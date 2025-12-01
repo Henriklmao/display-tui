@@ -10,6 +10,7 @@ use ratatui::prelude::*;
 mod list;
 mod map;
 mod monitor;
+mod rotation;
 mod resolutions;
 mod utils;
 mod scale;

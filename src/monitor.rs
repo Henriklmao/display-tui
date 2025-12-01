@@ -1,3 +1,4 @@
+use crate::rotation::Rotation;
 use serde::Deserialize;
 use std::process::Command;
 use std::io::Write;
@@ -10,6 +11,7 @@ pub struct Monitor {
     pub modes: Vec<Resolution>,
     pub position: Option<Position>,
     pub scale: Option<f32>,
+    pub transform: Option<String>,
 }
 
 
@@ -70,11 +72,18 @@ impl Monitor {
                 mode = monitor.get_prefered_resolution();
             }
 
+            let rotation = Rotation::from_transform(&monitor.transform);
+            let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
+                (mode.unwrap().height, mode.unwrap().width)
+            } else {
+                (mode.unwrap().width, mode.unwrap().height)
+            };
+
             let monitor_left = monitor.position.clone().unwrap().x as f64;
-            let monitor_right = monitor_left  + (mode.unwrap().width as f64 / monitor.scale.unwrap() as f64);
+            let monitor_right = monitor_left  + (width as f64 / monitor.scale.unwrap() as f64);
 
             let monitor_bottom = monitor.position.clone().unwrap().y as f64;
-            let monitor_top = monitor_bottom + (mode.unwrap().height as f64 / monitor.scale.unwrap() as f64);
+            let monitor_top = monitor_bottom + (height as f64 / monitor.scale.unwrap() as f64);
             
             if monitor_right > right {
                 right= monitor_right;
@@ -156,12 +165,14 @@ impl Monitor {
             }
         };
         if self.enabled {
+            let rotation = Rotation::from_transform(&self.transform);
             format!(
-                "monitor = {}, {}x{}@{}, {}x{}, {}",
+                "monitor = {}, {}x{}@{}, {}x{}, {}, transform,{}",
                 self.name,
                 mode.width, mode.height, mode.refresh,
                 self.position.clone().unwrap().x, self.position.clone().unwrap().y,
-                self.scale.unwrap_or(1.0)
+                self.scale.unwrap_or(1.0),
+                rotation.to_hyprland()
             )
         } else {
             format!(

@@ -105,20 +105,9 @@ impl Monitor {
         bottom -= margin;
         right += margin;
         top += margin;
-        let width = right - left;
-        let height = top - bottom;
- 
-        let area_ratio = area.width as f64 / area.height as f64;
-        let canvas_ratio = width / height;
-        let canvas_area_ratio = canvas_ratio / area_ratio;
-            
-        let height = top - bottom;
-        let added_height =  height * canvas_area_ratio  / 2.0;
-        let y_bounds = [bottom - added_height, top + added_height];
 
-        let width = right- left;
-        let added_width =  width / canvas_area_ratio  / 2.0;
-        let x_bounds = [left - added_width, right + added_width];
+        let x_bounds = [left, right];
+        let y_bounds = [bottom, top];
 
         let mut offset_y = 0.0;
         if bottom < 0.0 {

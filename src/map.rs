@@ -17,13 +17,12 @@ use ratatui::{
         }
     },
 };
-use crate::App;
-
-use crate::monitor::{
-    Monitor
-    ,MonitorCanvas
+use crate::{
+    App,
+    monitor::{Monitor, MonitorCanvas},
+    rotation::Rotation,
+    utils::TUIMode,
 };
-use crate::utils::TUIMode;
 
 #[derive(Debug)]
 pub struct Map<'a>{
@@ -111,9 +110,20 @@ impl<'a> Map<'a> {
         if mode.is_none() {
             mode = monitor.get_prefered_resolution();
         }
-        let width = mode.unwrap().width as f64 / monitor.scale.unwrap() as f64;
+
+        let rotation = Rotation::from_transform(&monitor.transform);
+        let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
+            (
+                mode.unwrap().height as f64 / monitor.scale.unwrap() as f64,
+                mode.unwrap().width as f64 / monitor.scale.unwrap() as f64,
+            )
+        } else {
+            (
+                mode.unwrap().width as f64 / monitor.scale.unwrap() as f64,
+                mode.unwrap().height as f64 / monitor.scale.unwrap() as f64,
+            )
+        };
         let x = monitor.position.clone().unwrap().x as f64;
-        let height = mode.unwrap().height as f64 / monitor.scale.unwrap() as f64;
         let y = (monitor_canvas.top - monitor_canvas.offset_y - monitor.position.clone().unwrap().y) as f64 - height ; 
 
         let x_margin = width * 0.07; 

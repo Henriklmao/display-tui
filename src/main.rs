@@ -1,5 +1,5 @@
 use std::io;
-use crossterm::event::{self,Event,KeyCode,KeyEvent,KeyEventKind};
+use crossterm::event::{self,Event,KeyCode,KeyEvent,KeyEventKind,KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -219,19 +219,23 @@ mod tests {
         app.handle_key_event(KeyCode::Char('m').into());
         assert_eq!(app.mode, TUIMode::Move);
 
-        app.handle_key_event(KeyCode::Char('k').into());
+        // K (Shift+k) moves -10
+        app.handle_key_event(KeyCode::Char('K').into());
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().y, -10);
 
-        app.handle_key_event(KeyCode::Char('j').into());
+        // J (Shift+j) moves +10
+        app.handle_key_event(KeyCode::Char('J').into());
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().y, 0);
 
-        app.handle_key_event(KeyCode::Char('h').into());
+        // H moves -10
+        app.handle_key_event(KeyCode::Char('H').into());
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().x, -10);
 
-        app.handle_key_event(KeyCode::Char('l').into());
+        // L moves +10
+        app.handle_key_event(KeyCode::Char('L').into());
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().x, 0);
 
@@ -329,21 +333,55 @@ mod tests {
         app.handle_key_event(KeyCode::Char('m').into());
         assert_eq!(app.mode, TUIMode::Move);
 
-        app.handle_key_event(KeyCode::Up.into());
+        // Shift+Up moves -10
+        app.handle_key_event(KeyEvent{
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::SHIFT,
+            kind: KeyEventKind::Press,
+            state: event::KeyEventState::empty(),
+        });
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().y, -10);
 
-        app.handle_key_event(KeyCode::Down.into());
+        // Shift+Down moves +10
+        app.handle_key_event(KeyEvent{
+             code: KeyCode::Down,
+             modifiers: KeyModifiers::SHIFT,
+             kind: KeyEventKind::Press,
+             state: event::KeyEventState::empty(),
+        });
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().y, 0);
 
-        app.handle_key_event(KeyCode::Left.into());
+        // Shift+Left moves -10
+        app.handle_key_event(KeyEvent{
+             code: KeyCode::Left,
+             modifiers: KeyModifiers::SHIFT,
+             kind: KeyEventKind::Press,
+             state: event::KeyEventState::empty(),
+        });
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().x, -10);
 
-        app.handle_key_event(KeyCode::Right.into());
+        // Shift+Right moves +10
+        app.handle_key_event(KeyEvent{
+             code: KeyCode::Right,
+             modifiers: KeyModifiers::SHIFT,
+             kind: KeyEventKind::Press,
+             state: event::KeyEventState::empty(),
+        });
         let monitor = app.monitors[app.selected_monitor].clone();
         assert_eq!(monitor.position.unwrap().x, 0);
+
+
+        // Snap Test
+        // Move to 100
+        app.monitors[app.selected_monitor].position.as_mut().unwrap().y = 100;
+        
+        // Up (no shift) should snap to 0 (which is a generic target for all monitors)
+        app.handle_key_event(KeyCode::Up.into());
+        let monitor = app.monitors[app.selected_monitor].clone();
+        assert_eq!(monitor.position.unwrap().y, 0);
 
         Ok(())
     }

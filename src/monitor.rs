@@ -192,4 +192,28 @@ impl Monitor {
     pub fn move_horizontal(&mut self, direction: i32) {
         if let Some(ref mut pos) = self.position { pos.x += direction};
     }
+
+    pub fn get_geometry(&self) -> (f64, f64, f64, f64) {
+        let mut mode = self.get_current_resolution();
+        if mode.is_none() {
+            mode = self.get_prefered_resolution();
+        }
+        
+        if mode.is_none() { return (0.0,0.0,0.0,0.0); }
+
+        let rotation = Rotation::from_transform(&self.transform);
+        let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
+            (mode.unwrap().height, mode.unwrap().width)
+        } else {
+            (mode.unwrap().width, mode.unwrap().height)
+        };
+
+        let scale = self.scale.unwrap_or(1.0);
+        let logical_width = width as f64 / scale as f64;
+        let logical_height = height as f64 / scale as f64;
+        let x = self.position.clone().unwrap().x as f64;
+        let y = self.position.clone().unwrap().y as f64;
+
+        (x, y, logical_width, logical_height)
+    }
 }

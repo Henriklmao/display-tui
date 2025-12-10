@@ -295,4 +295,98 @@ mod tests {
 
         Ok(())
     }       
+    #[test]
+    fn handle_mode_view_arrow_key_event() -> io::Result<()> {
+        let mut app = App{
+            monitors: test_monitors(),
+            selected_monitor: 0,
+            ..Default::default()
+        };
+
+        app.handle_key_event(KeyCode::Up.into());
+        assert_eq!(app.selected_monitor, 1);
+
+        app.handle_key_event(KeyCode::Down.into());
+        assert_eq!(app.selected_monitor, 0);
+
+        app.handle_key_event(KeyCode::Down.into());
+        assert_eq!(app.selected_monitor, app.monitors.len() - 1);
+
+        app.handle_key_event(KeyCode::Up.into());
+        assert_eq!(app.selected_monitor, 0);
+        
+        Ok(())
+    }
+
+    #[test]
+    fn handle_mode_move_arrow_key_event() -> io::Result<()> {
+        let mut app = App{
+            monitors: test_monitors(),
+            selected_monitor: 0,
+            ..Default::default()
+        };
+ 
+        app.handle_key_event(KeyCode::Char('m').into());
+        assert_eq!(app.mode, TUIMode::Move);
+
+        app.handle_key_event(KeyCode::Up.into());
+        let monitor = app.monitors[app.selected_monitor].clone();
+        assert_eq!(monitor.position.unwrap().y, -10);
+
+        app.handle_key_event(KeyCode::Down.into());
+        let monitor = app.monitors[app.selected_monitor].clone();
+        assert_eq!(monitor.position.unwrap().y, 0);
+
+        app.handle_key_event(KeyCode::Left.into());
+        let monitor = app.monitors[app.selected_monitor].clone();
+        assert_eq!(monitor.position.unwrap().x, -10);
+
+        app.handle_key_event(KeyCode::Right.into());
+        let monitor = app.monitors[app.selected_monitor].clone();
+        assert_eq!(monitor.position.unwrap().x, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn handle_mode_resolution_arrow_key_event() -> io::Result<()> {
+        let mut app = App{
+            monitors: test_monitors(),
+            selected_monitor: 0,
+            ..Default::default()
+        };
+
+        app.handle_key_event(KeyCode::Char('r').into());
+        assert_eq!(app.mode, TUIMode::Resolution);
+
+        app.selected_resolution = 0;
+        app.handle_key_event(KeyCode::Down.into());
+        assert_eq!(app.selected_resolution, 1);
+
+        app.handle_key_event(KeyCode::Up.into());
+        assert_eq!(app.selected_resolution, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn handle_mode_scale_arrow_key_event() -> io::Result<()> {
+        let mut app = App{
+            monitors: test_monitors(),
+            selected_monitor: 0,
+            ..Default::default()
+        };
+
+        app.handle_key_event(KeyCode::Char('s').into());
+        assert_eq!(app.mode, TUIMode::Scale);
+
+        app.selected_scale = 0;
+        app.handle_key_event(KeyCode::Down.into());
+        assert_eq!(app.selected_scale, 1);
+
+        app.handle_key_event(KeyCode::Up.into());
+        assert_eq!(app.selected_scale, 0);
+
+        Ok(())
+    }
 }

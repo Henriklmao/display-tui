@@ -36,8 +36,8 @@ impl<'a> MonitorList<'a> {
 
     pub fn handle_events(app:&mut App, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('k')=> MonitorList::previous_monitor(app),
-            KeyCode::Char('j')=> MonitorList::next_monitor(app),
+            KeyCode::Char('k') | KeyCode::Up => MonitorList::previous_monitor(app),
+            KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
             KeyCode::Char('e')=> MonitorList::enable_monitor(app),
             KeyCode::Char('d')=> MonitorList::disable_monitor(app),
             KeyCode::Char('m') => MonitorList::change_mode(app,TUIMode::Move),

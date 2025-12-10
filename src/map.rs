@@ -76,10 +76,10 @@ impl<'a> Map<'a> {
    
     pub fn handle_events(app:&mut App, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('k') => Map::move_vertical(app,-10),
-            KeyCode::Char('j') => Map::move_vertical(app,10),
-            KeyCode::Char('h') => Map::move_horizontal(app,-10),
-            KeyCode::Char('l') => Map::move_horizontal(app,10),
+            KeyCode::Char('k') | KeyCode::Up => Map::move_vertical(app,-10),
+            KeyCode::Char('j') | KeyCode::Down => Map::move_vertical(app,10),
+            KeyCode::Char('h') | KeyCode::Left => Map::move_horizontal(app,-10),
+            KeyCode::Char('l') | KeyCode::Right => Map::move_horizontal(app,10),
             KeyCode::Char('K') => Map::move_vertical(app,-100),
             KeyCode::Char('J') => Map::move_vertical(app,100),
             KeyCode::Char('H') => Map::move_horizontal(app,-100),

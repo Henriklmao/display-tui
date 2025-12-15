@@ -1,9 +1,9 @@
 use crate::rotation::Rotation;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::io::Write;
 use ratatui::layout::Rect;
-#[derive(Debug,Default, Clone, Deserialize)]
+#[derive(Debug,Default, Clone, Deserialize, Serialize)]
 pub struct Monitor {
     pub name: String,
     pub description: Option<String>,
@@ -12,17 +12,19 @@ pub struct Monitor {
     pub position: Option<Position>,
     pub scale: Option<f32>,
     pub transform: Option<String>,
+    #[serde(skip)]
+    pub saved_position: Option<Position>,
+    #[serde(skip)]
+    pub saved_scale: Option<f32>,
 }
 
-
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Position{
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Resolution {
     pub width: i32,
     pub height: i32,
@@ -57,7 +59,7 @@ impl Monitor {
 
         new_monitors
     }
-    pub fn get_monitors_canvas(monitors: &Vec<Monitor>, area: &Rect) -> MonitorCanvas {
+    pub fn get_monitors_canvas(monitors: &Vec<Monitor>, _area: &Rect) -> MonitorCanvas {
         let mut left = 10000.0;
         let mut bottom = 10000.0;
         let mut right = -10000.0;

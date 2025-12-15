@@ -12,6 +12,7 @@ use ratatui::layout::Constraint;
 use crate::utils::ScaleValue;
 use crate::utils::TUIMode;
 use crate::App;
+use crate::configuration::Configuration;
 
 #[derive(Debug)]
 pub struct Scale{
@@ -37,6 +38,10 @@ impl Scale{
         }
     }
     fn change_mode(app:&mut App,mode: TUIMode) {
+        // Save monitor state when exiting Scale mode
+        if app.mode == TUIMode::Scale {
+            let _ = Configuration::save_monitor_state(&app.monitors);
+        }
         app.mode = mode;
     }
 

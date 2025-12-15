@@ -3,18 +3,18 @@
 A simple TUI to manage display settings for Hyprland.
 Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-friendly interface to control your display configurations.
 
-# Features
+## Features
 
 - enable/disable display
 - set display position
 - set display resolution
 - set display scale
 
-# Preview
+## Preview
 
 ![Preview of Display TUI](/assets/preview.png)
 
-# Requirements
+## Requirements
 
 - Hyprland
 - Hyprctl
@@ -23,15 +23,17 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 - Rust
 - Cargo
 
-# Installation
+## Installation
 
 1. Clone the repository and build the project:
+
    ```bash
    git clone https://github.com/otto-bus-dev/display-tui.git
    cd display-tui
    cargo build --release
-   cp target/release/display-tui /usr/local/bin/ # or your preferred location
+   sudo cp target/release/display-tui /usr/local/bin/ # or your preferred location
    ```
+
 2. Create a display-tui configuration file or run display-tui a first time to generate the default one :
    The configuration file is a json file that contains the tui settings.
    It contains only one field `monitors_config_path` which is the path where display-tui will save the monitors configuration for hyprland.
@@ -52,6 +54,7 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
    Here we have the default path, if you changed the `monitors_config_path` in the configuration file, you need to change it here too.
 
 4. Run the TUI and Save your configuration:
+
    ```bash
    display-tui
    ```

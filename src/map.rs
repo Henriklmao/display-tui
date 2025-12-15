@@ -19,10 +19,10 @@ use ratatui::{
 };
 use crate::{
     App,
+    configuration::Configuration,
     monitor::{Monitor, MonitorCanvas},
     rotation::Rotation,
     utils::TUIMode,
-    use crate::configuration::Configuration;
 };
 
 #[derive(Debug)]

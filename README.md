@@ -9,6 +9,7 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 - set display position
 - set display resolution
 - set display scale
+- set display rotation
 
 ## Preview
 
@@ -41,7 +42,7 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 
    ```bash
    mkdir -p ~/.config/display-tui
-   echo '{"monitors_config_path": "~/.config/hypr/hyprland/monitors.conf"}' > ~/.config/display-tui/config.json
+   echo '{"monitors_config_path": "~/.config/hypr/monitors.conf"}' > ~/.config/display-tui/config.json
    ```
 
 3. Add reference to monitor configuration in your Hyprland config file:

@@ -80,13 +80,10 @@ impl<'a> MonitorList<'a> {
                 x: saved_pos.x,
                 y: saved_pos.y,
             });
-        } else {
-            monitor.position = Some(Position {
-                x: 0,
-                y: 0,
-            });
         }
-        monitor.scale = monitor.saved_scale.or(Some(1.0));
+        // If no saved_position (from disable), keep the current position
+        // which might have been loaded from the persistent state file
+        monitor.scale = monitor.saved_scale.or_else(|| monitor.scale).or(Some(1.0));
     }
 
     fn monitors_to_rows(&self) -> Vec<Row<'static>> {

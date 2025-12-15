@@ -66,18 +66,27 @@ impl<'a> MonitorList<'a> {
     }
     
     fn disable_monitor(app:&mut App) {
-        app.monitors[app.selected_monitor].enabled = false;
+        let monitor = &mut app.monitors[app.selected_monitor];
+        monitor.enabled = false;
+        monitor.saved_position = monitor.position.clone();
+        monitor.saved_scale = monitor.scale;
     }
 
     fn enable_monitor(app:&mut App) {
-        app.monitors[app.selected_monitor].enabled = true;
-        app.monitors[app.selected_monitor].position = Some(
-            Position {
+        let monitor = &mut app.monitors[app.selected_monitor];
+        monitor.enabled = true;
+        if let Some(saved_pos) = &monitor.saved_position {
+            monitor.position = Some(Position {
+                x: saved_pos.x,
+                y: saved_pos.y,
+            });
+        } else {
+            monitor.position = Some(Position {
                 x: 0,
                 y: 0,
-            }
-        );
-        app.monitors[app.selected_monitor].scale = Some(1.0);
+            });
+        }
+        monitor.scale = monitor.saved_scale.or(Some(1.0));
     }
 
     fn monitors_to_rows(&self) -> Vec<Row<'static>> {

@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::io::Write;
 use ratatui::layout::Rect;
-#[derive(Debug,Default, Clone, Deserialize)]
+#[derive(Debug,Default, Clone, Deserialize, Serialize)]
 pub struct Monitor {
     pub name: String,
     pub description: Option<String>,
@@ -10,17 +10,21 @@ pub struct Monitor {
     pub modes: Vec<Resolution>,
     pub position: Option<Position>,
     pub scale: Option<f32>,
+    #[serde(skip)]
+    pub saved_position: Option<Position>,
+    #[serde(skip)]
+    pub saved_scale: Option<f32>,
 }
 
 
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Position{
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Resolution {
     pub width: i32,
     pub height: i32,

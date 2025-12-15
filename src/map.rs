@@ -18,6 +18,7 @@ use ratatui::{
     },
 };
 use crate::App;
+use crate::configuration::Configuration;
 
 use crate::monitor::{
     Monitor
@@ -90,6 +91,10 @@ impl<'a> Map<'a> {
         }
     }
     fn change_mode(app:&mut App,mode: TUIMode) {
+        // Save monitor state when exiting Move mode
+        if app.mode == TUIMode::Move {
+            let _ = Configuration::save_monitor_state(&app.monitors);
+        }
         app.mode = mode;
     }
     fn move_vertical(app:&mut App, direction: i32) {

@@ -13,6 +13,7 @@ pub struct MonitorState {
     pub name: String,
     pub position: Option<Position>,
     pub scale: Option<f32>,
+    pub workspace: Option<u8>,
 }
 impl Configuration {
     pub fn get() -> Self {
@@ -55,6 +56,7 @@ impl Configuration {
                 name: m.name.clone(),
                 position: m.position.clone(),
                 scale: m.scale,
+                workspace: m.workspace,
             })
             .collect();
         
@@ -102,6 +104,7 @@ mod tests {
                 name: "HDMI-A-1".to_string(),
                 position: Some(Position { x: 100, y: 200 }),
                 scale: Some(1.5),
+                workspace: Some(1),
                 enabled: true,
                 ..Default::default()
             },
@@ -109,6 +112,7 @@ mod tests {
                 name: "DP-1".to_string(),
                 position: Some(Position { x: 300, y: 400 }),
                 scale: Some(1.0),
+                workspace: None,
                 enabled: true,
                 ..Default::default()
             },
@@ -125,9 +129,11 @@ mod tests {
         assert_eq!(loaded[0].name, "HDMI-A-1");
         assert_eq!(loaded[0].position, Some(Position { x: 100, y: 200 }));
         assert_eq!(loaded[0].scale, Some(1.5));
+        assert_eq!(loaded[0].workspace, Some(1));
 
         assert_eq!(loaded[1].name, "DP-1");
         assert_eq!(loaded[1].position, Some(Position { x: 300, y: 400 }));
         assert_eq!(loaded[1].scale, Some(1.0));
+        assert_eq!(loaded[1].workspace, None);
     }
 }

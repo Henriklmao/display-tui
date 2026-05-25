@@ -15,6 +15,7 @@ pub struct Monitor {
     pub position: Option<Position>,
     pub scale: Option<f32>,
     pub transform: Option<String>,
+    pub workspace: Option<u8>,
     #[serde(skip)]
     pub saved_position: Option<Position>,
     #[serde(skip)]
@@ -187,6 +188,18 @@ impl Monitor {
             let config_line = monitor.to_hyprland_config();
             writeln!(file, "{}", config_line)?;
         }
+        
+        let mut has_workspaces = false;
+        for monitor in monitors {
+            if monitor.workspace.is_some() {
+                if !has_workspaces {
+                    writeln!(file, "\n# Workspace assignments")?;
+                    has_workspaces = true;
+                }
+                writeln!(file, "workspace = {}, monitor:{}", monitor.workspace.unwrap(), monitor.name)?;
+            }
+        }
+        
         Ok(())
     }
 

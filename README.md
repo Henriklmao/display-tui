@@ -10,6 +10,7 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 - set display resolution
 - set display scale
 - set display rotation
+- set workspace assignments (using keys 1-9 in the list view, 0 to clear)
 
 ## Preview
 
@@ -38,7 +39,7 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 2. Create a display-tui configuration file or run display-tui a first time to generate the default one :
    The configuration file is a json file that contains the tui settings.
    It contains only one field `monitors_config_path` which is the path where display-tui will save the monitors configuration for hyprland.
-   the default path is `~/.config/hypr/hyprland/monitors.conf` (the path accept shell notations).
+   the default path is `~/.config/hypr/monitors.conf` (the path accept shell notations).
 
    ```bash
    mkdir -p ~/.config/display-tui

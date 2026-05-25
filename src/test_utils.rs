@@ -19,6 +19,7 @@ pub mod tests {
                 transform: None,
                 saved_position: None,
                 saved_scale: None,
+                workspace: None,
             },
             Monitor {
                 name: "Monitor 2".to_string(),
@@ -36,6 +37,7 @@ pub mod tests {
                 transform: None,
                 saved_position: None,
                 saved_scale: None,
+                workspace: None,
             },
         ]
     }

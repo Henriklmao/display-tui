@@ -58,6 +58,9 @@ impl App{
                     if let Some(scale) = saved_state.scale {
                         monitor.scale = Some(scale);
                     }
+                    if let Some(workspace) = saved_state.workspace {
+                        monitor.workspace = Some(workspace);
+                    }
                 }
             }
         }
@@ -185,6 +188,7 @@ impl Widget for &App {
 mod tests {
     use super::*;
     use crate::test_utils::tests::test_monitors;
+    use crossterm::event::KeyModifiers;
    
     #[test]
     fn handle_mode_view_key_event() -> io::Result<()> {

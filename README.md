@@ -3,6 +3,9 @@
 A simple TUI to manage display settings for Hyprland.
 Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-friendly interface to control your display configurations.
 
+> [!NOTE]  
+> Currently only supports deprecated hyprlang (.conf style). Support for the new lua syntax (hyprland 0.55+) is in the works.
+
 ## Features
 
 - enable/disable display

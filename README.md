@@ -1,8 +1,8 @@
 # Display TUI
 
 A simple TUI to manage display settings for Hyprland.
-Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-friendly interface to control your display configurations.
-
+Built with Rust and the [crossterm](https://github.com/crossterm-rs/crossterm) and [ratatui](https://ratatui.rs/) libraries, it provides a user-friendly interface to control your display configurations.
+Started as a Fork of [otto-bus-dev/display-tui](https://github.com/otto-bus-dev/display-tui) with some extra fetaures your are the biggest contributor to this project!
 > [!NOTE]  
 > Currently only supports deprecated hyprlang (.conf style). Support for the new lua syntax (hyprland 0.55+) is in the works.
 
@@ -23,12 +23,18 @@ Built with Rust and the `crossterm` and `ratatui` libraries, it provides a user-
 
 - Hyprland
 - Hyprctl
-- wlr-randr
+- wlr-randr > Will be dropped in the future for direct hyprctl usage
 - Nerd Font
 - Rust
 - Cargo
 
 ## Installation
+
+### AUR
+>
+> coming soon
+>
+### Manual
 
 1. Clone the repository and build the project:
 

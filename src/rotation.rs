@@ -33,6 +33,15 @@ impl Rotation {
         }
     }
 
+    pub fn to_hyprland_lua(&self) -> u8 {
+        match self {
+            Rotation::Normal => 0,
+            Rotation::Deg90 => 1,
+            Rotation::Deg180 => 2,
+            Rotation::Deg270 => 3,
+        }
+    }
+
     pub fn to_hyprland(&self) -> String {
         match self {
             Rotation::Normal => "".to_string(),

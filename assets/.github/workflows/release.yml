@@ -8,6 +8,22 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+name: Release AppImage
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -16,22 +32,48 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y file wget
+
+      - name: Build Rust Project
+        run: cargo build --release
+
       - name: Install appimagetool
         run: |
-          sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
-          sudo chmod +x /usr/local/bin/appimagetool
-      - name: Install cargo-appimage
-        run: cargo install cargo-appimage
-      - name: Build AppImage
-        run: cargo appimage
+          wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          sudo mv squashfs-root /opt/appimagetool
+
+      - name: Prepare AppDir Structure
+        run: |
+          mkdir -p AppDir/usr/bin
+          
+          cp target/release/display-tui AppDir/usr/bin/
+          
+          cp assets/desktop-icon.png AppDir/display-tui.png
+          cp assets/display-tui.desktop AppDir/display-tui.desktop
+          
+          cat << 'EOF' > AppDir/AppRun
+          #!/bin/sh
+          SELF=$(dirname "$(readlink -f "$0")")
+          exec "$SELF/usr/bin/display-tui" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+
+      - name: Generate AppImage
+        env:
+          ARCH: x86_64
+        run: |
+          /opt/appimagetool/AppRun AppDir/ --appimage-extract-and-run
 
       - name: Create Release and Upload AppImage
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.AppImage" 
+          files: "*.AppImage"
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

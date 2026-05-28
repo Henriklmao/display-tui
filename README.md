@@ -24,7 +24,6 @@ Thanks for your work, you are the biggest contributor to this project!
 
 - Hyprland
 - Hyprctl
-- wlr-randr > Will be dropped in the future for direct hyprctl usage
 - Nerd Font
 - Rust
 - Cargo

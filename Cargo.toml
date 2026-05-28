@@ -10,3 +10,8 @@ ratatui = "0.30.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 shellexpand = "3.1.1"
+
+[package.metadata.appimage]
+icon = "assets/desktop-icon.png"
+desktop_entry = "assets/display-tui.desktop"
+auto_link = true

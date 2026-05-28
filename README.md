@@ -49,6 +49,25 @@ paru -S display-tui-git
 
 AUR installation is fully automatic and adds `display-tui` as a .desktop shortcut, so you can launch it from your application launcher.
 
+### AppImage (Universal / All Distributions)
+
+You can download the latest AppImage from the [Releases](https://github.com/Henriklmao/display-tui/releases) page. The AppImage is built automatically and includes everything needed to run `display-tui` on any Linux distribution.
+
+1. Download the `.AppImage` file from the latest release.
+2. Make it executable:
+
+   ```bash
+   chmod +x display-tui-*.AppImage
+   ```
+
+3. Run it:
+
+   ```bash
+   ./display-tui-*.AppImage
+   ```
+
+4. Move it to your PATH, e.g., `sudo mv display-tui-*.AppImage /usr/local/bin/display-tui` for easier access)
+
 ### Manual
 
 1. Clone the repository and build the project:

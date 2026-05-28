@@ -256,32 +256,32 @@ mod tests {
         let mut expected = Buffer::with_lines(vec![
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Map ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
             "┃                                                                                                  ┃",
-            "┃  █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█   ┃",
-            "┃  █     Monitor 1                                                                             █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  █                                                                                           █   ┃",
-            "┃  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   ┃",
+            "┃  █▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█  ┃",
+            "┃  █     Monitor 1                                                                              █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █                                                                                            █  ┃",
+            "┃  █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█  ┃",
             "┃                                                                                                  ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
         ]);
@@ -305,15 +305,17 @@ mod tests {
         // Monitor styles
         // Top line y=2
         expected.set_style(Rect::new(3, 2, 1, 1), vertical_line_style);
-        expected.set_style(Rect::new(4, 2, 91, 1), horizontal_line_style);
-        expected.set_style(Rect::new(95, 2, 1, 1), vertical_line_style);
+        expected.set_style(Rect::new(4, 2, 92, 1), horizontal_line_style);
+        expected.set_style(Rect::new(96, 2, 1, 1), vertical_line_style);
 
         // Sides y=3..26
         expected.set_style(Rect::new(3, 3, 1, 24), vertical_line_style);
-        expected.set_style(Rect::new(95, 3, 1, 24), vertical_line_style);
+        expected.set_style(Rect::new(96, 3, 1, 24), vertical_line_style);
         
         // Bottom line y=27
-        expected.set_style(Rect::new(3, 27, 93, 1), horizontal_line_style);
+        expected.set_style(Rect::new(3, 27, 1, 1), vertical_line_style);
+        expected.set_style(Rect::new(4, 27, 92, 1), horizontal_line_style);
+        expected.set_style(Rect::new(96, 27, 1, 1), vertical_line_style);
 
         // Text y=3
         expected.set_style(Rect::new(9, 3, 9, 1), horizontal_line_style);

@@ -1,8 +1,9 @@
 # Display TUI
 
-A simple TUI to manage display settings for Hyprland.
+A simple and minimalistic TUI to manage display settings for Hyprland.
 Built with Rust and the [crossterm](https://github.com/crossterm-rs/crossterm) and [ratatui](https://ratatui.rs/) libraries, it provides a user-friendly interface to control your display configurations.
-Started as a Fork of [otto-bus-dev/display-tui](https://github.com/otto-bus-dev/display-tui) with some extra fetaures your are the biggest contributor to this project!
+Started as a Fork of [otto-bus-dev/display-tui](https://github.com/otto-bus-dev/display-tui) with some extra features.
+Thanks for your work, you are the biggest contributor to this project!
 > [!NOTE]  
 > Supports and will always support old hyprland 0.55+ lua style and hyprlang config style.
 

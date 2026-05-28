@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -16,16 +19,24 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y file wget
-      - name: Install appimagetool
+
+      # Another attempt t bypass FUSE issues on GitHub Actions by using the AppImageKit's appimagetool directly
+      - name: Install appimagetool (FUSE-Bypass)
         run: |
-          sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
-          sudo chmod +x /usr/local/bin/appimagetool
+          wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
+          sudo mv squashfs-root /opt/appimagetool
+          sudo ln -s /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+
       - name: Install cargo-appimage
         run: cargo install cargo-appimage
+
       - name: Build AppImage
         run: cargo appimage
 
@@ -33,5 +44,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: "*.AppImage" 
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

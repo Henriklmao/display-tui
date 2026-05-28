@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+# Solves Node.js 20 deprecation warning
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -16,22 +20,28 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y file wget
+          sudo apt-get install -y file wget libfuse2
+
       - name: Install appimagetool
         run: |
           sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
           sudo chmod +x /usr/local/bin/appimagetool
+
       - name: Install cargo-appimage
         run: cargo install cargo-appimage
+
       - name: Build AppImage
         run: cargo appimage
 
+      # Don't crash silently if no AppImage is found, but fail the workflow
       - name: Create Release and Upload AppImage
         uses: softprops/action-gh-release@v2
         with:
           files: "*.AppImage" 
-        env:
+          fail_on_unmatched_files: true  
+          env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -23,17 +23,32 @@ Thanks for your work, you are the biggest contributor to this project!
 ## Requirements
 
 - Hyprland
-- Hyprctl
 - Nerd Font
 - Rust
 - Cargo
 
+## Usage
+
+Run the TUI:
+
+   ```bash
+   display-tui
+   ```
+
+Everything is controlled using the keyboard, and the interface is pretty self-explanatory. You can navigate through the list of displays using the arrow keys, and press `Enter` to edit a display's settings. Use `Tab` to switch between different settings, and `Esc` to go back to the main list.
+
 ## Installation
 
 ### AUR
->
-> coming soon
->
+
+```bash
+yay -S display-tui-git
+# or
+paru -S display-tui-git
+```
+
+AUR installation is fully automatic and adds `display-tui` as a .desktop shortcut, so you can launch it from your application launcher.
+
 ### Manual
 
 1. Clone the repository and build the project:
@@ -45,14 +60,16 @@ Thanks for your work, you are the biggest contributor to this project!
    sudo cp target/release/display-tui /usr/local/bin/ # or your preferred location
    ```
 
-2. Configuration & Integration
+## Configuration & Integration
 
    Display TUI automatically detects your Hyprland configuration format.
 
-   **For Hyprland 0.55+ (Lua Config):**
+### Hyprland lua 0.55+
+
    If `~/.config/hypr/hyprland.lua` exists, Display TUI will automatically detect your monitor config it, and writes to it. If it doesn't detect any monitor config it will write into `~/.config/hypr/lua/monitors.lua`), and automatically add the necessary `require("...")` statement to your `hyprland.lua` file. No manual setup is needed!
 
-   **For older Hyprland versions (hyprlang .conf):**
+### Hyprlang (old .conf style)
+
    Display TUI will fall back to using `~/.config/display-tui/config.json` to know where to save the `.conf` file. The default path is `~/.config/hypr/monitors.conf`. You can create it manually like this:
 
    ```bash
@@ -60,14 +77,19 @@ Thanks for your work, you are the biggest contributor to this project!
    echo '{"monitors_config_path": "~/.config/hypr/monitors.conf"}' > ~/.config/display-tui/config.json
    ```
 
-   Then, add this line to your `~/.config/hypr/hyprland.conf`:
+## Contributions
 
-   ```bash
-   source = ~/.config/hypr/monitors.conf
-   ```
+Contributions are always welcome! If you have any ideas for new features, improvements, or bug fixes, feel free to open an issue or submit a pull request.
 
-3. Run the TUI and Save your configuration:
+### Contributor list
 
-   ```bash
-   display-tui
-   ```
+[otto-bus-dev](https://github.com/Henriklmao/display-tui/commits/master/?author=otto-bus-dev)
+
+- The idea and most of the implementation comes from him.
+- Thank you for starting this project.
+
+[Dan-Kingsley](https://github.com/Henriklmao/display-tui/commits/master/?author=Dan-Kingsley)
+
+- Display rotation
+- Arrow key support for navigation
+- Snapping and fine control in move mode

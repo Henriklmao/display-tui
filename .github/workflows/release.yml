@@ -19,7 +19,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y file wget
+          sudo apt-get install -y file wget libfuse2
       - name: Install appimagetool
         run: |
           sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
@@ -32,6 +32,6 @@ jobs:
       - name: Create Release and Upload AppImage
         uses: softprops/action-gh-release@v2
         with:
-          files: "*.AppImage" 
+          files: "target/appimage/*.AppImage" 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

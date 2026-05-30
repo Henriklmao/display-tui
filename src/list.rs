@@ -5,7 +5,7 @@ use ratatui::{
     style::{Style,Stylize,Color},
     symbols::border,
     text::Line,
-    widgets::{Cell,Block,StatefulWidget,Row,Table,TableState},
+    widgets::{Cell,Block,StatefulWidget,Row,Table,TableState,Widget},
 };
 use crate::monitor::{Monitor,Position};
 
@@ -108,7 +108,7 @@ impl<'a> MonitorList<'a> {
         monitor.scale = monitor.saved_scale.or_else(|| monitor.scale).or(Some(1.0));
     }
 
-    fn monitors_to_rows(&self) -> Vec<Row<'static>> {
+    fn monitors_to_rows(&self, workspace_counts: &std::collections::HashMap<u8, usize>) -> Vec<Row<'static>> {
         self.monitors
             .iter()
             .map(|monitor| {
@@ -132,9 +132,17 @@ impl<'a> MonitorList<'a> {
                     Some(res) => format!("{}x{}", res.width, res.height),
                     None => "N/A".to_string(),
                 };
-                let workspace = match monitor.workspace {
-                    Some(ws) => ws.to_string(),
-                    None => "-".to_string(),
+                let is_duplicate_ws = monitor.workspace.map_or(false, |ws| workspace_counts.get(&ws).copied().unwrap_or(0) > 1);
+                let workspace_cell = match monitor.workspace {
+                    Some(ws) => {
+                        let ws_str = ws.to_string();
+                        if is_duplicate_ws {
+                            Cell::default().content(Line::from(ws_str.red()))
+                        } else {
+                            Cell::from(ws_str)
+                        }
+                    },
+                    None => Cell::from("-"),
                 };
                 Row::new(vec![
                     Cell::default().content(
@@ -158,7 +166,7 @@ impl<'a> MonitorList<'a> {
                     Cell::from(position),
                     Cell::from(scale),
                     Cell::from(rotation),
-                    Cell::from(workspace),
+                    workspace_cell,
                 ])
             }
             )
@@ -169,82 +177,118 @@ impl<'a> MonitorList<'a> {
         let title = Line::from(if self.monitors.len()>1 {" Displays "}else{" Display "}.white().bold());
         let mut instructions_items = vec![];
 
-        match self.mode {
-            TUIMode::View => {
-                let selected_monitor = &self.monitors[self.selected_row.unwrap_or(0)];
-                instructions_items.push(" Up ".white());
-                instructions_items.push("<k> ".blue().bold());
-                instructions_items.push(" Down ".white());
-                instructions_items.push("<j> ".blue().bold());
-                instructions_items.push(" Move ".white());
-                instructions_items.push("<m> ".blue().bold());
-                instructions_items.push(" Resolution ".white());
-                instructions_items.push("<r> ".blue().bold());
-                instructions_items.push(" Scale ".white());
-                instructions_items.push("<s> ".blue().bold());
-                instructions_items.push(" Rotate ".white());
-                instructions_items.push("<o> ".blue().bold());
-                instructions_items.push(" Workspace ".white());
-                instructions_items.push("<0-9> ".blue().bold());
-                if selected_monitor.enabled {
-                    instructions_items.push(" Disable ".white());
-                    instructions_items.push("<d> ".blue().bold());
-                } else {
-                    instructions_items.push(" Enable ".white());
-                    instructions_items.push("<e> ".blue().bold());
+        let mut workspace_counts = std::collections::HashMap::new();
+        let mut has_duplicate_workspace = false;
+        for monitor in self.monitors {
+            if let Some(ws) = monitor.workspace {
+                let count = workspace_counts.entry(ws).or_insert(0);
+                *count += 1;
+                if *count > 1 {
+                    has_duplicate_workspace = true;
                 }
-            },
-
-            TUIMode::Resolution=> {
-                instructions_items.push(" Up ".white());
-                instructions_items.push("<k> ".blue().bold());
-                instructions_items.push(" Down ".white());
-                instructions_items.push("<j> ".blue().bold());
-                instructions_items.push(" Select ".white());
-                instructions_items.push("<Space> ".blue().bold());
-                instructions_items.push(" Quit Resolution Mode ".white());
-                instructions_items.push("<Esc> ".blue().bold());
-            },
-
-            TUIMode::Move => {
-                instructions_items.push(" Fast ".white());
-                instructions_items.push("<MAJ>+<*> ".blue().bold());
-                instructions_items.push(" Up ".white());
-                instructions_items.push("<k> ".blue().bold());
-                instructions_items.push(" Down ".white());
-                instructions_items.push("<j> ".blue().bold());
-                instructions_items.push(" Left ".white());
-                instructions_items.push("<h> ".blue().bold());
-                instructions_items.push(" Right ".white());
-                instructions_items.push("<l> ".blue().bold());
-                instructions_items.push(" Quit Move Mode ".white());
-                instructions_items.push("<Esc> ".blue().bold());
-            },
-            TUIMode::Scale => {
-                instructions_items.push(" Up ".white());
-                instructions_items.push("<k> ".blue().bold());
-                instructions_items.push(" Down ".white());
-                instructions_items.push("<j> ".blue().bold());
-                instructions_items.push(" Select ".white());
-                instructions_items.push("<Space> ".blue().bold());
-                instructions_items.push(" Quit Scale Mode ".white());
-                instructions_items.push("<Esc> ".blue().bold());
-            },
+            }
         }
 
-        instructions_items.push(" Save ".white());
-        instructions_items.push("<w> ".blue().bold());
-        instructions_items.push(" Quit ".white());
-        instructions_items.push("<q> ".blue().bold());
+        let is_mini_mode = area.width < 115;
+
+        if is_mini_mode {
+            instructions_items.push(" Save ".white());
+            instructions_items.push("<w> ".blue().bold());
+            instructions_items.push(" Quit ".white());
+            instructions_items.push("<q> ".blue().bold());
+            instructions_items.push(" Keybinds ".white());
+            instructions_items.push("<K> ".blue().bold());
+        } else {
+            match self.mode {
+                TUIMode::View => {
+                    let selected_monitor = &self.monitors[self.selected_row.unwrap_or(0)];
+                    instructions_items.push(" Up ".white());
+                    instructions_items.push("<k> ".blue().bold());
+                    instructions_items.push(" Down ".white());
+                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Move ".white());
+                    instructions_items.push("<m> ".blue().bold());
+                    instructions_items.push(" Resolution ".white());
+                    instructions_items.push("<r> ".blue().bold());
+                    instructions_items.push(" Scale ".white());
+                    instructions_items.push("<s> ".blue().bold());
+                    instructions_items.push(" Rotate ".white());
+                    instructions_items.push("<o> ".blue().bold());
+                    instructions_items.push(" Workspace ".white());
+                    instructions_items.push("<0-9> ".blue().bold());
+                    if selected_monitor.enabled {
+                        instructions_items.push(" Disable ".white());
+                        instructions_items.push("<d> ".blue().bold());
+                    } else {
+                        instructions_items.push(" Enable ".white());
+                        instructions_items.push("<e> ".blue().bold());
+                    }
+                },
+
+                TUIMode::Resolution=> {
+                    instructions_items.push(" Up ".white());
+                    instructions_items.push("<k> ".blue().bold());
+                    instructions_items.push(" Down ".white());
+                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Select ".white());
+                    instructions_items.push("<Space> ".blue().bold());
+                    instructions_items.push(" Quit Resolution Mode ".white());
+                    instructions_items.push("<Esc> ".blue().bold());
+                },
+
+                TUIMode::Move => {
+                    instructions_items.push(" Fast ".white());
+                    instructions_items.push("<MAJ>+<*> ".blue().bold());
+                    instructions_items.push(" Up ".white());
+                    instructions_items.push("<k> ".blue().bold());
+                    instructions_items.push(" Down ".white());
+                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Left ".white());
+                    instructions_items.push("<h> ".blue().bold());
+                    instructions_items.push(" Right ".white());
+                    instructions_items.push("<l> ".blue().bold());
+                    instructions_items.push(" Quit Move Mode ".white());
+                    instructions_items.push("<Esc> ".blue().bold());
+                },
+                TUIMode::Scale => {
+                    instructions_items.push(" Up ".white());
+                    instructions_items.push("<k> ".blue().bold());
+                    instructions_items.push(" Down ".white());
+                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Select ".white());
+                    instructions_items.push("<Space> ".blue().bold());
+                    instructions_items.push(" Quit Scale Mode ".white());
+                    instructions_items.push("<Esc> ".blue().bold());
+                },
+            }
+
+            instructions_items.push(" Save ".white());
+            instructions_items.push("<w> ".blue().bold());
+            instructions_items.push(" Quit ".white());
+            instructions_items.push("<q> ".blue().bold());
+            instructions_items.push(" Help ".white());
+            instructions_items.push("<K> ".blue().bold());
+        }
 
         let instructions = Line::from(instructions_items);
 
         let block = Block::bordered()
             .title(title.centered())
-            .title_bottom(instructions.centered())
             .border_set(border::THICK)
             .border_style(Style::default().fg(
                 if self.mode == TUIMode::View {Color::Yellow} else {Color::White}));
+
+        let inner_area = block.inner(area);
+        Widget::render(block, area, buf);
+
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(if has_duplicate_workspace { 1 } else { 0 }),
+                Constraint::Length(1),
+            ])
+            .split(inner_area);
 
         let widths = [
             
@@ -258,7 +302,7 @@ impl<'a> MonitorList<'a> {
             Constraint::Percentage(10),
         ];   
 
-        let table = Table::new(self.monitors_to_rows(),widths) 
+        let table = Table::new(self.monitors_to_rows(&workspace_counts),widths) 
             .column_spacing(1)
             .header(
                 Row::new(vec![
@@ -281,15 +325,21 @@ impl<'a> MonitorList<'a> {
             )
             .row_highlight_style(Style::new().yellow())
             .cell_highlight_style(Style::new().blue())
-            .highlight_symbol("  ")
-            .block(block);
+            .highlight_symbol("  ");
 
         StatefulWidget::render(
             table,
-            area,
+            chunks[0],
             buf,
             &mut self.state,
         );
+
+        if has_duplicate_workspace {
+            ratatui::widgets::Paragraph::new(Line::from(" Error: Duplicate workspace assignment! ".red().bold()).centered())
+                .render(chunks[1], buf);
+        }
+        ratatui::widgets::Paragraph::new(instructions.centered())
+            .render(chunks[2], buf);
     }
 }
 

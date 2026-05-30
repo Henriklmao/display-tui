@@ -2,11 +2,12 @@ use std::io;
 use crossterm::event::{self,Event,KeyCode,KeyEvent,KeyEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
-    widgets::Widget,
+    layout::{Rect, Layout, Direction, Constraint, Alignment},
+    widgets::{Widget, Block, Borders, Paragraph, Clear},
+    style::{Style, Stylize, Color},
+    text::Line,
     DefaultTerminal,Frame,
 };
-use ratatui::prelude::*;
 mod list;
 mod map;
 mod monitor;
@@ -42,6 +43,8 @@ struct App {
     selected_resolution : usize,
     selected_scale: usize,
     mode: TUIMode,
+    show_help: bool,
+    show_error: Option<Vec<String>>,
 }
 
 impl App{
@@ -91,9 +94,35 @@ impl App{
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if self.show_help {
+            match key_event.code {
+                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') | KeyCode::Char('k') => self.show_help = false,
+                _ => {}
+            }
+            return;
+        }
+
+        if self.show_error.is_some() {
+            match key_event.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => self.show_error = None,
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    self.show_error = None;
+                    self.write();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            KeyCode::Char('w') => self.write(), 
+            KeyCode::Char('w') => {
+                match self.validate() {
+                    Ok(_) => self.write(),
+                    Err(errs) => self.show_error = Some(errs),
+                }
+            }, 
+            KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
             _ => {
                 match self.mode {
                     TUIMode::View => MonitorList::handle_events(self,key_event),
@@ -113,6 +142,94 @@ impl App{
         self.exit = true;
     }
     
+    fn validate(&self) -> Result<(), Vec<String>> {
+        let mut errors = Vec::new();
+        
+        // Duplicate workspace check
+        let mut ws_counts = std::collections::HashMap::new();
+        for m in &self.monitors {
+            if let Some(ws) = m.workspace {
+                *ws_counts.entry(ws).or_insert(0) += 1;
+            }
+        }
+        
+        let mut duplicated_ws = Vec::new();
+        for (ws, count) in ws_counts {
+            if count > 1 {
+                duplicated_ws.push(ws.to_string());
+            }
+        }
+        if !duplicated_ws.is_empty() {
+            errors.push(format!("Duplicate workspace assignment detected: {}", duplicated_ws.join(", ")));
+        }
+
+        // Contiguous check
+        let enabled_indices: Vec<usize> = self.monitors.iter().enumerate().filter(|(_, m)| m.enabled).map(|(i, _)| i).collect();
+        
+        if enabled_indices.len() > 1 {
+            let mut adj = vec![vec![]; enabled_indices.len()];
+            let mut geoms = Vec::new();
+            for &idx in &enabled_indices {
+                geoms.push(self.monitors[idx].get_geometry());
+            }
+            
+            let eps = 2.0;
+            for i in 0..geoms.len() {
+                for j in (i+1)..geoms.len() {
+                    let (x1, y1, w1, h1) = geoms[i];
+                    let (x2, y2, w2, h2) = geoms[j];
+                    
+                    let touches_x = x1 <= x2 + w2 + eps && x2 <= x1 + w1 + eps;
+                    let touches_y = y1 <= y2 + h2 + eps && y2 <= y1 + h1 + eps;
+                    
+                    if touches_x && touches_y {
+                        adj[i].push(j);
+                        adj[j].push(i);
+                    }
+                }
+            }
+            
+            let mut components = Vec::new();
+            let mut global_visited = vec![false; enabled_indices.len()];
+            
+            for i in 0..enabled_indices.len() {
+                if !global_visited[i] {
+                    let mut comp = Vec::new();
+                    let mut q = vec![i];
+                    global_visited[i] = true;
+                    
+                    while let Some(node) = q.pop() {
+                        comp.push(node);
+                        for &neighbor in &adj[node] {
+                            if !global_visited[neighbor] {
+                                global_visited[neighbor] = true;
+                                q.push(neighbor);
+                            }
+                        }
+                    }
+                    components.push(comp);
+                }
+            }
+            
+            if components.len() > 1 {
+                components.sort_by(|a, b| b.len().cmp(&a.len()));
+                let mut disconnected = Vec::new();
+                for comp in components.iter().skip(1) {
+                    for &idx in comp {
+                        disconnected.push(self.monitors[enabled_indices[idx]].name.clone());
+                    }
+                }
+                errors.push(format!("Monitors not contiguous. Disconnected: {}", disconnected.join(", ")));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+    
     fn write(&mut self) {
         Monitor::save_hyprland_config(
             &self.config.monitors_config_path,
@@ -123,6 +240,26 @@ impl App{
             eprintln!("✗ Failed to save monitor state: {}", e);
         }
     }         
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 impl Widget for &App {
@@ -181,6 +318,53 @@ impl Widget for &App {
             }
         }
         monitor_list.render(outer_layout[1], buf);
+
+        if self.show_help {
+            let popup_area = centered_rect(60, 60, area);
+            let text = vec![
+                Line::from(" --- Global --- ".bold().yellow()),
+                Line::from("Save <w> | Quit <q> | Close Help <K/Esc>"),
+                Line::from(""),
+                Line::from(" --- View Mode --- ".bold().yellow()),
+                Line::from("Up <k> | Down <j>"),
+                Line::from("Move <m> | Resolution <r> | Scale <s>"),
+                Line::from("Rotate <o> | Workspace <0-9>"),
+                Line::from("Enable <e> | Disable <d>"),
+                Line::from(""),
+                Line::from(" --- Move Mode --- ".bold().yellow()),
+                Line::from("Fast <Shift+*> | Up <k> | Down <j>"),
+                Line::from("Left <h> | Right <l> | Quit <Esc>"),
+                Line::from(""),
+                Line::from(" --- Res / Scale Mode --- ".bold().yellow()),
+                Line::from("Select <Space> | Quit <Esc> | Up/Down <k/j>"),
+            ];
+
+            let p = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title(" Keybindings ".bold().white()).border_style(Style::default().fg(Color::Cyan)))
+                .alignment(Alignment::Center);
+
+            Clear.render(popup_area, buf);
+            p.render(popup_area, buf);
+        }
+
+        if let Some(ref errors) = self.show_error {
+            let popup_area = centered_rect(50, 40, area);
+            let mut text = vec![
+                Line::from(""),
+            ];
+            for err in errors {
+                text.push(Line::from(err.clone().red().bold()));
+                text.push(Line::from(""));
+            }
+            text.push(Line::from("Press <f> to force write anyway, or <Esc>, <Enter>, <q> to close.".gray()));
+
+            let p = Paragraph::new(text)
+                .block(Block::default().borders(Borders::ALL).title(" Error ".bold().white()).border_style(Style::default().fg(Color::Red)))
+                .alignment(Alignment::Center);
+
+            Clear.render(popup_area, buf);
+            p.render(popup_area, buf);
+        }
     }
 }
 

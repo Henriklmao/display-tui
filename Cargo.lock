@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "display-tui"
-version = "0.9.0"
+version = "0.9.4"
 dependencies = [
  "crossterm",
  "dirs",

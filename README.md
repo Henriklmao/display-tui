@@ -14,7 +14,10 @@ Thanks for your work, you are the biggest contributor to this project!
 - set display resolution
 - set display scale
 - set display rotation
-- set workspace assignments (using keys 1-9 in the list view, 0 to clear)
+- set workspace assignments
+- save validation with detailed warning (overridable)
+- quick-access global help modal (press `shift + K`)
+- responsive mini-mode for small terminal windows
 
 ## Preview
 
@@ -23,9 +26,10 @@ Thanks for your work, you are the biggest contributor to this project!
 ## Requirements
 
 - Hyprland
-- Nerd Font
+- Nerd Font (Not automatically installed)
 - Rust
 - Cargo
+- xdg-terminal-exec (If you want to launch from the .desktop shortcut)
 
 ## Usage
 
@@ -35,7 +39,20 @@ Run the TUI:
    display-tui
    ```
 
-Everything is controlled using the keyboard, and the interface is pretty self-explanatory. You can navigate through the list of displays using the arrow keys, and press `Enter` to edit a display's settings. Use `Tab` to switch between different settings, and `Esc` to go back to the main list.
+Everything is controlled using the keyboard, and the interface provides direct hints at the bottom.
+You can navigate through the list of displays using the arrow keys or `j`/`k`.
+
+- `m`: Move mode (use arrow keys or `h`/`j`/`k`/`l` to arrange displays)
+- `r`: Resolution mode
+- `s`: Scale mode
+- `o`: Cycle rotation
+- `1-9`: Assign workspace to the selected display (`0` to clear)
+- `e`/`d`: Enable/Disable display
+- `K`: Open the global keybindings help modal
+- `w`: Save the configuration to your hyprland config
+- `q`: Quit the application
+
+When saving, the app will automatically validate your layout. If any displays are separated too far or if there are duplicate workspace assignments, a warning modal will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
 
 ## Installation
 

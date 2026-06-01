@@ -16,22 +16,31 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y file wget libfuse2
+
       - name: Install appimagetool
         run: |
           sudo wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O /usr/local/bin/appimagetool
           sudo chmod +x /usr/local/bin/appimagetool
+
       - name: Install cargo-appimage
         run: cargo install cargo-appimage
+
       - name: Build AppImage
         run: cargo appimage
+
+      - name: Rename AppImage with Tag
+        run: |
+          cd target/appimage
+          mv display-tui.AppImage display-tui-${{ github.ref_name }}.AppImage
 
       - name: Create Release and Upload AppImage
         uses: softprops/action-gh-release@v2
         with:
-          files: "target/appimage/*.AppImage" 
+          files: "target/appimage/display-tui-*.AppImage" 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

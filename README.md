@@ -4,8 +4,9 @@ A simple and minimalistic TUI to manage display settings for Hyprland.
 Built with Rust and the [crossterm](https://github.com/crossterm-rs/crossterm) and [ratatui](https://ratatui.rs/) libraries, it provides a user-friendly interface to control your display configurations.
 Started as a Fork of [otto-bus-dev/display-tui](https://github.com/otto-bus-dev/display-tui) with some extra features.
 Thanks for your work, you are the biggest contributor to this project!
+
 > [!NOTE]  
-> Supports and will always support old hyprland 0.55+ lua style and hyprlang config style.
+> Supports and will always support old hyprlang (.conf) style and new hyprland 0.55+ lua style.
 
 ## Features
 
@@ -35,9 +36,9 @@ Thanks for your work, you are the biggest contributor to this project!
 
 Run the TUI:
 
-   ```bash
-   display-tui
-   ```
+```bash
+display-tui
+```
 
 Everything is controlled using the keyboard, and the interface provides direct hints at the bottom.
 You can navigate through the list of displays using the arrow keys or `j`/`k`.
@@ -98,20 +99,20 @@ You can download the latest AppImage from the [Releases](https://github.com/Henr
 
 ## Configuration & Integration
 
-   Display TUI automatically detects your Hyprland configuration format.
+Display TUI automatically detects your Hyprland configuration format.
 
 ### Hyprland lua 0.55+
 
-   If `~/.config/hypr/hyprland.lua` exists, Display TUI will automatically detect your monitor config it, and writes to it. If it doesn't detect any monitor config it will write into `~/.config/hypr/lua/monitors.lua`), and automatically add the necessary `require("...")` statement to your `hyprland.lua` file. No manual setup is needed!
+If `~/.config/hypr/hyprland.lua` exists, Display TUI will automatically detect your monitor config it, and writes to it. If it doesn't detect any monitor config it will write into `~/.config/hypr/lua/monitors.lua`), and automatically add the necessary `require("...")` statement to your `hyprland.lua` file. No manual setup is needed!
 
 ### Hyprlang (old .conf style)
 
-   Display TUI will fall back to using `~/.config/display-tui/config.json` to know where to save the `.conf` file. The default path is `~/.config/hypr/monitors.conf`. You can create it manually like this:
+Display TUI will fall back to using `~/.config/display-tui/config.json` to know where to save the `.conf` file. The default path is `~/.config/hypr/monitors.conf`. You can create it manually like this:
 
-   ```bash
-   mkdir -p ~/.config/display-tui
-   echo '{"monitors_config_path": "~/.config/hypr/monitors.conf"}' > ~/.config/display-tui/config.json
-   ```
+```bash
+mkdir -p ~/.config/display-tui
+echo '{"monitors_config_path": "~/.config/hypr/monitors.conf"}' > ~/.config/display-tui/config.json
+```
 
 ## Contributions
 

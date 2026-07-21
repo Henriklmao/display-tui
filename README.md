@@ -30,7 +30,6 @@ Thanks for your work, you are the biggest contributor to this project!
 - Nerd Font (Not automatically installed)
 - Rust
 - Cargo
-- xdg-terminal-exec (If you want to launch from the .desktop shortcut)
 
 ## Usage
 

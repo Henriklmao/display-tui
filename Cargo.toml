@@ -14,4 +14,4 @@ shellexpand = "3.1.1"
 [package.metadata.appimage]
 icon = "assets/desktop-icon.png"
 desktop_entry = "assets/display-tui.desktop"
-auto_link = true
+auto_link = false

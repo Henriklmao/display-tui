@@ -94,7 +94,7 @@ impl<'a> Map<'a> {
             KeyCode::Char('L') => Map::move_horizontal(app, 10),
             KeyCode::Right => if is_shift { Map::move_horizontal(app, 10) } else { Map::snap_horizontal(app, 1) },
             
-            KeyCode::Esc => Map::change_mode(app,TUIMode::View),
+            KeyCode::Esc | KeyCode::Enter => Map::change_mode(app,TUIMode::View),
             _ => {}
         }
     }

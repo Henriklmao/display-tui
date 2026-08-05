@@ -32,8 +32,12 @@ impl Scale{
         match key_event.code {
             KeyCode::Char('k') | KeyCode::Up => Scale::previous(app),
             KeyCode::Char('j') | KeyCode::Down => Scale::next(app),
-            KeyCode::Char(' ')=> Scale::select(app),
-            KeyCode::Esc => Scale::change_mode(app,TUIMode::View),
+            KeyCode::Char(' ') => Scale::select(app),
+            KeyCode::Enter => {
+                Scale::select(app);
+                Scale::change_mode(app, TUIMode::View);
+            }
+            KeyCode::Esc => Scale::change_mode(app, TUIMode::View),
             _ => {}
         }
     }

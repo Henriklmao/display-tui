@@ -345,7 +345,11 @@ impl Monitor {
                 "lua.monitors".to_string()
             });
             
-            let relative_path = module_name.replace(".", "/") + ".lua";
+            let relative_path = if module_name == "hypr.monitors" {
+                "monitors.lua".to_string()
+            } else {
+                module_name.replace(".", "/") + ".lua"
+            };
             let hypr_dir = shellexpand::tilde("~/.config/hypr/").to_string();
             let final_path = std::path::Path::new(&hypr_dir).join(relative_path);
             

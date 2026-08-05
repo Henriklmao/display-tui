@@ -190,6 +190,13 @@ impl App{
                     let (x1, y1, w1, h1) = geoms[i];
                     let (x2, y2, w2, h2) = geoms[j];
                     
+                    // Overlap check
+                    if x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1 {
+                        let name1 = &self.monitors[enabled_indices[i]].name;
+                        let name2 = &self.monitors[enabled_indices[j]].name;
+                        errors.push(format!("Monitors overlap: {} and {}", name1, name2));
+                    }
+                    
                     let touches_x = x1 <= x2 + w2 + eps && x2 <= x1 + w1 + eps;
                     let touches_y = y1 <= y2 + h2 + eps && y2 <= y1 + h1 + eps;
                     

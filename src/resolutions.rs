@@ -33,7 +33,11 @@ impl<'a> Resolutions<'a> {
         match key_event.code {
             KeyCode::Char('k') | KeyCode::Up => Resolutions::previous(app),
             KeyCode::Char('j') | KeyCode::Down => Resolutions::next(app),
-            KeyCode::Char(' ')=> Resolutions::select(app),
+            KeyCode::Char(' ') => Resolutions::select(app),
+            KeyCode::Enter => {
+                Resolutions::select(app);
+                Resolutions::change_mode(app, TUIMode::View);
+            }
             KeyCode::Esc => Resolutions::change_mode(app,TUIMode::View),
             _ => {}
         }

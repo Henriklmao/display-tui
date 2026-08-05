@@ -44,7 +44,14 @@ struct App {
     selected_scale: usize,
     mode: TUIMode,
     show_help: bool,
-    show_error: Option<Vec<String>>,
+    show_popup: Option<Popup>,
+}
+
+#[derive(Debug)]
+struct Popup {
+    title: String,
+    lines: Vec<String>,
+    is_error: bool,
 }
 
 impl App{
@@ -102,11 +109,11 @@ impl App{
             return;
         }
 
-        if self.show_error.is_some() {
+        if self.show_popup.is_some() {
             match key_event.code {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => self.show_error = None,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => self.show_popup = None,
                 KeyCode::Char('f') | KeyCode::Char('F') => {
-                    self.show_error = None;
+                    self.show_popup = None;
                     self.write();
                 }
                 _ => {}
@@ -119,7 +126,11 @@ impl App{
             KeyCode::Char('w') => {
                 match self.validate() {
                     Ok(_) => self.write(),
-                    Err(errs) => self.show_error = Some(errs),
+                    Err(errs) => self.show_popup = Some(Popup {
+                        title: " Error ".to_string(),
+                        lines: errs,
+                        is_error: true,
+                    }),
                 }
             }, 
             KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
@@ -231,10 +242,25 @@ impl App{
     }
     
     fn write(&mut self) {
-        Monitor::save_hyprland_config(
+        match Monitor::save_hyprland_config(
             &self.config.monitors_config_path,
             &self.monitors
-        ).expect("Failed to save Hyprland config");
+        ) {
+            Ok(_) => {
+                let _ = std::process::Command::new("hyprctl")
+                    .arg("reload")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            },
+            Err(e) => {
+                self.show_popup = Some(Popup {
+                    title: " Error ".to_string(),
+                    lines: vec![format!("Failed to save Hyprland config: {}", e)],
+                    is_error: true,
+                });
+            }
+        }
         
         if let Err(e) = Configuration::save_monitor_state(&self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
@@ -347,19 +373,24 @@ impl Widget for &App {
             p.render(popup_area, buf);
         }
 
-        if let Some(ref errors) = self.show_error {
+        if let Some(ref popup) = self.show_popup {
             let popup_area = centered_rect(50, 40, area);
             let mut text = vec![
                 Line::from(""),
             ];
-            for err in errors {
-                text.push(Line::from(err.clone().red().bold()));
+            for line in &popup.lines {
+                text.push(Line::from(line.clone()));
                 text.push(Line::from(""));
             }
-            text.push(Line::from("Press <f> to force write anyway, or <Esc>, <Enter>, <q> to close.".gray()));
+           if popup.is_error {
+                text.push(Line::from("Press <f> to force write anyway, or <Esc>, <Enter>, <q> to close.".gray()));
+            } 
+            let color = if popup.is_error { Color::Red } else { Color::Yellow };
+            let border_style = Style::default().fg(color);
+            let title = Line::from(popup.title.clone().bold().white());
 
             let p = Paragraph::new(text)
-                .block(Block::default().borders(Borders::ALL).title(" Error ".bold().white()).border_style(Style::default().fg(Color::Red)))
+                .block(Block::default().borders(Borders::ALL).title(title).border_style(border_style))
                 .alignment(Alignment::Center);
 
             Clear.render(popup_area, buf);

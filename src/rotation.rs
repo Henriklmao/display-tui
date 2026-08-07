@@ -1,17 +1,11 @@
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 pub enum Rotation {
-    Normal,
+    #[default] Normal,
     Deg90,
     Deg180,
     Deg270,
-}
-
-impl Default for Rotation {
-    fn default() -> Self {
-        Rotation::Normal
-    }
 }
 
 impl Rotation {

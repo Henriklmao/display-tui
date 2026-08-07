@@ -19,7 +19,7 @@ pub struct MonitorList<'a> {
     pub mode: TUIMode,
     pub selected_row: Option<usize>,
     pub state: TableState,
-    pub monitors: &'a Vec<Monitor>,
+    pub monitors: &'a [Monitor],
 }
 
 impl<'a> MonitorList<'a> {
@@ -42,7 +42,7 @@ impl<'a> MonitorList<'a> {
             KeyCode::Char('r') => MonitorList::change_mode(app, TUIMode::Resolution),
             KeyCode::Char('s') => MonitorList::change_mode(app, TUIMode::Scale),
             KeyCode::Char('o') => MonitorList::cycle_rotation(app),
-            KeyCode::Char(c) if c.is_digit(10) => {
+            KeyCode::Char(c) if c.is_ascii_digit() => {
                 let ws = c.to_digit(10).unwrap() as u8;
                 MonitorList::set_workspace(app, ws);
             }
@@ -103,7 +103,7 @@ impl<'a> MonitorList<'a> {
         }
         // If no saved_position (from disable), keep the current position
         // which might have been loaded from the persistent state file
-        monitor.scale = monitor.saved_scale.or_else(|| monitor.scale).or(Some(1.0));
+        monitor.scale = monitor.saved_scale.or(monitor.scale).or(Some(1.0));
     }
 
     fn monitors_to_rows(
@@ -136,9 +136,9 @@ impl<'a> MonitorList<'a> {
                     Some(res) => format!("{}x{}", res.width, res.height),
                     None => "N/A".to_string(),
                 };
-                let is_duplicate_ws = monitor.workspace.map_or(false, |ws| {
-                    workspace_counts.get(&ws).copied().unwrap_or(0) > 1
-                });
+                let is_duplicate_ws = monitor
+                    .workspace
+                    .is_some_and(|ws| workspace_counts.get(&ws).copied().unwrap_or(0) > 1);
                 let workspace_cell = match monitor.workspace {
                     Some(ws) => {
                         let ws_str = ws.to_string();
@@ -151,12 +151,16 @@ impl<'a> MonitorList<'a> {
                     None => Cell::from("-"),
                 };
                 Row::new(vec![
-                         Cell::from(if enabled == "true" { "".to_string() } else { "".to_string() })
-                         .style(
-                             Style::default().fg(
-                                 if enabled == "true" {Color::Green} else {Color::Red}
-                             ),
-                         ),
+                    Cell::from(if enabled == "true" {
+                        "".to_string()
+                    } else {
+                        "".to_string()
+                    })
+                    .style(Style::default().fg(if enabled == "true" {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    })),
                     Cell::from(name),
                     Cell::from(description),
                     Cell::from(resolution),

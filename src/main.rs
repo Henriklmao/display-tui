@@ -230,7 +230,7 @@ impl App{
             }
             
             if components.len() > 1 {
-                components.sort_by(|a, b| b.len().cmp(&a.len()));
+                        components.sort_by_key(|a| std::cmp::Reverse(a.len()));
                 let mut disconnected = Vec::new();
                 for comp in components.iter().skip(1) {
                     for &idx in comp {
@@ -511,7 +511,7 @@ mod tests {
 
         app.handle_key_event(KeyCode::Char(' ').into());
         let monitor = app.monitors[0].clone();
-        assert_eq!(monitor.modes[0].current, true);
+        assert!(monitor.modes[0].current);
 
         app.handle_key_event(KeyCode::Char('q').into());
         assert!(app.exit);

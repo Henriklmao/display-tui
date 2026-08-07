@@ -249,30 +249,28 @@ impl App{
     }
     
     fn write(&mut self) {
-        match Monitor::save_hyprland_config(
-            &self.config.monitors_config_path,
-            &self.monitors
-        ) {
-            Ok(_) => {
-                let _ = std::process::Command::new("hyprctl")
-                    .arg("reload")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
-            },
-            Err(e) => {
-                self.show_popup = Some(Popup {
-                    title: " Error ".to_string(),
-                    lines: vec![format!("Failed to save Hyprland config: {}", e)],
-                    is_error: true,
-                });
-            }
+        let path = self.config.monitors_config_path.as_deref().unwrap_or("~/.config/hypr/monitors.conf");
+        let lua_config = self.config.lua_monitor_config.as_deref();
+
+        if Monitor::save_hyprland_config(path, &self.monitors, lua_config).is_err() {
+            self.show_popup = Some(Popup {
+                title: " Error ".to_string(),
+                lines: vec!["Failed to save Hyprland config.".to_string()],
+                is_error: true,
+            });
+        } else {
+            let _ = std::process::Command::new("hyprctl")
+                .arg("reload")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
         }
-        
+
         if let Err(e) = Configuration::save_monitor_state(&self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
         }
     }         
+
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

@@ -1,48 +1,46 @@
-use crossterm::event::{KeyCode,KeyEvent};
+use crate::monitor::{Monitor, Position};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style,Stylize,Color},
+    style::{Color, Style, Stylize},
     symbols::border,
     text::Line,
-    widgets::{Cell,Block,StatefulWidget,Row,Table,TableState,Widget},
+    widgets::{Block, Cell, Row, StatefulWidget, Table, TableState, Widget},
 };
-use crate::monitor::{Monitor,Position};
 
-use ratatui::layout::Constraint;
-use crate::utils::TUIMode;
-use crate::rotation::Rotation;
 use crate::App;
+use crate::rotation::Rotation;
+use crate::utils::TUIMode;
+use ratatui::layout::Constraint;
 
 #[derive(Debug)]
 pub struct MonitorList<'a> {
     pub mode: TUIMode,
     pub selected_row: Option<usize>,
     pub state: TableState,
-    pub monitors:&'a Vec<Monitor>,
+    pub monitors: &'a Vec<Monitor>,
 }
 
-
 impl<'a> MonitorList<'a> {
-    pub fn new(monitors: &'a Vec<Monitor>,mode:TUIMode,selected_row:Option<usize>) -> Self {
-        MonitorList{
+    pub fn new(monitors: &'a Vec<Monitor>, mode: TUIMode, selected_row: Option<usize>) -> Self {
+        MonitorList {
             mode,
             selected_row,
-            state: TableState::default()
-                .with_selected(selected_row),
+            state: TableState::default().with_selected(selected_row),
             monitors,
         }
     }
 
-    pub fn handle_events(app:&mut App, key_event: KeyEvent) {
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('k') | KeyCode::Up => MonitorList::previous_monitor(app),
             KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
-            KeyCode::Char('e')=> MonitorList::enable_monitor(app),
-            KeyCode::Char('d')=> MonitorList::disable_monitor(app),
-            KeyCode::Char('m') => MonitorList::change_mode(app,TUIMode::Move),
-            KeyCode::Char('r') => MonitorList::change_mode(app,TUIMode::Resolution),
-            KeyCode::Char('s') => MonitorList::change_mode(app,TUIMode::Scale),
+            KeyCode::Char('e') => MonitorList::enable_monitor(app),
+            KeyCode::Char('d') => MonitorList::disable_monitor(app),
+            KeyCode::Char('m') => MonitorList::change_mode(app, TUIMode::Move),
+            KeyCode::Char('r') => MonitorList::change_mode(app, TUIMode::Resolution),
+            KeyCode::Char('s') => MonitorList::change_mode(app, TUIMode::Scale),
             KeyCode::Char('o') => MonitorList::cycle_rotation(app),
             KeyCode::Char(c) if c.is_digit(10) => {
                 let ws = c.to_digit(10).unwrap() as u8;
@@ -60,18 +58,18 @@ impl<'a> MonitorList<'a> {
             monitor.workspace = Some(workspace);
         }
     }
-    fn cycle_rotation(app:&mut App) {
+    fn cycle_rotation(app: &mut App) {
         let monitor = &mut app.monitors[app.selected_monitor];
         let current_rotation = Rotation::from_transform(&monitor.transform);
         let next_rotation = current_rotation.cycle();
         monitor.transform = Some(next_rotation.to_transform().to_string());
     }
 
-    fn change_mode(app:&mut App,mode: TUIMode) {
+    fn change_mode(app: &mut App, mode: TUIMode) {
         app.mode = mode;
     }
 
-    fn next_monitor(app:&mut App) {
+    fn next_monitor(app: &mut App) {
         app.selected_monitor = if app.selected_monitor >= app.monitors.len() - 1 {
             0
         } else {
@@ -79,22 +77,22 @@ impl<'a> MonitorList<'a> {
         }
     }
 
-    fn previous_monitor(app:&mut App) {
+    fn previous_monitor(app: &mut App) {
         app.selected_monitor = if app.selected_monitor == 0 {
             app.monitors.len() - 1
         } else {
             app.selected_monitor - 1
         }
     }
-    
-    fn disable_monitor(app:&mut App) {
+
+    fn disable_monitor(app: &mut App) {
         let monitor = &mut app.monitors[app.selected_monitor];
         monitor.enabled = false;
         monitor.saved_position = monitor.position.clone();
         monitor.saved_scale = monitor.scale;
     }
 
-    fn enable_monitor(app:&mut App) {
+    fn enable_monitor(app: &mut App) {
         let monitor = &mut app.monitors[app.selected_monitor];
         monitor.enabled = true;
         if let Some(saved_pos) = &monitor.saved_position {
@@ -108,15 +106,21 @@ impl<'a> MonitorList<'a> {
         monitor.scale = monitor.saved_scale.or_else(|| monitor.scale).or(Some(1.0));
     }
 
-    fn monitors_to_rows(&self, workspace_counts: &std::collections::HashMap<u8, usize>) -> Vec<Row<'static>> {
+    fn monitors_to_rows(
+        &self,
+        workspace_counts: &std::collections::HashMap<u8, usize>,
+    ) -> Vec<Row<'static>> {
         self.monitors
             .iter()
             .map(|monitor| {
                 let name = monitor.name.clone();
-                let description = monitor.description.clone().unwrap_or_else(|| "No description".to_string());
+                let description = monitor
+                    .description
+                    .clone()
+                    .unwrap_or_else(|| "No description".to_string());
                 let scale = monitor.scale.unwrap_or(1.0).to_string();
                 let enabled = monitor.enabled.to_string();
-                
+
                 let position = match monitor.position.as_ref() {
                     Some(pos) => format!("({},{})", pos.x, pos.y),
                     None => "N/A".to_string(),
@@ -128,11 +132,13 @@ impl<'a> MonitorList<'a> {
                 if mode.is_none() {
                     mode = monitor.get_prefered_resolution();
                 }
-                let resolution = match mode{
+                let resolution = match mode {
                     Some(res) => format!("{}x{}", res.width, res.height),
                     None => "N/A".to_string(),
                 };
-                let is_duplicate_ws = monitor.workspace.map_or(false, |ws| workspace_counts.get(&ws).copied().unwrap_or(0) > 1);
+                let is_duplicate_ws = monitor.workspace.map_or(false, |ws| {
+                    workspace_counts.get(&ws).copied().unwrap_or(0) > 1
+                });
                 let workspace_cell = match monitor.workspace {
                     Some(ws) => {
                         let ws_str = ws.to_string();
@@ -141,40 +147,38 @@ impl<'a> MonitorList<'a> {
                         } else {
                             Cell::from(ws_str)
                         }
-                    },
+                    }
                     None => Cell::from("-"),
                 };
                 Row::new(vec![
-                    Cell::default().content(
-                        Line::from(
-                            if enabled == "true" {
-                                "".green().to_string()
-                            } else {
-                                "".red().to_string()
-                            }
-                        )
-                        .centered()
-                        .style(
-                            Style::default().fg(
-                                if enabled == "true" {Color::Green} else {Color::Red}
-                            )
-                        ),
-                    ),
+                         Cell::from(if enabled == "true" { "".to_string() } else { "".to_string() })
+                         .style(
+                             Style::default().fg(
+                                 if enabled == "true" {Color::Green} else {Color::Red}
+                             ),
+                         ),
                     Cell::from(name),
                     Cell::from(description),
-                    Cell::from(resolution), 
+                    Cell::from(resolution),
                     Cell::from(position),
                     Cell::from(scale),
                     Cell::from(rotation),
                     workspace_cell,
                 ])
-            }
-            )
+            })
             .collect()
     }
-    
+
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        let title = Line::from(if self.monitors.len()>1 {" Displays "}else{" Display "}.white().bold());
+        let title = Line::from(
+            if self.monitors.len() > 1 {
+                " Displays "
+            } else {
+                " Display "
+            }
+            .white()
+            .bold(),
+        );
         let mut instructions_items = vec![];
 
         let mut workspace_counts = std::collections::HashMap::new();
@@ -223,9 +227,9 @@ impl<'a> MonitorList<'a> {
                         instructions_items.push(" Enable ".white());
                         instructions_items.push("<e> ".blue().bold());
                     }
-                },
+                }
 
-                TUIMode::Resolution=> {
+                TUIMode::Resolution => {
                     instructions_items.push(" Up ".white());
                     instructions_items.push("<k> ".blue().bold());
                     instructions_items.push(" Down ".white());
@@ -234,7 +238,7 @@ impl<'a> MonitorList<'a> {
                     instructions_items.push("<Space> ".blue().bold());
                     instructions_items.push(" Quit Resolution Mode ".white());
                     instructions_items.push("<Esc> ".blue().bold());
-                },
+                }
 
                 TUIMode::Move => {
                     instructions_items.push(" Fast ".white());
@@ -249,7 +253,7 @@ impl<'a> MonitorList<'a> {
                     instructions_items.push("<l> ".blue().bold());
                     instructions_items.push(" Quit Move Mode ".white());
                     instructions_items.push("<Esc> ".blue().bold());
-                },
+                }
                 TUIMode::Scale => {
                     instructions_items.push(" Up ".white());
                     instructions_items.push("<k> ".blue().bold());
@@ -259,7 +263,7 @@ impl<'a> MonitorList<'a> {
                     instructions_items.push("<Space> ".blue().bold());
                     instructions_items.push(" Quit Scale Mode ".white());
                     instructions_items.push("<Esc> ".blue().bold());
-                },
+                }
             }
 
             instructions_items.push(" Save ".white());
@@ -275,8 +279,11 @@ impl<'a> MonitorList<'a> {
         let block = Block::bordered()
             .title(title.centered())
             .border_set(border::THICK)
-            .border_style(Style::default().fg(
-                if self.mode == TUIMode::View {Color::Yellow} else {Color::White}));
+            .border_style(Style::default().fg(if self.mode == TUIMode::View {
+                Color::Yellow
+            } else {
+                Color::White
+            }));
 
         let inner_area = block.inner(area);
         Widget::render(block, area, buf);
@@ -291,7 +298,6 @@ impl<'a> MonitorList<'a> {
             .split(inner_area);
 
         let widths = [
-            
             Constraint::Percentage(5),
             Constraint::Percentage(15),
             Constraint::Percentage(25),
@@ -300,65 +306,58 @@ impl<'a> MonitorList<'a> {
             Constraint::Percentage(10),
             Constraint::Percentage(10),
             Constraint::Percentage(10),
-        ];   
+        ];
 
-        let table = Table::new(self.monitors_to_rows(&workspace_counts),widths) 
+        let table = Table::new(self.monitors_to_rows(&workspace_counts), widths)
             .column_spacing(1)
             .header(
                 Row::new(vec![
-                    Cell::default().content(
-                        Line::from("  ")
-                        .centered()
-                    ),
+                    Cell::default().content(Line::from("  ").centered()),
                     Cell::from("name"),
                     Cell::from("description"),
                     Cell::from("resolution"),
                     Cell::from("position"),
                     Cell::from("scale"),
                     Cell::from("rotation"),
-                    Cell::from("workspace")
+                    Cell::from("workspace"),
                 ])
-                    .bottom_margin(1)
-                    .bold()
-                    .green()
-                    .reversed()
+                .bottom_margin(1)
+                .bold()
+                .green()
+                .reversed(),
             )
             .row_highlight_style(Style::new().yellow())
             .cell_highlight_style(Style::new().blue())
             .highlight_symbol("  ");
 
-        StatefulWidget::render(
-            table,
-            chunks[0],
-            buf,
-            &mut self.state,
-        );
+        StatefulWidget::render(table, chunks[0], buf, &mut self.state);
 
         if has_duplicate_workspace {
-            ratatui::widgets::Paragraph::new(Line::from(" Error: Duplicate workspace assignment! ".red().bold()).centered())
-                .render(chunks[1], buf);
+            ratatui::widgets::Paragraph::new(
+                Line::from(" Error: Duplicate workspace assignment! ".red().bold()).centered(),
+            )
+            .render(chunks[1], buf);
         }
-        ratatui::widgets::Paragraph::new(instructions.centered())
-            .render(chunks[2], buf);
+        ratatui::widgets::Paragraph::new(instructions.centered()).render(chunks[2], buf);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Style;
     use crate::test_utils::tests::test_monitors;
+    use ratatui::style::Style;
 
     #[test]
     fn render_list() {
-        let mut list = MonitorList{
+        let mut list = MonitorList {
             state: TableState::default(),
             selected_row: Some(0),
             mode: TUIMode::View,
             monitors: &test_monitors(),
-        }; 
+        };
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
-        
+
         list.render(buf.area, &mut buf);
 
         let mut expected = Buffer::with_lines(vec![
@@ -433,7 +432,7 @@ mod tests {
         expected.set_style(Rect::new(91, 6, 4, 1), instructions_key_style);
         expected.set_style(Rect::new(95, 6, 6, 1), instructions_label_style);
         expected.set_style(Rect::new(101, 6, 4, 1), instructions_key_style);
-        // We skip exact buffer comparison here due to length variations, 
+        // We skip exact buffer comparison here due to length variations,
         // the test already ran and exercised the render path which is the main goal.
     }
 }

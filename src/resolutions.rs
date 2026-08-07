@@ -71,20 +71,20 @@ impl<'a> Resolutions<'a> {
             .iter()
             .map(|mode| {
                 Row::new(vec![
-                    Cell::from(if mode.current { "" } else { "" })
-                    .style(
-                        Style::default().fg(
-                            if mode.current {Color::Green} else {Color::Red}
-                        )
-                    ),
+                     Cell::from(if mode.current { "".to_string() } else { "".to_string() })
+                     .style(
+                         Style::default().fg(
+                             if mode.current {Color::Green} else {Color::Red}
+                         )
+                     ),
                     Cell::from(format!("{}x{}", mode.width, mode.height)),
                     Cell::from(mode.refresh.to_string()),
-                    Cell::from(if mode.preferred { "" } else { "" })
-                    .style(
-                        Style::default().fg(
-                            if mode.preferred {Color::Green} else {Color::Red}
-                        )
-                    ),
+                     Cell::from(if mode.preferred { "".to_string() } else { "".to_string() })
+                     .style(
+                         Style::default().fg(
+                             if mode.preferred {Color::Green} else {Color::Red}
+                         )
+                     ),
                 ])
             })
             .collect()

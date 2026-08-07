@@ -3,7 +3,7 @@ name: Release AppImage
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ name: Release AppImage
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -51,12 +51,12 @@ jobs:
       - name: Prepare AppDir Structure
         run: |
           mkdir -p AppDir/usr/bin
-          
+
           cp target/release/display-tui AppDir/usr/bin/
-          
+
           cp assets/desktop-icon.png AppDir/display-tui.png
           cp assets/display-tui.desktop AppDir/display-tui.desktop
-          
+
           cat << 'EOF' > AppDir/AppRun
           #!/bin/sh
           SELF=$(dirname "$(readlink -f "$0")")

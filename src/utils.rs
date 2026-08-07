@@ -11,6 +11,7 @@ pub struct ScaleValue {
     pub name: &'static str,
     pub value: f32,
 }
+
 impl ScaleValue {
     pub fn new(name: &'static str, value: f32) -> Self {
         ScaleValue { name, value }
@@ -28,4 +29,32 @@ impl ScaleValue {
             ScaleValue::new("200%", 2.0),
         ]
     }
+}
+
+pub fn find_best_delta(sources: &[f64], targets: &[f64], direction: i32) -> Option<f64> {
+    let mut best_delta: Option<f64> = None;
+
+    for s in sources {
+        for t in targets {
+            let diff = t - s;
+            if (direction < 0 && diff < -0.1) || (direction > 0 && diff > 0.1) {
+                match best_delta {
+                    None => best_delta = Some(diff),
+                    Some(current) => {
+                        if diff.abs() < current.abs() {
+                            best_delta = Some(diff);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    best_delta
+}
+
+pub fn change_mode(app: &mut crate::App, mode: TUIMode) {
+    if app.mode == TUIMode::Move || app.mode == TUIMode::Scale {
+        let _ = crate::configuration::Configuration::save_monitor_state(&app.monitors);
+    }
+    app.mode = mode;
 }

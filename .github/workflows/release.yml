@@ -3,7 +3,7 @@ name: Release AppImage
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -53,6 +53,6 @@ jobs:
       - name: Create Release and Upload AppImage
         uses: softprops/action-gh-release@v2
         with:
-          files: "target/appimage/display-tui-*.AppImage" 
+          files: "target/appimage/display-tui-*.AppImage"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

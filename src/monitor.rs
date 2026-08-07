@@ -195,23 +195,13 @@ impl Monitor {
             if !monitor.enabled {
                 continue;
             }
-            let mut mode = monitor.get_current_resolution();
-            if mode.is_none() {
-                mode = monitor.get_prefered_resolution();
-            }
-
-            let rotation = Rotation::from_transform(&monitor.transform);
-            let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
-                (mode.unwrap().height, mode.unwrap().width)
-            } else {
-                (mode.unwrap().width, mode.unwrap().height)
-            };
+            let (width, height) = monitor.get_logical_dimensions();
 
             let monitor_left = monitor.position.clone().unwrap().x as f64;
-            let monitor_right = monitor_left + (width as f64 / monitor.scale.unwrap() as f64);
+            let monitor_right = monitor_left + width;
 
             let monitor_bottom = monitor.position.clone().unwrap().y as f64;
-            let monitor_top = monitor_bottom + (height as f64 / monitor.scale.unwrap() as f64);
+            let monitor_top = monitor_bottom + height;
 
             if monitor_right > right {
                 right = monitor_right;
@@ -255,6 +245,27 @@ impl Monitor {
 
     pub fn get_prefered_resolution(&self) -> Option<&Resolution> {
         self.modes.iter().find(|m| m.preferred)
+    }
+
+    pub fn get_best_resolution(&self) -> Option<&Resolution> {
+        self.get_current_resolution().or_else(|| self.get_prefered_resolution())
+    }
+
+    pub fn get_logical_dimensions(&self) -> (f64, f64) {
+        let mode = match self.get_best_resolution() {
+            Some(m) => m,
+            None => return (0.0, 0.0),
+        };
+
+        let rotation = Rotation::from_transform(&self.transform);
+        let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
+            (mode.height as f64, mode.width as f64)
+        } else {
+            (mode.width as f64, mode.height as f64)
+        };
+
+        let scale = self.scale.unwrap_or(1.0) as f64;
+        (width / scale, height / scale)
     }
 
     pub fn set_current_resolution(&mut self, index: usize) {
@@ -452,25 +463,11 @@ impl Monitor {
     }
 
     pub fn get_geometry(&self) -> (f64, f64, f64, f64) {
-        let mut mode = self.get_current_resolution();
-        if mode.is_none() {
-            mode = self.get_prefered_resolution();
-        }
-
-        if mode.is_none() {
+        let (logical_width, logical_height) = self.get_logical_dimensions();
+        if logical_width == 0.0 && logical_height == 0.0 {
             return (0.0, 0.0, 0.0, 0.0);
         }
 
-        let rotation = Rotation::from_transform(&self.transform);
-        let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {
-            (mode.unwrap().height, mode.unwrap().width)
-        } else {
-            (mode.unwrap().width, mode.unwrap().height)
-        };
-
-        let scale = self.scale.unwrap_or(1.0);
-        let logical_width = width as f64 / scale as f64;
-        let logical_height = height as f64 / scale as f64;
         let x = self.position.clone().unwrap().x as f64;
         let y = self.position.clone().unwrap().y as f64;
 

@@ -1,13 +1,12 @@
-use std::path::{Path, PathBuf};
-use std::fs;
-use serde::{Deserialize, Serialize};
 use crate::monitor::{Monitor, Position};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug,Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct Configuration {
     pub monitors_config_path: Option<String>,
     pub lua_monitor_config: Option<String>,
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,26 +16,30 @@ pub struct MonitorState {
     pub scale: Option<f32>,
     pub workspace: Option<u8>,
 }
+fn get_state_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|p| p.join(".config/display-tui/monitor_state.json"))
+        .unwrap_or_else(|| Path::new("monitor_state.json").to_path_buf())
+}
+
+fn get_config_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|p| p.join(".config/display-tui/config.json"))
+        .unwrap_or_else(|| Path::new("config.json").to_path_buf())
+}
+
 impl Configuration {
     pub fn get() -> Self {
-        let config_json_path = dirs::home_dir()
-             .map(|p| p.join(".config/display-tui/config.json"))
-             .unwrap_or_else(|| Path::new("~/.config/display-tui/config.json").to_path_buf());
+        let config_json_path = get_config_path();
         match !config_json_path.exists() {
-            true => {
-                Configuration::create_default_config(&config_json_path)
-            },
-            false => {
-                Configuration::load_config()
-            }
+            true => Configuration::create_default_config(&config_json_path),
+            false => Configuration::load_config(),
         }
     }
 
     pub fn load_monitor_state() -> Option<Vec<MonitorState>> {
-        let state_path = dirs::home_dir()
-            .map(|p| p.join(".config/display-tui/monitor_state.json"))
-            .unwrap_or_else(|| Path::new("~/.config/display-tui/monitor_state.json").to_path_buf());
-        
+        let state_path = get_state_path();
+
         if !state_path.exists() {
             return None;
         }
@@ -46,12 +49,14 @@ impl Configuration {
     }
 
     pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
-        let state_path = dirs::home_dir()
-            .map(|p| p.join(".config/display-tui/monitor_state.json"))
-            .unwrap_or_else(|| Path::new("~/.config/display-tui/monitor_state.json").to_path_buf());
-        
-        fs::create_dir_all(state_path.parent().unwrap())?;
-        
+        let state_path = get_state_path();
+
+        if let Some(parent) = state_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+
         let state: Vec<MonitorState> = monitors
             .iter()
             .map(|m| MonitorState {
@@ -61,38 +66,41 @@ impl Configuration {
                 workspace: m.workspace,
             })
             .collect();
-        
+
         let json = serde_json::to_string_pretty(&state)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         fs::write(state_path, json)?;
-        
+
         Ok(())
     }
 
     pub fn create_default_config(config_json_path: &PathBuf) -> Self {
-        fs::create_dir_all(config_json_path.parent().unwrap()).expect("Failed to create config directory");
+        if let Some(parent) = config_json_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent).expect("Failed to create config directory");
+        }
         fs::write(config_json_path, "").expect("Failed to write default config file");
         Configuration {
             monitors_config_path: None,
             lua_monitor_config: None,
-        } 
+        }
     }
 
     pub fn load_config() -> Self {
-        let config_json_path = dirs::home_dir()
-            .map(|p| p.join(".config/display-tui/config.json"))
-            .unwrap_or_else(|| Path::new("~/.config/display-tui/config.json").to_path_buf());
-        
-        let config_content = fs::read_to_string(config_json_path)
-            .expect("Failed to read config file");
-        
-        let config: Configuration = serde_json::from_str(&config_content).unwrap_or(Configuration {
-            monitors_config_path: None,
-            lua_monitor_config: None,
-        });
-        
+        let config_json_path = get_config_path();
+
+        let config_content =
+            fs::read_to_string(config_json_path).expect("Failed to read config file");
+
+        let config: Configuration =
+            serde_json::from_str(&config_content).unwrap_or(Configuration {
+                monitors_config_path: None,
+                lua_monitor_config: None,
+            });
+
         if config.monitors_config_path.is_none() && config.lua_monitor_config.is_none() {
-             return Configuration {
+            return Configuration {
                 monitors_config_path: Some("~/.config/hypr/monitors.conf".to_string()),
                 lua_monitor_config: None,
             };

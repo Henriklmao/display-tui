@@ -128,11 +128,7 @@ impl<'a> MonitorList<'a> {
 
                 let rotation = monitor.transform.clone().unwrap_or("normal".to_string());
 
-                let mut mode = monitor.get_current_resolution();
-                if mode.is_none() {
-                    mode = monitor.get_prefered_resolution();
-                }
-                let resolution = match mode {
+                let resolution = match monitor.get_best_resolution() {
                     Some(res) => format!("{}x{}", res.width, res.height),
                     None => "N/A".to_string(),
                 };

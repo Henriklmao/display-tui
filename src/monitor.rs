@@ -1,9 +1,9 @@
 use crate::rotation::Rotation;
-use serde::{Deserialize, Serialize};
-use std::process::Command;
-use std::io::Write;
 use ratatui::layout::Rect;
-#[derive(Debug,Default, Clone, Deserialize, Serialize)]
+use serde::{Deserialize, Serialize};
+use std::io::Write;
+use std::process::Command;
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 pub struct Monitor {
     pub name: String,
     pub description: Option<String>,
@@ -23,7 +23,7 @@ pub struct Monitor {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct Position{
+pub struct Position {
     pub x: i32,
     pub y: i32,
 }
@@ -38,14 +38,12 @@ pub struct Resolution {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct MonitorCanvas{
+pub struct MonitorCanvas {
     pub top: i32,
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],
     pub offset_y: i32,
 }
-
-
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,11 +78,11 @@ struct HyprWorkspace {
 }
 
 impl Monitor {
-
     pub fn get_monitors() -> Vec<Monitor> {
         let output = Command::new("hyprctl")
             .args(["monitors", "all", "-j"])
-            .output().expect("Failed to execute hyprctl command");
+            .output()
+            .expect("Failed to execute hyprctl command");
         let stdout = String::from_utf8(output.stdout).expect("Failed to convert output to string");
         Self::parse_hyprctl_output(&stdout)
     }
@@ -115,7 +113,9 @@ impl Monitor {
                     }
                 }
 
-                let current = width == hm.width && height == hm.height && (refresh - hm.refresh_rate).abs() < 0.1;
+                let current = width == hm.width
+                    && height == hm.height
+                    && (refresh - hm.refresh_rate).abs() < 0.1;
                 if current {
                     found_current = true;
                 }
@@ -128,7 +128,7 @@ impl Monitor {
                     current,
                 });
             }
-            
+
             if !found_current && !modes.is_empty() && !hm.disabled {
                 modes[0].current = true;
             }
@@ -138,16 +138,33 @@ impl Monitor {
                 2 | 6 => "180",
                 3 | 7 => "270",
                 _ => "normal",
-            }.to_string();
+            }
+            .to_string();
 
-            let workspace = hm.active_workspace.and_then(|w| {
-                if w.id > 0 { Some(w.id as u8) } else { None }
-            });
+            let workspace = hm
+                .active_workspace
+                .and_then(|w| if w.id > 0 { Some(w.id as u8) } else { None });
 
-            let make_opt = if hm.make.is_empty() { None } else { Some(hm.make) };
-            let model_opt = if hm.model.is_empty() { None } else { Some(hm.model) };
-            let serial_opt = if hm.serial.is_empty() { None } else { Some(hm.serial) };
-            let desc_opt = if hm.description.is_empty() { None } else { Some(hm.description) };
+            let make_opt = if hm.make.is_empty() {
+                None
+            } else {
+                Some(hm.make)
+            };
+            let model_opt = if hm.model.is_empty() {
+                None
+            } else {
+                Some(hm.model)
+            };
+            let serial_opt = if hm.serial.is_empty() {
+                None
+            } else {
+                Some(hm.serial)
+            };
+            let desc_opt = if hm.description.is_empty() {
+                None
+            } else {
+                Some(hm.description)
+            };
 
             new_monitors.push(Monitor {
                 name: hm.name,
@@ -191,25 +208,24 @@ impl Monitor {
             };
 
             let monitor_left = monitor.position.clone().unwrap().x as f64;
-            let monitor_right = monitor_left  + (width as f64 / monitor.scale.unwrap() as f64);
+            let monitor_right = monitor_left + (width as f64 / monitor.scale.unwrap() as f64);
 
             let monitor_bottom = monitor.position.clone().unwrap().y as f64;
             let monitor_top = monitor_bottom + (height as f64 / monitor.scale.unwrap() as f64);
-            
+
             if monitor_right > right {
-                right= monitor_right;
+                right = monitor_right;
             }
             if monitor_top > top {
-                top= monitor_top;
+                top = monitor_top;
             }
             if monitor_left < left {
-                left= monitor_left;
+                left = monitor_left;
             }
             if monitor_bottom < bottom {
-                bottom= monitor_bottom;
+                bottom = monitor_bottom;
             }
         }
-
 
         let margin = 50.0;
         left -= margin;
@@ -222,30 +238,25 @@ impl Monitor {
 
         let mut offset_y = 0.0;
         if bottom < 0.0 {
-             offset_y = -bottom;
+            offset_y = -bottom;
         }
-       
+
         MonitorCanvas {
             top: top as i32,
             x_bounds,
             y_bounds,
             offset_y: offset_y as i32,
         }
-
     }
 
     pub fn get_current_resolution(&self) -> Option<&Resolution> {
-        self.modes
-            .iter()
-            .find(|m| m.current)
+        self.modes.iter().find(|m| m.current)
     }
 
     pub fn get_prefered_resolution(&self) -> Option<&Resolution> {
-        self.modes
-            .iter()
-            .find(|m| m.preferred)
+        self.modes.iter().find(|m| m.preferred)
     }
-    
+
     pub fn set_current_resolution(&mut self, index: usize) {
         if index < self.modes.len() {
             for mode in &mut self.modes {
@@ -260,37 +271,41 @@ impl Monitor {
     pub fn to_hyprland_config(&self) -> String {
         let mode = match self.get_current_resolution() {
             Some(m) => m,
-            None => {
-                self.get_prefered_resolution().expect("No preferred resolution found")
-            }
+            None => self
+                .get_prefered_resolution()
+                .expect("No preferred resolution found"),
         };
         if self.enabled {
             let rotation = Rotation::from_transform(&self.transform);
             format!(
                 "monitor = {}, {}x{}@{}, {}x{}, {}, {}",
                 self.name,
-                mode.width, mode.height, mode.refresh,
-                self.position.clone().unwrap().x, self.position.clone().unwrap().y,
+                mode.width,
+                mode.height,
+                mode.refresh,
+                self.position.clone().unwrap().x,
+                self.position.clone().unwrap().y,
                 self.scale.unwrap_or(1.0),
                 rotation.to_hyprland()
             )
         } else {
-            format!(
-                "monitor = {}, disabled",
-                self.name
-            )
+            format!("monitor = {}, disabled", self.name)
         }
-        
     }
 
     pub fn to_hyprland_lua_config(&self) -> String {
         if !self.enabled {
-            return format!("hl.monitor({{\n  output = \"{}\",\n  disabled = true\n}})", self.name);
+            return format!(
+                "hl.monitor({{\n  output = \"{}\",\n  disabled = true\n}})",
+                self.name
+            );
         }
 
         let mode = match self.get_current_resolution() {
             Some(m) => m,
-            None => self.get_prefered_resolution().expect("No preferred resolution found"),
+            None => self
+                .get_prefered_resolution()
+                .expect("No preferred resolution found"),
         };
 
         let rotation = Rotation::from_transform(&self.transform);
@@ -301,8 +316,11 @@ impl Monitor {
         format!(
             "hl.monitor({{\n  output = \"{}\",\n  mode = \"{}x{}@{}\",\n  position = \"{}x{}\",\n  scale = {},\n  transform = {}\n}})",
             self.name,
-            mode.width, mode.height, mode.refresh,
-            pos_x, pos_y,
+            mode.width,
+            mode.height,
+            mode.refresh,
+            pos_x,
+            pos_y,
             scale,
             rotation.to_hyprland_lua()
         )
@@ -310,65 +328,80 @@ impl Monitor {
 
     pub fn to_hyprland_lua_workspace_rule(&self) -> Option<String> {
         self.workspace.map(|ws| {
-            format!("hl.workspace_rule({{ workspace = \"{}\", monitor = \"{}\", default = true }})", ws, self.name)
+            format!(
+                "hl.workspace_rule({{ workspace = \"{}\", monitor = \"{}\", default = true }})",
+                ws, self.name
+            )
         })
     }
 
-    pub fn save_hyprland_config(path: &String, monitors: &Vec<Monitor>) -> std::io::Result<()> {
-        let hyprland_lua_path = shellexpand::tilde("~/.config/hypr/hyprland.lua").to_string();
-        
-        if std::path::Path::new(&hyprland_lua_path).exists() {
-            // Use Lua formatting
-            let content = std::fs::read_to_string(&hyprland_lua_path)?;
-            let mut monitors_module = None;
-            
-            for line in content.lines() {
-                if line.contains("require") && line.contains("monitor") {
-                    let parts: Vec<&str> = line.split('"').collect();
-                    if parts.len() >= 3 {
-                        monitors_module = Some(parts[1].to_string());
-                    } else {
-                        let parts: Vec<&str> = line.split('\'').collect();
-                        if parts.len() >= 3 {
-                            monitors_module = Some(parts[1].to_string());
-                        }
+    pub fn save_hyprland_config(
+        path: &str,
+        monitors: &Vec<Monitor>,
+        lua_monitor_config: Option<&str>,
+    ) -> std::io::Result<()> {
+        let use_lua = if let Some(_lua_path) = lua_monitor_config {
+            true
+        } else {
+            let hyprland_lua_path = shellexpand::tilde("~/.config/hypr/hyprland.lua").to_string();
+            std::path::Path::new(&hyprland_lua_path).exists()
+        };
+
+        if use_lua {
+            let hyprland_lua_path = shellexpand::tilde("~/.config/hypr/hyprland.lua").to_string();
+            let lua_config_path = lua_monitor_config
+                .map(|s| shellexpand::tilde(s).to_string())
+                .unwrap_or_else(|| {
+                    // Use Lua formatting, find or require monitors module from hyprland.lua
+                    let mut monitors_module = None;
+                    if let Ok(content) = std::fs::read_to_string(&hyprland_lua_path)
+                        && let Some(module) = content
+                            .lines()
+                            .filter(|l| l.contains("require") && l.contains("monitor"))
+                            .find_map(|l| l.split(['"', '\'']).nth(1))
+                    {
+                        monitors_module = Some(module.to_string());
                     }
-                }
-            }
-            
-            let module_name = monitors_module.unwrap_or_else(|| {
-                let mut file = std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&hyprland_lua_path)
-                    .unwrap();
-                let _ = writeln!(file, "\nrequire(\"lua.monitors\")");
-                "lua.monitors".to_string()
-            });
-            
-            let relative_path = if module_name == "hypr.monitors" {
-                "monitors.lua".to_string()
-            } else {
-                module_name.replace(".", "/") + ".lua"
-            };
-            let hypr_dir = shellexpand::tilde("~/.config/hypr/").to_string();
-            let final_path = std::path::Path::new(&hypr_dir).join(relative_path);
-            
-            if let Some(parent) = final_path.parent() {
+
+                    let module_name = monitors_module.unwrap_or_else(|| {
+                        if std::path::Path::new(&hyprland_lua_path).exists() {
+                            let mut file = std::fs::OpenOptions::new()
+                                .append(true)
+                                .open(&hyprland_lua_path)
+                                .unwrap();
+                            let _ = writeln!(file, "\nrequire(\"lua.monitors\")");
+                        }
+                        "lua.monitors".to_string()
+                    });
+
+                    let relative_path = if module_name == "hypr.monitors" {
+                        "monitors.lua".to_string()
+                    } else {
+                        module_name.replace(".", "/") + ".lua"
+                    };
+                    let hypr_dir = shellexpand::tilde("~/.config/hypr/").to_string();
+                    std::path::Path::new(&hypr_dir)
+                        .join(relative_path)
+                        .to_string_lossy()
+                        .into_owned()
+                });
+
+            if let Some(parent) = std::path::Path::new(&lua_config_path).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            
+
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .truncate(true)
                 .create(true)
-                .open(final_path)?;
-                
+                .open(&lua_config_path)?;
+
             writeln!(file, "-- Monitors generated by display-tui")?;
             for monitor in monitors {
                 let config_line = monitor.to_hyprland_lua_config();
                 writeln!(file, "{}", config_line)?;
             }
-            
+
             let mut has_workspaces = false;
             for monitor in monitors {
                 if let Some(rule) = monitor.to_hyprland_lua_workspace_rule() {
@@ -391,7 +424,7 @@ impl Monitor {
                 let config_line = monitor.to_hyprland_config();
                 writeln!(file, "{}", config_line)?;
             }
-            
+
             let mut has_workspaces = false;
             for monitor in monitors {
                 if monitor.workspace.is_some() {
@@ -399,7 +432,12 @@ impl Monitor {
                         writeln!(file, "\n# Workspace assignments")?;
                         has_workspaces = true;
                     }
-                    writeln!(file, "workspace = {}, monitor:{}", monitor.workspace.unwrap(), monitor.name)?;
+                    writeln!(
+                        file,
+                        "workspace = {}, monitor:{}",
+                        monitor.workspace.unwrap(),
+                        monitor.name
+                    )?;
                 }
             }
         }
@@ -407,11 +445,15 @@ impl Monitor {
     }
 
     pub fn move_vertical(&mut self, direction: i32) {
-        if let Some(ref mut pos) = self.position { pos.y += direction};
+        if let Some(ref mut pos) = self.position {
+            pos.y += direction
+        };
     }
 
     pub fn move_horizontal(&mut self, direction: i32) {
-        if let Some(ref mut pos) = self.position { pos.x += direction};
+        if let Some(ref mut pos) = self.position {
+            pos.x += direction
+        };
     }
 
     pub fn get_geometry(&self) -> (f64, f64, f64, f64) {
@@ -419,8 +461,10 @@ impl Monitor {
         if mode.is_none() {
             mode = self.get_prefered_resolution();
         }
-        
-        if mode.is_none() { return (0.0,0.0,0.0,0.0); }
+
+        if mode.is_none() {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
 
         let rotation = Rotation::from_transform(&self.transform);
         let (width, height) = if rotation == Rotation::Deg90 || rotation == Rotation::Deg270 {

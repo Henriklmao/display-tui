@@ -102,7 +102,13 @@ Display TUI automatically detects your Hyprland configuration format.
 
 ### Hyprland lua 0.55+
 
-If `~/.config/hypr/hyprland.lua` exists, Display TUI will automatically detect your monitor config it, and writes to it. If it doesn't detect any monitor config it will write into `~/.config/hypr/lua/monitors.lua`), and automatically add the necessary `require("...")` statement to your `hyprland.lua` file. No manual setup is needed!
+If `~/.config/hypr/hyprland.lua` exists, Display TUI will automatically detect your monitor config it, and writes to it. If it doesn't detect any monitor config it will write into `~/.config/hypr/lua/monitors.lua`), and automatically add the necessary `require("...")` statement to your `hyprland.lua` file.
+You can also specify a custom location like this:
+
+```bash
+mkdir -p ~/.config/display-tui
+echo '{"lua_monitor_config": "~/.config/hypr/LaptopMonitor.lua"}' > ~/.config/display-tui/config.json
+```
 
 ### Hyprlang (old .conf style)
 

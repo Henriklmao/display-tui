@@ -2,10 +2,10 @@ use crossterm::event::{KeyCode,KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style,Stylize,Color},
+    style::{Color, Style, Stylize},
     symbols::border,
     text::Line,
-    widgets::{Block,StatefulWidget,Row,Table,Cell,TableState},
+    widgets::{Block, Cell, Row, StatefulWidget, Table, TableState},
 };
 
 use ratatui::layout::Constraint;
@@ -67,52 +67,25 @@ impl<'a> Resolutions<'a> {
     }
 
     fn resolutions_to_rows(&self) -> Vec<Row<'static>> {
-        self.monitor.modes.clone()
-            .into_iter()
+        self.monitor.modes
+            .iter()
             .map(|mode| {
                 Row::new(vec![
-                    Cell::default().content(
-                        Line::from(
-                            if mode.current{
-                                "".green().to_string()
-                            } else {
-                                "".red().to_string()
-                            }
-                        )
-                        .centered()
-                    )
+                    Cell::from(if mode.current { "" } else { "" })
                     .style(
                         Style::default().fg(
                             if mode.current {Color::Green} else {Color::Red}
                         )
                     ),
-                    Cell::default().content(
-                        Line::from(
-                            format!("{}x{}",mode.width, mode.height)
-                        )
-                        .centered()
-                    ),
-                    Cell::default().content(
-                        Line::from(
-                            mode.refresh.to_string()
-                        )
-                        .centered()
-                    ),
-                    Cell::default().content(
-                        Line::from(
-                            if mode.preferred {
-                                "".green().to_string()
-                            } else {
-                                "".red().to_string()
-                            }
-                        )
-                        .centered()
-                    )
+                    Cell::from(format!("{}x{}", mode.width, mode.height)),
+                    Cell::from(mode.refresh.to_string()),
+                    Cell::from(if mode.preferred { "" } else { "" })
                     .style(
                         Style::default().fg(
                             if mode.preferred {Color::Green} else {Color::Red}
-                    )
-                )])
+                        )
+                    ),
+                ])
             })
             .collect()
     }
@@ -138,22 +111,10 @@ impl<'a> Resolutions<'a> {
             //.style(Style::new().blue())
             .header(
                 Row::new(vec![
-                    Cell::from(
-                        Line::from("current")
-                            .centered()
-                    ),
-                    Cell::from(
-                        Line::from("resolution")
-                            .centered()
-                    ),
-                    Cell::from(
-                        Line::from("refresh")
-                            .centered()
-                    ), 
-                    Cell::from(
-                        Line::from("preferred")
-                            .centered()
-                    ), 
+                    Cell::from("current"),
+                    Cell::from("resolution"),
+                    Cell::from("refresh"),
+                    Cell::from("preferred"),
                 ])
                     .style(Style::new().bold())
                     .bottom_margin(1)
@@ -196,10 +157,10 @@ mod tests {
 
         let mut expected = Buffer::with_lines(vec![
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━ Resolutions ━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-            "┃    current       resolution        refresh        preferred   ┃",
+            "┃current         resolution      refresh         preferred      ┃",
             "┃                                                               ┃",
-            "┃                  1920x1080          60                      ┃",
-            "┃                  1280x720           60                      ┃",
+            "┃               1920x1080       60                            ┃",
+            "┃               1280x720        60                            ┃",
             "┃                                                               ┃",
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
         ]);

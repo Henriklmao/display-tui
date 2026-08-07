@@ -2,10 +2,10 @@ use crossterm::event::{KeyCode,KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Style,Stylize,Color},
+    style::{Color, Style, Stylize},
     symbols::border,
     text::Line,
-    widgets::{Block,StatefulWidget,Row,Table,Cell,TableState},
+    widgets::{Block, Cell, Row, StatefulWidget, Table, TableState},
 };
 
 use ratatui::layout::Constraint;
@@ -75,13 +75,10 @@ impl Scale{
     fn scale_to_rows(&self) -> Vec<Row<'static>> {
         
         ScaleValue::table()
-            .into_iter()
+            .iter()
             .map(|scale| {
                 Row::new(vec![
-                    Cell::default().content(
-                        Line::from(scale.name)
-                            .centered()
-                    ),
+                    Cell::from(scale.name),
                 ])
             })
             .collect()
@@ -134,15 +131,15 @@ mod tests {
 
         let mut expected = Buffer::with_lines(vec![
             "┏━━━━━ Scale ━━━━━━┓",
-            "┃       50%        ┃",
-            "┃       66%        ┃",
-            "┃       75%        ┃",
-            "┃       80%        ┃",
-            "┃       100%       ┃",
-            "┃       125%       ┃",
-            "┃       160%       ┃",
-            "┃       175%       ┃",
-            "┃       200%       ┃",
+            "┃50%               ┃",
+            "┃66%               ┃",
+            "┃75%               ┃",
+            "┃80%               ┃",
+            "┃100%              ┃",
+            "┃125%              ┃",
+            "┃160%              ┃",
+            "┃175%              ┃",
+            "┃200%              ┃",
             "┗━━━━━━━━━━━━━━━━━━┛",
         ]);
 
@@ -168,4 +165,3 @@ mod tests {
         assert_eq!(buf, expected);
     }
 }
-

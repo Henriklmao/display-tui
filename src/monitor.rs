@@ -427,17 +427,12 @@ impl Monitor {
 
             let mut has_workspaces = false;
             for monitor in monitors {
-                if monitor.workspace.is_some() {
+                if let Some(ws) = monitor.workspace {
                     if !has_workspaces {
                         writeln!(file, "\n# Workspace assignments")?;
                         has_workspaces = true;
                     }
-                    writeln!(
-                        file,
-                        "workspace = {}, monitor:{}",
-                        monitor.workspace.unwrap(),
-                        monitor.name
-                    )?;
+                    writeln!(file, "workspace = {}, monitor:{}", ws, monitor.name)?;
                 }
             }
         }
@@ -446,8 +441,8 @@ impl Monitor {
 
     pub fn move_vertical(&mut self, direction: i32) {
         if let Some(ref mut pos) = self.position {
-            pos.y += direction
-        };
+            pos.y += direction;
+        }
     }
 
     pub fn move_horizontal(&mut self, direction: i32) {
@@ -520,6 +515,6 @@ mod tests {
         assert_eq!(m.modes[0].refresh, 60.0);
         assert_eq!(m.transform.as_deref(), Some("normal"));
         assert_eq!(m.workspace, Some(5));
-        assert_eq!(m.enabled, true);
+        assert!(m.enabled);
     }
 }

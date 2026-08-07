@@ -45,7 +45,7 @@ impl Configuration {
         serde_json::from_str(&content).ok()
     }
 
-    pub fn save_monitor_state(monitors: &Vec<Monitor>) -> std::io::Result<()> {
+    pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
         let state_path = dirs::home_dir()
             .map(|p| p.join(".config/display-tui/monitor_state.json"))
             .unwrap_or_else(|| Path::new("~/.config/display-tui/monitor_state.json").to_path_buf());

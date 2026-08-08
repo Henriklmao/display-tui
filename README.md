@@ -8,6 +8,10 @@ Thanks for your work, you are the biggest contributor to this project!
 > [!NOTE]  
 > Supports and will always support old hyprlang (.conf) style and new hyprland 0.55+ lua style.
 
+## Preview
+
+![Preview of Display TUI](/assets/preview.png)
+
 ## Features
 
 - enable/disable display
@@ -19,10 +23,6 @@ Thanks for your work, you are the biggest contributor to this project!
 - save validation with detailed warning (overridable)
 - quick-access help modal (press `shift + K` in View mode)
 - responsive mini-mode for small terminal windows
-
-## Preview
-
-![Preview of Display TUI](/assets/preview.png)
 
 ## Requirements
 

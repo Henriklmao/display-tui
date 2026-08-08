@@ -33,6 +33,12 @@ impl HelpModal {
             Line::from(""),
             Line::from(" --- Res / Scale Mode --- ".bold().yellow()),
             Line::from("Select <Space/Enter> | Quit <Esc> | Up/Down <k/j>"),
+            Line::from(""),
+            Line::from(" --- Tip --- ".bold().yellow()),
+            Line::from(
+                "Arrow keys can be used as alternative to h/j/k/l for navigation in all modes."
+                    .light_blue(),
+            ),
         ];
 
         let p = Paragraph::new(text)

@@ -198,7 +198,6 @@ impl<'a> MonitorList<'a> {
         }
 
         let is_mini_mode = area.width < 115;
-
         if is_mini_mode {
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
@@ -207,13 +206,12 @@ impl<'a> MonitorList<'a> {
             instructions_items.push(" Keybinds ".white());
             instructions_items.push("<K> ".blue().bold());
         } else {
+            // nerdfont symbols:      (nf-oct-arrow_...)
             match self.mode {
                 TUIMode::View => {
                     let selected_monitor = &self.monitors[self.selected_row.unwrap_or(0)];
-                    instructions_items.push(" Up ".white());
-                    instructions_items.push("<k> ".blue().bold());
-                    instructions_items.push(" Down ".white());
-                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Scroll  ".white());
+                    instructions_items.push("<k/j> ".blue().bold());
                     instructions_items.push(" Move ".white());
                     instructions_items.push("<m> ".blue().bold());
                     instructions_items.push(" Resolution ".white());
@@ -234,39 +232,23 @@ impl<'a> MonitorList<'a> {
                 }
 
                 TUIMode::Resolution => {
-                    instructions_items.push(" Up ".white());
-                    instructions_items.push("<k> ".blue().bold());
-                    instructions_items.push(" Down ".white());
-                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Scroll  ".white());
+                    instructions_items.push("<k/j> ".blue().bold());
                     instructions_items.push(" Select ".white());
                     instructions_items.push("<Space> ".blue().bold());
-                    instructions_items.push(" Quit Resolution Mode ".white());
-                    instructions_items.push("<Esc> ".blue().bold());
                 }
 
                 TUIMode::Move => {
-                    instructions_items.push(" Fast ".white());
-                    instructions_items.push("<MAJ>+<*> ".blue().bold());
-                    instructions_items.push(" Up ".white());
-                    instructions_items.push("<k> ".blue().bold());
-                    instructions_items.push(" Down ".white());
-                    instructions_items.push("<j> ".blue().bold());
-                    instructions_items.push(" Left ".white());
-                    instructions_items.push("<h> ".blue().bold());
-                    instructions_items.push(" Right ".white());
-                    instructions_items.push("<l> ".blue().bold());
-                    instructions_items.push(" Quit Move Mode ".white());
-                    instructions_items.push("<Esc> ".blue().bold());
+                    instructions_items.push(" Fastmove ".white());
+                    instructions_items.push("<H/J/K/L ".blue().bold());
+                    instructions_items.push(" Snapmove ".white());
+                    instructions_items.push("<h/j/k/l> ".blue().bold());
                 }
                 TUIMode::Scale => {
-                    instructions_items.push(" Up ".white());
-                    instructions_items.push("<k> ".blue().bold());
-                    instructions_items.push(" Down ".white());
-                    instructions_items.push("<j> ".blue().bold());
+                    instructions_items.push(" Scroll  ".white());
+                    instructions_items.push("<k/j> ".blue().bold());
                     instructions_items.push(" Select ".white());
                     instructions_items.push("<Space> ".blue().bold());
-                    instructions_items.push(" Quit Scale Mode ".white());
-                    instructions_items.push("<Esc> ".blue().bold());
                 }
             }
 
@@ -274,6 +256,11 @@ impl<'a> MonitorList<'a> {
             instructions_items.push("<w> ".blue().bold());
             instructions_items.push(" Quit ".white());
             instructions_items.push("<q> ".blue().bold());
+            // Show Apply in sub modes
+            if self.mode != TUIMode::View {
+                instructions_items.push(" Apply ".white());
+                instructions_items.push("<Enter> ".blue().bold());
+            }
             // Don't show help in sub modes
             if self.mode == TUIMode::View {
                 instructions_items.push(" Help ".white());

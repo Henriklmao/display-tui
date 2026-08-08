@@ -17,7 +17,7 @@ Thanks for your work, you are the biggest contributor to this project!
 - set display rotation
 - set workspace assignments
 - save validation with detailed warning (overridable)
-- quick-access global help modal (press `shift + K`)
+- quick-access help modal (press `shift + K` in View mode)
 - responsive mini-mode for small terminal windows
 
 ## Preview
@@ -48,11 +48,11 @@ You can navigate through the list of displays using the arrow keys or `j`/`k`.
 - `o`: Cycle rotation
 - `1-9`: Assign workspace to the selected display (`0` to clear)
 - `e`/`d`: Enable/Disable display
-- `K`: Open the global keybindings help modal
+- `K`: Open the keybindings help modal (View/Normal mode only)
 - `w`: Save the configuration to your hyprland config
 - `q`: Quit the application
 
-When saving, the app will automatically validate your layout. If any displays are separated too far or if there are duplicate workspace assignments, a warning modal will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
+When saving, the app will automatically validate your layout. If any displays are separated too far, have overlapping regions, or if there are duplicate workspace assignments, a warning pop-up will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
 
 ## Installation
 
@@ -69,6 +69,9 @@ AUR installation is fully automatic and adds `display-tui` as a .desktop shortcu
 ### AppImage (Universal / All Distributions)
 
 You can download the latest AppImage from the [Releases](https://github.com/Henriklmao/display-tui/releases) page. The AppImage is built automatically and includes everything needed to run `display-tui` on any Linux distribution.
+
+> [!NOTE]  
+> The additional package `fuse3` is required to run AppImages on some distributions.
 
 1. Download the `.AppImage` file from the latest release.
 2. Make it executable:

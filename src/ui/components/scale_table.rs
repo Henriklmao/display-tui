@@ -1,3 +1,5 @@
+//! Scale selection table component.
+
 use crossterm::event::{KeyCode,KeyEvent};
 use ratatui::{
     buffer::Buffer,
@@ -12,7 +14,7 @@ use ratatui::layout::Constraint;
 use crate::utils::ScaleValue;
 use crate::utils::TUIMode;
 use crate::App;
-use crate::configuration::Configuration;
+use crate::config::save_monitor_state;
 
 #[derive(Debug)]
 pub struct Scale{
@@ -44,7 +46,7 @@ impl Scale{
     fn change_mode(app:&mut App,mode: TUIMode) {
         // Save monitor state when exiting Scale mode
         if app.mode == TUIMode::Scale {
-            let _ = Configuration::save_monitor_state(&app.monitors);
+            let _ = save_monitor_state(&app.monitors);
         }
         app.mode = mode;
     }

@@ -1,3 +1,7 @@
+//! Monitor list component.
+//!
+//! Displays a list of monitors with their properties.
+
 use crate::monitor::{Monitor, Position};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -270,8 +274,11 @@ impl<'a> MonitorList<'a> {
             instructions_items.push("<w> ".blue().bold());
             instructions_items.push(" Quit ".white());
             instructions_items.push("<q> ".blue().bold());
-            instructions_items.push(" Help ".white());
-            instructions_items.push("<K> ".blue().bold());
+            // Don't show help in sub modes
+            if self.mode == TUIMode::View {
+                instructions_items.push(" Help ".white());
+                instructions_items.push("<K> ".blue().bold());
+            }
         }
 
         let instructions = Line::from(instructions_items);

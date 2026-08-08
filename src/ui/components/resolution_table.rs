@@ -1,3 +1,5 @@
+//! Resolution selection table component.
+
 use crossterm::event::{KeyCode,KeyEvent};
 use ratatui::{
     buffer::Buffer,

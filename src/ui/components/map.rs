@@ -1,3 +1,7 @@
+//! Monitor map canvas component.
+//!
+//! Displays a visual representation of monitor layout.
+
 use crossterm::event::{KeyCode,KeyEvent,KeyModifiers};
 use ratatui::{
     buffer::Buffer,

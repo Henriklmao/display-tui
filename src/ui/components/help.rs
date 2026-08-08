@@ -16,6 +16,12 @@ impl HelpModal {
     pub fn render(area: Rect, buf: &mut Buffer) {
         let popup_area = centered_rect(60, 60, area);
         let text = vec![
+            Line::from(
+                format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))
+                    .bold()
+                    .blue(),
+            ),
+            Line::from(""),
             Line::from(" --- Global --- ".bold().yellow()),
             Line::from("Save <w> | Quit <q>"),
             Line::from(""),
@@ -45,7 +51,7 @@ impl HelpModal {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Keybindings ".bold().white())
+                    .title(" Keybindings/Help ".bold().white())
                     .border_style(Style::default().fg(Color::Cyan)),
             )
             .alignment(Alignment::Center);

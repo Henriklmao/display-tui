@@ -108,64 +108,55 @@ impl App {
             let event = preset_menu.handle_event(key_event.code);
             match event {
                 crate::ui::components::MenuEvent::Action(action) => {
-                    match action {
-                        crate::ui::components::PresetAction::Create(name) => {
-                            match self.create_preset(&name) {
-                                Ok(()) => {
-                                    self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets()));
-                                }
-                                Err(err_text) => {
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.set_error(err_text);
+                    // Drop the borrow by extracting what we need, then act
+                    let action_to_take = Some(action);
+                    drop(preset_menu);
+
+                    if let Some(action) = action_to_take {
+                        match action {
+                            crate::ui::components::PresetAction::Create(name) => {
+                                let result = self.create_preset(&name);
+                                if let Some(menu) = self.show_preset_menu.as_mut() {
+                                    match result {
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets()),
+                                        Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
                             }
-                        }
-                        crate::ui::components::PresetAction::Delete(name) => {
-                            match self.delete_preset(&name) {
-                                Ok(()) => {
-                                    self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets()));
-                                }
-                                Err(err_text) => {
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.set_error(err_text);
+                            crate::ui::components::PresetAction::Delete(name) => {
+                                let result = self.delete_preset(&name);
+                                if let Some(menu) = self.show_preset_menu.as_mut() {
+                                    match result {
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets()),
+                                        Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
                             }
-                        }
-                        crate::ui::components::PresetAction::Rename(old, new) => {
-                            match self.rename_preset(&old, &new) {
-                                Ok(()) => {
-                                    self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets()));
-                                }
-                                Err(err_text) => {
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.set_error(err_text);
+                            crate::ui::components::PresetAction::Rename(old, new) => {
+                                let result = self.rename_preset(&old, &new);
+                                if let Some(menu) = self.show_preset_menu.as_mut() {
+                                    match result {
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets()),
+                                        Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
                             }
-                        }
-                        crate::ui::components::PresetAction::Apply(name) => {
-                            match crate::config::apply_preset(&name, &mut self.monitors) {
-                                Ok(()) => self.show_preset_menu = None,
-                                Err(err_text) => {
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.set_error(err_text);
+                            crate::ui::components::PresetAction::Apply(name) => {
+                                match crate::config::apply_preset(&name, &mut self.monitors) {
+                                    Ok(()) => self.show_preset_menu = None,
+                                    Err(err_text) => {
+                                        if let Some(menu) = self.show_preset_menu.as_mut() {
+                                            menu.set_error(err_text);
+                                        }
                                     }
                                 }
                             }
-                        }
-                        crate::ui::components::PresetAction::Override(name) => {
-                            match crate::config::override_preset(&name, &mut self.monitors) {
-                                Ok(()) => {
-                                    // Keep menu open and refresh preset list
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.presets = crate::config::list_presets();
-                                    }
-                                }
-                                Err(err_text) => {
-                                    if let Some(menu) = self.show_preset_menu.as_mut() {
-                                        menu.set_error(err_text);
+                            crate::ui::components::PresetAction::Override(name) => {
+                                let result = crate::config::override_preset(&name, &mut self.monitors);
+                                if let Some(menu) = self.show_preset_menu.as_mut() {
+                                    match result {
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets()),
+                                        Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
                             }

@@ -41,6 +41,7 @@ impl App {
         if let Some(saved_states) = load_monitor_state() {
             for monitor in &mut self.monitors {
                 if let Some(saved_state) = saved_states.iter().find(|s| s.name == monitor.name) {
+                    monitor.enabled = saved_state.enabled;
                     if let Some(pos) = &saved_state.position {
                         monitor.position = Some(pos.clone());
                     }

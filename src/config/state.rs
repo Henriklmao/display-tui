@@ -127,6 +127,12 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
     }
 }
 
+// Override current configuration with a preset (merge preset settings on top of current config).
+// Currently behaves the same as apply_preset, but reserved for future merge behavior.
+pub fn override_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> {
+    apply_preset(name, monitors)
+}
+
 // List all preset names in the presets directory.
 pub fn list_presets() -> Vec<String> {
     let dir = get_presets_dir();

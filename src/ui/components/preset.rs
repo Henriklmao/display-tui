@@ -15,6 +15,7 @@ pub enum PresetAction {
     Delete(String),
     Rename(String, String), // (old_name, new_name)
     Apply(String),
+    Override(String),
 }
 
 // Result of handling a key event in the preset menu.
@@ -98,6 +99,12 @@ impl PresetMenu {
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     if let Some(preset) = self.presets.get(self.selected_index).cloned() {
                         return MenuEvent::Action(PresetAction::Apply(preset));
+                    }
+                    MenuEvent::Handled
+                }
+                KeyCode::Char('o') => {
+                    if let Some(preset) = self.presets.get(self.selected_index).cloned() {
+                        return MenuEvent::Action(PresetAction::Override(preset));
                     }
                     MenuEvent::Handled
                 }
@@ -193,7 +200,7 @@ impl PresetMenu {
                 }
                 lines.push(Line::from(""));
                 lines.push(Line::from(
-                    "[Enter/Space] Apply  [n] New  [d] Delete  [r] Rename  [Esc] Close".dim(),
+                    "[Enter/Space] Apply  [o] Override  [n] New  [d] Delete  [r] Rename  [Esc] Close".dim(),
                 ));
                 lines
             }

@@ -78,7 +78,7 @@ impl PresetMenu {
                 },
                 KeyCode::Char('r') => match self.presets.get(self.selected_index).cloned() {
                     Some(preset) => {
-                        self.state = MenuState::RenameName(preset, String::new());
+                        self.state = MenuState::RenameName(preset.clone(), preset.clone());
                         MenuEvent::Handled
                     }
                     None => MenuEvent::Handled,
@@ -180,11 +180,15 @@ impl PresetMenu {
         let mut text: Vec<Line> = match &self.state {
             MenuState::List => {
                 let mut lines = vec![Line::from("")];
-                for (i, name) in self.presets.iter().enumerate() {
-                    if i == self.selected_index {
-                        lines.push(Line::from(format!(" > {} ", name).cyan()));
-                    } else {
-                        lines.push(Line::from(format!("   {} ", name)));
+                if self.presets.is_empty() {
+                    lines.push(Line::from("No presets found").dim());
+                } else {
+                    for (i, name) in self.presets.iter().enumerate() {
+                        if i == self.selected_index {
+                            lines.push(Line::from(format!(" > {} ", name).cyan()));
+                        } else {
+                            lines.push(Line::from(format!("   {} ", name)));
+                        }
                     }
                 }
                 lines.push(Line::from(""));

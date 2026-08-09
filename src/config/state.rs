@@ -133,6 +133,13 @@ pub fn override_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), Strin
     apply_preset(name, monitors)
 }
 
+// Count the number of enabled monitors in a preset.
+pub fn count_enabled_monitors_in_preset(name: &str) -> Option<usize> {
+    let state = load_preset(name)?;
+    // Count monitors that have a position set (indicating they're enabled in the preset)
+    Some(state.iter().filter(|m| m.position.is_some()).count())
+}
+
 // List all preset names in the presets directory.
 pub fn list_presets() -> Vec<String> {
     let dir = get_presets_dir();

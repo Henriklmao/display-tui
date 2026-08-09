@@ -14,5 +14,5 @@ pub use resolution_table::Resolutions;
 pub use scale_table::Scale;
 pub use popup::Popup;
 pub use help::HelpModal;
-pub use preset::{PresetMenu, PresetAction, MenuEvent};
+pub use preset::{PresetMenu, PresetAction, MenuEvent, PresetEntry};
 

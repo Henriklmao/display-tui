@@ -19,21 +19,39 @@ pub enum ValidationError {
     NonContiguousMonitors {
         disconnected: Vec<String>,
     },
+    // A preset name is invalid.
+    InvalidName,
 }
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ValidationError::DuplicateWorkspace { workspace, monitors } => {
-                write!(f, "Workspace {} is assigned to multiple monitors: {}",
-                    workspace, monitors.join(", "))
+            ValidationError::DuplicateWorkspace {
+                workspace,
+                monitors,
+            } => {
+                write!(
+                    f,
+                    "Workspace {} is assigned to multiple monitors: {}",
+                    workspace,
+                    monitors.join(", ")
+                )
             }
             ValidationError::OverlappingMonitors { monitor1, monitor2 } => {
                 write!(f, "Monitors overlap: {} and {}", monitor1, monitor2)
             }
             ValidationError::NonContiguousMonitors { disconnected } => {
-                write!(f, "Monitors not contiguous. Disconnected: {}",
-                    disconnected.join(", "))
+                write!(
+                    f,
+                    "Monitors not contiguous. Disconnected: {}",
+                    disconnected.join(", ")
+                )
+            }
+            ValidationError::InvalidName => {
+                write!(
+                    f,
+                    "Preset name is invalid (must be alphanumeric and hyphens)"
+                )
             }
         }
     }

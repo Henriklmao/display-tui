@@ -139,6 +139,16 @@ impl App {
                                 }
                             }
                         }
+                        crate::ui::components::PresetAction::Apply(name) => {
+                            match crate::config::apply_preset(&name, &mut self.monitors) {
+                                Ok(()) => self.show_preset_menu = None,
+                                Err(err_text) => {
+                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                        menu.set_error(err_text);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 crate::ui::components::MenuEvent::Handled => {}

@@ -111,6 +111,22 @@ pub fn load_preset(name: &str) -> Option<Vec<MonitorState>> {
     serde_json::from_str(&content).ok()
 }
 
+// Apply a preset to the current monitors configuration.
+pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> {
+    if let Some(state) = load_preset(name) {
+        for monitor_state in state {
+            if let Some(monitor) = monitors.iter_mut().find(|m| m.name == monitor_state.name) {
+                monitor.position = monitor_state.position;
+                monitor.scale = monitor_state.scale;
+                monitor.workspace = monitor_state.workspace;
+            }
+        }
+        Ok(())
+    } else {
+        Err(format!("Preset '{}' not found", name))
+    }
+}
+
 // List all preset names in the presets directory.
 pub fn list_presets() -> Vec<String> {
     let dir = get_presets_dir();

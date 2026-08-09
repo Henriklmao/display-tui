@@ -8,7 +8,7 @@ use ratatui::Frame;
 use std::io;
 use crate::config::{Configuration, save_monitor_state, load_monitor_state};
 use crate::monitor::Monitor;
-use crate::ui::components::{MonitorList, Map, Resolutions, Scale};
+use crate::ui::components::{MonitorList, Map, Resolutions, Scale, PresetMenu};
 use crate::utils::TUIMode;
 
 // Main application state.
@@ -23,6 +23,7 @@ pub struct App {
     pub mode: TUIMode,
     pub show_help: bool,
     pub show_popup: Option<Popup>,
+    pub show_preset_menu: Option<PresetMenu>,
 }
 
 // Popup message displayed to the user.
@@ -89,7 +90,7 @@ impl App {
             return;
         }
 
-        if self.show_popup.is_some() {
+        if let Some(ref _popup) = self.show_popup {
             match key_event.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => {
                     self.show_popup = None
@@ -99,6 +100,56 @@ impl App {
                     self.write();
                 }
                 _ => {}
+            }
+            return;
+        }
+
+        if let Some(ref mut preset_menu) = self.show_preset_menu {
+            let event = preset_menu.handle_event(key_event.code);
+            match event {
+                crate::ui::components::MenuEvent::Action(action) => {
+                    match action {
+                        crate::ui::components::PresetAction::Create(name) => {
+                            match self.create_preset(&name) {
+                                Ok(()) => self.show_preset_menu = None,
+                                Err(err_text) => {
+                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                        menu.set_error(err_text);
+                                    }
+                                }
+                            }
+                        }
+                        crate::ui::components::PresetAction::Delete(name) => {
+                            match self.delete_preset(&name) {
+                                Ok(()) => self.show_preset_menu = None,
+                                Err(err_text) => {
+                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                        menu.set_error(err_text);
+                                    }
+                                }
+                            }
+                        }
+                        crate::ui::components::PresetAction::Rename(old, new) => {
+                            match self.rename_preset(&old, &new) {
+                                Ok(()) => self.show_preset_menu = None,
+                                Err(err_text) => {
+                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                        menu.set_error(err_text);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                crate::ui::components::MenuEvent::Handled => {}
+                crate::ui::components::MenuEvent::Ignored => {
+                    if key_event.code == KeyCode::Char('q')
+                        || key_event.code == KeyCode::Char('Q')
+                        || key_event.code == KeyCode::Esc
+                    {
+                        self.show_preset_menu = None;
+                    }
+                }
             }
             return;
         }
@@ -117,7 +168,13 @@ impl App {
             },
             KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
             _ => match self.mode {
-                TUIMode::View => MonitorList::handle_events(self, key_event),
+                TUIMode::View => {
+                    if key_event.code == KeyCode::Char('p') {
+                        self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets()));
+                    } else {
+                        MonitorList::handle_events(self, key_event)
+                    }
+                },
                 TUIMode::Move => Map::handle_events(self, key_event),
                 TUIMode::Resolution => Resolutions::handle_events(self, key_event),
                 TUIMode::Scale => Scale::handle_events(self, key_event),
@@ -126,7 +183,6 @@ impl App {
     }
 
     fn exit(&mut self) {
-        // Save monitor state before exiting
         if let Err(e) = save_monitor_state(&self.monitors) {
             eprintln!("Warning: Failed to save monitor state on exit: {}", e);
         }
@@ -135,8 +191,6 @@ impl App {
 
     fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
-
-        // Duplicate workspace check
         let mut ws_counts = std::collections::HashMap::new();
         for m in &self.monitors {
             if let Some(ws) = m.workspace {
@@ -151,13 +205,9 @@ impl App {
             }
         }
         if !duplicated_ws.is_empty() {
-            errors.push(format!(
-                "Duplicate workspace assignment detected: {}",
-                duplicated_ws.join(", ")
-            ));
+            errors.push(format!("Duplicate workspace assignment detected: {}", duplicated_ws.join(", ")));
         }
 
-        // Contiguous check
         let enabled_indices: Vec<usize> = self
             .monitors
             .iter()
@@ -179,7 +229,6 @@ impl App {
                     let (x1, y1, w1, h1) = geoms[i];
                     let (x2, y2, w2, h2) = geoms[j];
 
-                    // Overlap check
                     if x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1 {
                         let name1 = &self.monitors[enabled_indices[i]].name;
                         let name2 = &self.monitors[enabled_indices[j]].name;
@@ -226,18 +275,11 @@ impl App {
                         disconnected.push(self.monitors[enabled_indices[idx]].name.clone());
                     }
                 }
-                errors.push(format!(
-                    "Monitors not contiguous. Disconnected: {}",
-                    disconnected.join(", ")
-                ));
+                errors.push(format!("Monitors not contiguous. Disconnected: {}", disconnected.join(", ")));
             }
         }
 
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
 
     fn write(&mut self) {
@@ -249,9 +291,10 @@ impl App {
         let lua_config = self.config.lua_monitor_config.as_deref();
 
         if Monitor::save_hyprland_config(path, &self.monitors, lua_config).is_err() {
+            let lines = vec!["Failed to save Hyprland config.".to_string()];
             self.show_popup = Some(Popup {
                 title: " Error ".to_string(),
-                lines: vec!["Failed to save Hyprland config.".to_string()],
+                lines,
                 is_error: true,
             });
         } else {
@@ -265,5 +308,20 @@ impl App {
         if let Err(e) = save_monitor_state(&self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
         }
+    }
+
+    pub fn create_preset(&mut self, name: &str) -> Result<(), String> {
+        crate::config::save_preset(name, &self.monitors)
+            .map_err(|e| format!("Failed to save preset '{}': {}", name, e))
+    }
+
+    pub fn delete_preset(&mut self, name: &str) -> Result<(), String> {
+        crate::config::delete_preset(name)
+            .map_err(|e| format!("Failed to delete preset '{}': {}", name, e))
+    }
+
+    pub fn rename_preset(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+        crate::config::rename_preset(old_name, new_name)
+            .map_err(|e| format!("Failed to rename preset: {}", e))
     }
 }

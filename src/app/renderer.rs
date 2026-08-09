@@ -51,6 +51,10 @@ impl Widget for &App {
         }
         monitor_list.render(outer_layout[1], buf);
 
+        if let Some(ref preset_menu) = self.show_preset_menu {
+            preset_menu.render(area, buf);
+        }
+
         if self.show_help {
             HelpModal::render(area, buf);
         }

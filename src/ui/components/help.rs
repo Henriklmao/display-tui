@@ -29,7 +29,7 @@ impl HelpModal {
             Line::from("Up <k> | Down <j>"),
             Line::from("Move <m> | Resolution <r> | Scale <s>"),
             Line::from("Rotate <o>"),
-            Line::from("Select Workspace for selected screen <0-9>"),
+            Line::from("Set Workspace (0 to clear) <0-9>"),
             Line::from("Enable <e> | Disable <d>"),
             Line::from("Show Keybindings <K>"),
             Line::from(""),

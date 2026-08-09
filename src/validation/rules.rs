@@ -125,3 +125,44 @@ pub fn validate_contiguous(monitors: &[Monitor]) -> Result<(), Vec<ValidationErr
         Ok(())
     }
 }
+
+
+// Validates that a preset name only contains ASCII alphanumeric characters and hyphens.
+pub fn validate_preset_name(name: &str) -> Result<(), Vec<ValidationError>> {
+    if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        Ok(())
+    } else {
+        Err(vec![ValidationError::InvalidName])
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::validate_preset_name;
+
+    #[test]
+    fn accepts_valid_names() {
+        assert!(validate_preset_name("default").is_ok());
+        assert!(validate_preset_name("my-setup-1").is_ok());
+        assert!(validate_preset_name("A").is_ok());
+        assert!(validate_preset_name("123").is_ok());
+        assert!(validate_preset_name("a-b-c-42").is_ok());
+    }
+
+    #[test]
+    fn rejects_empty_name() {
+        assert!(validate_preset_name("").is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_characters() {
+        assert!(validate_preset_name("with space").is_err());
+        assert!(validate_preset_name("under_score").is_err());
+        assert!(validate_preset_name("dot.name").is_err());
+        assert!(validate_preset_name("slash/name").is_err());
+        assert!(validate_preset_name("../escape").is_err());
+        assert!(validate_preset_name("unicode-é").is_err());
+        assert!(validate_preset_name("-").is_ok()); // single hyphen is allowed
+    }
+}

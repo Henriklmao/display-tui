@@ -19,6 +19,8 @@ pub fn is_last_preset(name: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorState {
     pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
     pub position: Option<Position>,
     pub scale: Option<f32>,
     pub workspace: Option<u8>,
@@ -36,6 +38,7 @@ pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
         .iter()
         .map(|m| MonitorState {
             name: m.name.clone(),
+            enabled: m.enabled,
             position: m.position.clone(),
             scale: m.scale,
             workspace: m.workspace,
@@ -73,6 +76,7 @@ pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
         .iter()
         .map(|m| MonitorState {
             name: m.name.clone(),
+            enabled: m.enabled,
             position: m.position.clone(),
             scale: m.scale,
             workspace: m.workspace,
@@ -118,6 +122,7 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
         .iter()
         .map(|m| MonitorState {
             name: m.name.clone(),
+            enabled: m.enabled,
             position: m.position.clone(),
             scale: m.scale,
             workspace: m.workspace,
@@ -154,6 +159,7 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
                 monitor.position = monitor_state.position;
                 monitor.scale = monitor_state.scale;
                 monitor.workspace = monitor_state.workspace;
+                monitor.enabled = monitor_state.enabled;
             }
         }
         Ok(())
@@ -171,8 +177,7 @@ pub fn override_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), Strin
 // Count the number of enabled monitors in a preset.
 pub fn count_enabled_monitors_in_preset(name: &str) -> Option<usize> {
     let state = load_preset(name)?;
-    // Count monitors that have a position set (indicating they're enabled in the preset)
-    Some(state.iter().filter(|m| m.position.is_some()).count())
+    Some(state.iter().filter(|m| m.enabled).count())
 }
 
 // List all preset names in the presets directory.

@@ -9,6 +9,12 @@ use crate::monitor::{Monitor, Position};
 use super::paths::{get_state_path, get_presets_dir};
 use crate::validation::{validate, validate_preset_name};
 
+pub const LAST_PRESET_NAME: &str = "last";
+
+pub fn is_last_preset(name: &str) -> bool {
+    name == LAST_PRESET_NAME
+}
+
 // Persistent monitor state for saving/restoring configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorState {
@@ -55,8 +61,37 @@ pub fn load_monitor_state() -> Option<Vec<MonitorState>> {
     serde_json::from_str(&content).ok()
 }
 
+// Save the current monitor state as "last" preset.
+// No layout validation — live state can be invalid.
+// No name validation — "last" is always valid.
+pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
+    let preset_path = get_presets_dir().join("last.json");
+    if let Some(parent) = preset_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
+    }
+    let state: Vec<MonitorState> = monitors
+        .iter()
+        .map(|m| MonitorState {
+            name: m.name.clone(),
+            position: m.position.clone(),
+            scale: m.scale,
+            workspace: m.workspace,
+        })
+        .collect();
+    let json = serde_json::to_string_pretty(&state)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    fs::write(preset_path, json)?;
+    Ok(())
+}
+
 // Save a preset to the presets directory.
 pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
+    if is_last_preset(name) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Cannot save to read-only preset '{}'", LAST_PRESET_NAME),
+        ));
+    }
     // Validate name
     if let Err(errors) = validate_preset_name(name) {
         return Err(std::io::Error::new(
@@ -168,6 +203,12 @@ pub fn list_presets() -> Vec<String> {
 
 // Delete a preset from the presets directory.
 pub fn delete_preset(name: &str) -> std::io::Result<()> {
+    if is_last_preset(name) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Cannot delete read-only preset '{}'", LAST_PRESET_NAME),
+        ));
+    }
     if let Err(errors) = validate_preset_name(name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -186,6 +227,12 @@ pub fn delete_preset(name: &str) -> std::io::Result<()> {
 // Rename a preset: copy the old file to the new name, then remove the old file.
 // Non-destructive: refuses to overwrite an existing preset or rename to the same name.
 pub fn rename_preset(old_name: &str, new_name: &str) -> std::io::Result<()> {
+    if is_last_preset(old_name) || is_last_preset(new_name) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Cannot rename read-only preset '{}'", LAST_PRESET_NAME),
+        ));
+    }
     if let Err(errors) = validate_preset_name(new_name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,

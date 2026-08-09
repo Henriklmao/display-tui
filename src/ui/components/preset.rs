@@ -87,14 +87,22 @@ impl PresetMenu {
                 }
                 KeyCode::Char('d') => match self.presets.get(self.selected_index) {
                     Some(entry) => {
-                        self.state = MenuState::DeleteConfirm(entry.name.clone());
+                        if crate::config::is_last_preset(&entry.name) {
+                            self.set_error("Cannot delete read-only 'last' preset".to_string());
+                        } else {
+                            self.state = MenuState::DeleteConfirm(entry.name.clone());
+                        }
                         MenuEvent::Handled
                     }
                     None => MenuEvent::Handled,
                 },
                 KeyCode::Char('r') => match self.presets.get(self.selected_index) {
                     Some(entry) => {
-                        self.state = MenuState::RenameName(entry.name.clone(), entry.name.clone());
+                        if crate::config::is_last_preset(&entry.name) {
+                            self.set_error("Cannot rename read-only 'last' preset".to_string());
+                        } else {
+                            self.state = MenuState::RenameName(entry.name.clone(), entry.name.clone());
+                        }
                         MenuEvent::Handled
                     }
                     None => MenuEvent::Handled,
@@ -206,11 +214,24 @@ impl PresetMenu {
                     lines.push(Line::from("No presets found").dim());
                 } else {
                     for (i, entry) in self.presets.iter().enumerate() {
-                        let display = format!("{} ({} monitors)", entry.name, entry.enabled_count);
-                        if i == self.selected_index {
-                            lines.push(Line::from(format!(" > {} ", display).cyan()));
+                        let is_last = crate::config::is_last_preset(&entry.name);
+                        let display = if is_last {
+                            format!("{} [read-only]", entry.name)
                         } else {
-                            lines.push(Line::from(format!("   {} ", display)));
+                            format!("{} ({} monitors)", entry.name, entry.enabled_count)
+                        };
+                        if i == self.selected_index {
+                            if is_last {
+                                lines.push(Line::from(format!(" > {} ", display)).cyan().dim());
+                            } else {
+                                lines.push(Line::from(format!(" > {} ", display).cyan()));
+                            }
+                        } else {
+                            if is_last {
+                                lines.push(Line::from(format!("   {} ", display)).dim());
+                            } else {
+                                lines.push(Line::from(format!("   {} ", display)));
+                            }
                         }
                     }
                 }

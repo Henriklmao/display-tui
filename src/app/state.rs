@@ -142,8 +142,12 @@ impl App {
                                 }
                             }
                             crate::ui::components::PresetAction::Apply(name) => {
+                                let _ = crate::config::save_state_as_last(&self.monitors);
                                 match crate::config::apply_preset(&name, &mut self.monitors) {
-                                    Ok(()) => self.show_preset_menu = None,
+                                    Ok(()) => {
+                                        self.show_preset_menu = None;
+                                        self.write();
+                                    }
                                     Err(err_text) => {
                                         if let Some(menu) = self.show_preset_menu.as_mut() {
                                             menu.set_error(err_text);

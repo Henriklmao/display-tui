@@ -31,6 +31,7 @@ impl HelpModal {
             Line::from("Rotate <o>"),
             Line::from("Set Workspace (0 to clear) <0-9>"),
             Line::from("Enable <e> | Disable <d>"),
+            Line::from("Preset Menu <p>"),
             Line::from("Show Keybindings <K>"),
             Line::from(""),
             Line::from(" --- Move Mode --- ".bold().yellow()),

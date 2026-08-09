@@ -1,5 +1,6 @@
 //! Preset menu component for managing saved monitor configurations.
 
+use crate::config::count_enabled_monitors_in_preset;
 use crate::ui::layouts::centered_rect;
 use crossterm::event::KeyCode;
 use ratatui::{
@@ -36,16 +37,30 @@ pub enum MenuState {
     RenameName(String, String), // (old_name, new_name)
 }
 
+// Preset entry with name and enabled monitor count.
+#[derive(Debug, Clone)]
+pub struct PresetEntry {
+    pub name: String,
+    pub enabled_count: usize,
+}
+
 /// PresetMenu component.
 pub struct PresetMenu {
     pub state: MenuState,
-    pub presets: Vec<String>,
+    pub presets: Vec<PresetEntry>,
     pub selected_index: usize,
     pub error_message: Option<String>,
 }
 
 impl PresetMenu {
-    pub fn new(presets: Vec<String>) -> Self {
+    pub fn new(preset_names: Vec<String>) -> Self {
+        let presets = preset_names
+            .into_iter()
+            .map(|name| {
+                let enabled_count = count_enabled_monitors_in_preset(&name).unwrap_or(0);
+                PresetEntry { name, enabled_count }
+            })
+            .collect();
         Self {
             state: MenuState::List,
             presets,
@@ -70,16 +85,16 @@ impl PresetMenu {
                     self.state = MenuState::CreateName(String::new());
                     MenuEvent::Handled
                 }
-                KeyCode::Char('d') => match self.presets.get(self.selected_index).cloned() {
-                    Some(preset) => {
-                        self.state = MenuState::DeleteConfirm(preset);
+                KeyCode::Char('d') => match self.presets.get(self.selected_index) {
+                    Some(entry) => {
+                        self.state = MenuState::DeleteConfirm(entry.name.clone());
                         MenuEvent::Handled
                     }
                     None => MenuEvent::Handled,
                 },
-                KeyCode::Char('r') => match self.presets.get(self.selected_index).cloned() {
-                    Some(preset) => {
-                        self.state = MenuState::RenameName(preset.clone(), preset.clone());
+                KeyCode::Char('r') => match self.presets.get(self.selected_index) {
+                    Some(entry) => {
+                        self.state = MenuState::RenameName(entry.name.clone(), entry.name.clone());
                         MenuEvent::Handled
                     }
                     None => MenuEvent::Handled,
@@ -97,14 +112,14 @@ impl PresetMenu {
                     MenuEvent::Handled
                 }
                 KeyCode::Enter | KeyCode::Char(' ') => {
-                    if let Some(preset) = self.presets.get(self.selected_index).cloned() {
-                        return MenuEvent::Action(PresetAction::Apply(preset));
+                    if let Some(entry) = self.presets.get(self.selected_index) {
+                        return MenuEvent::Action(PresetAction::Apply(entry.name.clone()));
                     }
                     MenuEvent::Handled
                 }
                 KeyCode::Char('o') => {
-                    if let Some(preset) = self.presets.get(self.selected_index).cloned() {
-                        return MenuEvent::Action(PresetAction::Override(preset));
+                    if let Some(entry) = self.presets.get(self.selected_index) {
+                        return MenuEvent::Action(PresetAction::Override(entry.name.clone()));
                     }
                     MenuEvent::Handled
                 }
@@ -190,11 +205,12 @@ impl PresetMenu {
                 if self.presets.is_empty() {
                     lines.push(Line::from("No presets found").dim());
                 } else {
-                    for (i, name) in self.presets.iter().enumerate() {
+                    for (i, entry) in self.presets.iter().enumerate() {
+                        let display = format!("{} ({} monitors)", entry.name, entry.enabled_count);
                         if i == self.selected_index {
-                            lines.push(Line::from(format!(" > {} ", name).cyan()));
+                            lines.push(Line::from(format!(" > {} ", display).cyan()));
                         } else {
-                            lines.push(Line::from(format!("   {} ", name)));
+                            lines.push(Line::from(format!("   {} ", display)));
                         }
                     }
                 }

@@ -24,6 +24,7 @@ pub struct App {
     pub show_help: bool,
     pub show_popup: Option<Popup>,
     pub show_preset_menu: Option<PresetMenu>,
+    pub preset_backup: Option<Vec<crate::config::MonitorState>>,
 }
 
 // Popup message displayed to the user.
@@ -149,6 +150,8 @@ impl App {
                                         // Mismatch: apply into monitor_state, but NO write
                                         let _ = crate::config::save_state_as_last(&self.monitors);
                                         let _ = crate::config::apply_preset(&name, &mut self.monitors);
+                                        // State change is intentional, so no restore.
+                                        self.preset_backup = None;
                                         self.show_preset_menu = None;
                                         self.show_popup = Some(Popup {
                                             title: " Preset Mismatch ".to_string(),
@@ -166,6 +169,8 @@ impl App {
                                         let _ = crate::config::save_state_as_last(&self.monitors);
                                         match crate::config::apply_preset(&name, &mut self.monitors) {
                                             Ok(()) => {
+                                                // Successful apply: don't restore the backup.
+                                                self.preset_backup = None;
                                                 self.show_preset_menu = None;
                                                 self.write();
                                             }
@@ -190,12 +195,18 @@ impl App {
                         }
                     }
                 }
+                crate::ui::components::MenuEvent::Preview(name) => {
+                    // Live preview: render the preset in display/map in real time.
+                    self.preview_preset(&name);
+                }
                 crate::ui::components::MenuEvent::Handled => {}
                 crate::ui::components::MenuEvent::Ignored => {
                     if key_event.code == KeyCode::Char('q')
                         || key_event.code == KeyCode::Char('Q')
                         || key_event.code == KeyCode::Esc
                     {
+                        // Closing without apply: restore the original state.
+                        self.restore_preset_backup();
                         self.show_preset_menu = None;
                     }
                 }
@@ -219,7 +230,16 @@ impl App {
             _ => match self.mode {
                 TUIMode::View => {
                     if key_event.code == KeyCode::Char('p') {
+                        self.save_preset_backup();
                         self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()));
+                        // Preview the first preset immediately.
+                        let first_preset = self
+                            .show_preset_menu
+                            .as_ref()
+                            .and_then(|menu| menu.presets.first().map(|entry| entry.name.clone()));
+                        if let Some(name) = first_preset {
+                            self.preview_preset(&name);
+                        }
                     } else {
                         MonitorList::handle_events(self, key_event)
                     }
@@ -229,6 +249,43 @@ impl App {
                 TUIMode::Scale => Scale::handle_events(self, key_event),
             },
         }
+    }
+
+    // Snapshot the current monitor state so it can be restored if the
+    // preset menu is closed without applying.
+    fn save_preset_backup(&mut self) {
+        self.preset_backup = Some(
+            self.monitors
+                .iter()
+                .map(|m| crate::config::MonitorState {
+                    name: m.name.clone(),
+                    enabled: m.enabled,
+                    position: m.position.clone(),
+                    scale: m.scale,
+                    workspace: m.workspace,
+                })
+                .collect(),
+        );
+    }
+
+    // Restore the monitor state captured when the preset menu was opened.
+    fn restore_preset_backup(&mut self) {
+        if let Some(backup) = self.preset_backup.take() {
+            for state in backup {
+                if let Some(monitor) = self.monitors.iter_mut().find(|m| m.name == state.name) {
+                    monitor.enabled = state.enabled;
+                    monitor.position = state.position;
+                    monitor.scale = state.scale;
+                    monitor.workspace = state.workspace;
+                }
+            }
+        }
+    }
+
+    // Apply a preset as a live preview only; no save_state_as_last (that is
+    // only done on the final apply).
+    fn preview_preset(&mut self, name: &str) {
+        let _ = crate::config::apply_preset(name, &mut self.monitors);
     }
 
     fn exit(&mut self) {

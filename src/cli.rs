@@ -72,7 +72,7 @@ pub fn print_help() {
     println!("  --help, -h         Show this help message and exit");
     println!("  -p <preset-name>   Load and apply the named preset, then exit");
     println!("  -pl, -p -l         List available presets and exit");
-    println!("  -pm                Open the TUI with the preset menu open");
+    println!("  -pm, -p -m         Open the TUI with the preset menu open");
     println!();
     println!("If no options are given, the TUI opens in normal view mode.");
     process::exit(0);

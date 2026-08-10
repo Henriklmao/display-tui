@@ -40,16 +40,16 @@ Display TUI supports command-line arguments for scripting, hotkeys and quick acc
 
 ```bash
 # Show help
-display-tui --help
+display-tui --help # or -h
 
 # List all presets
-display-tui -pl
+display-tui -pl # or -p -l
 
 # Load and apply a preset (exits after writing config)
 display-tui -p my-setup
 
 # Open the preset menu directly
-display-tui -pm
+display-tui -pm # or -p -m
 ```
 
 When loading a preset via `-p <name>`, the same validation rules apply as in the TUI. If the preset doesn't match connected monitors, or has zero enabled monitors, or fails validation, the TUI opens with an appropriate warning or error popup so you can fix the configuration.
@@ -64,4 +64,12 @@ In this case spawns a kitty terminal window with the preset menu open, allowing 
 
 ```lua
   hl.bind("SUPER + CTRL + D", hl.dsp.exec_cmd("kitty display-tui -pm"))
+```
+
+### Load a preset directly
+
+This will load the preset named `my-setup` and apply.
+
+```lua
+  hl.bind("SUPER + CTRL + D", hl.dsp.exec_cmd("display-tui -p my-setup"))
 ```

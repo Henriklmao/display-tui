@@ -25,6 +25,7 @@ pub struct App {
     pub show_popup: Option<Popup>,
     pub show_preset_menu: Option<PresetMenu>,
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
+    pub active_preset: Option<String>,
 }
 
 // Popup message displayed to the user.
@@ -120,7 +121,11 @@ impl App {
                                 let result = self.create_preset(&name);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()),
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
+                                            crate::config::list_presets(),
+                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                            self.active_preset.clone(),
+                                        ),
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -129,7 +134,11 @@ impl App {
                                 let result = self.delete_preset(&name);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()),
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
+                                            crate::config::list_presets(),
+                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                            self.active_preset.clone(),
+                                        ),
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -138,7 +147,11 @@ impl App {
                                 let result = self.rename_preset(&old, &new);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()),
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
+                                            crate::config::list_presets(),
+                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                            self.active_preset.clone(),
+                                        ),
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -170,6 +183,7 @@ impl App {
                                         match crate::config::apply_preset(&name, &mut self.monitors) {
                                             Ok(()) => {
                                                 // Successful apply: don't restore the backup.
+                                                self.active_preset = Some(name.clone());
                                                 self.preset_backup = None;
                                                 self.show_preset_menu = None;
                                                 self.write();
@@ -187,7 +201,11 @@ impl App {
                                 let result = crate::config::override_preset(&name, &mut self.monitors);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()),
+                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
+                                            crate::config::list_presets(),
+                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                            self.active_preset.clone(),
+                                        ),
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -231,7 +249,11 @@ impl App {
                 TUIMode::View => {
                     if key_event.code == KeyCode::Char('p') {
                         self.save_preset_backup();
-                        self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(crate::config::list_presets(), &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>()));
+                        self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(
+                            crate::config::list_presets(),
+                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                            self.active_preset.clone(),
+                        ));
                         // Preview the first preset immediately.
                         let first_preset = self
                             .show_preset_menu
@@ -241,12 +263,22 @@ impl App {
                             self.preview_preset(&name);
                         }
                     } else {
-                        MonitorList::handle_events(self, key_event)
+                        MonitorList::handle_events(self, key_event);
+                        self.clear_active_preset_if_changed();
                     }
                 },
-                TUIMode::Move => Map::handle_events(self, key_event),
-                TUIMode::Resolution => Resolutions::handle_events(self, key_event),
-                TUIMode::Scale => Scale::handle_events(self, key_event),
+                TUIMode::Move => {
+                    Map::handle_events(self, key_event);
+                    self.clear_active_preset_if_changed();
+                },
+                TUIMode::Resolution => {
+                    Resolutions::handle_events(self, key_event);
+                    self.clear_active_preset_if_changed();
+                },
+                TUIMode::Scale => {
+                    Scale::handle_events(self, key_event);
+                    self.clear_active_preset_if_changed();
+                },
             },
         }
     }
@@ -278,6 +310,30 @@ impl App {
                     monitor.scale = state.scale;
                     monitor.workspace = state.workspace;
                 }
+            }
+        }
+    }
+
+    // Clear the active preset marker as soon as the current monitor state
+    // diverges from what the active preset defines (or the preset file is gone).
+    fn clear_active_preset_if_changed(&mut self) {
+        if let Some(ref active) = self.active_preset.clone() {
+            if let Some(state) = crate::config::load_preset(active) {
+                for monitor_state in &state {
+                    if let Some(monitor) = self.monitors.iter().find(|m| m.name == monitor_state.name) {
+                        let changed = monitor.position != monitor_state.position
+                            || monitor.scale != monitor_state.scale
+                            || monitor.workspace != monitor_state.workspace
+                            || monitor.enabled != monitor_state.enabled;
+                        if changed {
+                            self.active_preset = None;
+                            return;
+                        }
+                    }
+                }
+            } else {
+                // Preset file gone
+                self.active_preset = None;
             }
         }
     }

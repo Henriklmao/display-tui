@@ -473,7 +473,7 @@ impl App {
                         lines: errs,
                         is_error: true,
                         apply_preset: None,
-                        is_forceable: false,
+                        is_forceable: true,
                     })
                 }
             },
@@ -754,7 +754,7 @@ impl App {
                 lines,
                 is_error: true,
                 apply_preset: None,
-                is_forceable: true,
+                is_forceable: false,
             });
         } else {
             let _ = std::process::Command::new("hyprctl")

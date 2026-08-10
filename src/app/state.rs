@@ -113,7 +113,7 @@ impl App {
                 crate::ui::components::MenuEvent::Action(action) => {
                     // Drop the borrow by extracting what we need, then act
                     let action_to_take = Some(action);
-                    drop(preset_menu);
+                    let _ = preset_menu;
 
                     if let Some(action) = action_to_take {
                         match action {

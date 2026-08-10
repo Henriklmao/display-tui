@@ -222,21 +222,30 @@ impl App {
             return;
         }
 
-        if let Some(popup) = self.show_popup.take() {
+        if let Some(popup) = &self.show_popup {
+            let is_error = popup.is_error;
+            let is_forceable = popup.is_forceable;
             match key_event.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
                     // Close popup without action
+                    self.show_popup = None;
                 }
                 KeyCode::Enter => {
-                    if let Some(preset_name) = popup.apply_preset {
-                        // Apply preset to monitor_state only (don't write)
-                        let _ = crate::config::apply_preset(&preset_name, &mut self.monitors);
+                    if !is_error {
+                        // For non-error popups (mismatch/warning), Enter accepts and writes
+                        self.write();
                     }
+                    // Close the popup
+                    self.show_popup = None;
                 }
-                KeyCode::Char('f') | KeyCode::Char('F') if popup.is_error => {
+                KeyCode::Char('f') | KeyCode::Char('F') if is_forceable => {
+                    // Force write for forceable popups
                     self.write();
+                    self.show_popup = None;
                 }
-                _ => {}
+                _ => {
+                    // For unrelated keys, keep the popup visible
+                }
             }
             return;
         }

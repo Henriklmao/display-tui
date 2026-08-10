@@ -256,6 +256,11 @@ impl PresetMenu {
                             format!("{} ({} monitors)", entry.name, entry.enabled_count)
                         };
                         let marker = if i == self.selected_index { " > " } else { "   " };
+                        // Presets with 0 enabled monitors get a dimmed indicator.
+                        if entry.enabled_count == 0 {
+                            lines.push(Line::from(format!("   {} ", display)).dark_gray());
+                            continue;
+                        }
                         let mut line = Line::from(format!("{} {} ", marker, display));
                         if entry.has_mismatch {
                             line = line.red();

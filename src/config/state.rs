@@ -244,7 +244,13 @@ pub fn list_presets() -> Vec<String> {
                 .filter_map(|entry| {
                     let name = entry.file_name().into_string().ok()?;
                     if name.ends_with(".json") {
-                        Some(name[..name.len() - 5].to_string())
+                        let stem = name[..name.len() - 5].to_string();
+                        // Only include names that pass preset name validation
+                        if validate_preset_name(&stem).is_ok() {
+                            Some(stem)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

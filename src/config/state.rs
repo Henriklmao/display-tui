@@ -15,6 +15,15 @@ pub fn is_last_preset(name: &str) -> bool {
     name == LAST_PRESET_NAME
 }
 
+// Snapshot of a monitor's current resolution mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolutionState {
+    pub width: i32,
+    pub height: i32,
+    #[serde(rename = "refresh")]
+    pub refresh_rate: f32,
+}
+
 // Persistent monitor state for saving/restoring configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorState {
@@ -24,6 +33,33 @@ pub struct MonitorState {
     pub position: Option<Position>,
     pub scale: Option<f32>,
     pub workspace: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<ResolutionState>,
+}
+
+// Convert a slice of Monitors into a Vec of MonitorState for persistence.
+fn monitors_to_state(monitors: &[Monitor]) -> Vec<MonitorState> {
+    monitors
+        .iter()
+        .map(|m| {
+            let resolution = m.get_current_resolution().map(|r| ResolutionState {
+                width: r.width,
+                height: r.height,
+                refresh_rate: r.refresh,
+            });
+            MonitorState {
+                name: m.name.clone(),
+                enabled: m.enabled,
+                position: m.position.clone(),
+                scale: m.scale,
+                workspace: m.workspace,
+                rotation: m.transform.clone(),
+                resolution,
+            }
+        })
+        .collect()
 }
 
 // Save monitor state to file.
@@ -34,16 +70,7 @@ pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let state: Vec<MonitorState> = monitors
-        .iter()
-        .map(|m| MonitorState {
-            name: m.name.clone(),
-            enabled: m.enabled,
-            position: m.position.clone(),
-            scale: m.scale,
-            workspace: m.workspace,
-        })
-        .collect();
+    let state = monitors_to_state(monitors);
 
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -72,16 +99,7 @@ pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
     if let Some(parent) = preset_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
-    let state: Vec<MonitorState> = monitors
-        .iter()
-        .map(|m| MonitorState {
-            name: m.name.clone(),
-            enabled: m.enabled,
-            position: m.position.clone(),
-            scale: m.scale,
-            workspace: m.workspace,
-        })
-        .collect();
+    let state = monitors_to_state(monitors);
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     fs::write(preset_path, json)?;
@@ -118,16 +136,7 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let state: Vec<MonitorState> = monitors
-        .iter()
-        .map(|m| MonitorState {
-            name: m.name.clone(),
-            enabled: m.enabled,
-            position: m.position.clone(),
-            scale: m.scale,
-            workspace: m.workspace,
-        })
-        .collect();
+    let state = monitors_to_state(monitors);
 
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -189,6 +198,16 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
                 monitor.scale = monitor_state.scale;
                 monitor.workspace = monitor_state.workspace;
                 monitor.enabled = monitor_state.enabled;
+                monitor.transform = monitor_state.rotation;
+                if let Some(ref res) = monitor_state.resolution
+                    && let Some(idx) = monitor.modes.iter().position(|m| {
+                        m.width == res.width
+                            && m.height == res.height
+                            && (m.refresh - res.refresh_rate).abs() < 0.1
+                    })
+                {
+                    monitor.set_current_resolution(idx);
+                }
             }
         }
         Ok(())

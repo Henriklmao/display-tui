@@ -127,6 +127,8 @@ mod tests {
                 position: m.position.clone(),
                 scale: m.scale,
                 workspace: m.workspace,
+                rotation: None,
+                resolution: None,
             })
             .collect();
 

@@ -37,8 +37,8 @@ impl HelpModal {
 // horizontally at most 60 columns; on smaller terminals it shrinks to
 // fit (with at least one row/column of breathing room on each side).
 fn responsive_help_rect(area: Rect) -> Rect {
-    // Vertical: up to 60% height but at most 30 rows, at least 1 row of
-    // padding above and below.
+    // Vertical: at most 30 rows, with at least 1 row of padding above
+    // and below.
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -48,8 +48,8 @@ fn responsive_help_rect(area: Rect) -> Rect {
         ])
         .split(area);
 
-    // Horizontal: up to 70% width but at most 60 columns, at least 1
-    // column of padding on each side.
+    // Horizontal: at most 60 columns, with at least 1 column of padding
+    // on each side.
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

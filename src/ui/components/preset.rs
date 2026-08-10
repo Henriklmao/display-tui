@@ -53,10 +53,15 @@ pub struct PresetMenu {
     pub presets: Vec<PresetEntry>,
     pub selected_index: usize,
     pub error_message: Option<String>,
+    pub active_preset: Option<String>,
 }
 
 impl PresetMenu {
-    pub fn new(preset_names: Vec<String>, connected_names: &[String]) -> Self {
+    pub fn new(
+        preset_names: Vec<String>,
+        connected_names: &[String],
+        active_preset: Option<String>,
+    ) -> Self {
         let presets = preset_names
             .into_iter()
             .map(|name| {
@@ -87,6 +92,7 @@ impl PresetMenu {
             presets,
             selected_index: 0,
             error_message: None,
+            active_preset,
         }
     }
 
@@ -243,30 +249,29 @@ impl PresetMenu {
                 } else {
                     for (i, entry) in self.presets.iter().enumerate() {
                         let is_last = crate::config::is_last_preset(&entry.name);
+                        let is_active = self.active_preset.as_deref() == Some(entry.name.as_str());
                         let display = if is_last {
                             format!("{} [read-only]", entry.name)
                         } else {
                             format!("{} ({} monitors)", entry.name, entry.enabled_count)
                         };
+                        let marker = if i == self.selected_index { " > " } else { "   " };
+                        let mut line = Line::from(format!("{} {} ", marker, display));
                         if entry.has_mismatch {
-                            if i == self.selected_index {
-                                lines.push(Line::from(format!(" > {} ", display)).red());
-                            } else {
-                                lines.push(Line::from(format!("   {} ", display)).red());
-                            }
+                            line = line.red();
                         } else if i == self.selected_index {
+                            line = line.cyan();
                             if is_last {
-                                lines.push(Line::from(format!(" > {} ", display)).cyan().dim());
-                            } else {
-                                lines.push(Line::from(format!(" > {} ", display).cyan()));
+                                line = line.dim();
                             }
-                        } else {
-                            if is_last {
-                                lines.push(Line::from(format!("   {} ", display)).dim());
-                            } else {
-                                lines.push(Line::from(format!("   {} ", display)));
-                            }
+                        } else if is_last {
+                            line = line.dim();
                         }
+                        // Highlight the currently active preset in bold.
+                        if is_active {
+                            line = line.bold();
+                        }
+                        lines.push(line);
                     }
                 }
                 lines.push(Line::from(""));

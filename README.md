@@ -21,8 +21,10 @@ Thanks for your work, you are the biggest contributor to this project!
 - set display rotation
 - set workspace assignments
 - save validation with detailed warning (overridable)
-- quick-access help modal (press `shift + K` in View mode)
-- responsive mini-mode for small terminal windows
+
+- preset management: save, load, apply, rename, and delete monitor layout presets with live preview
+- CLI interface for headless preset loading, listing, and quick preset menu access
+- quick-access help modal for keybinds (press `K` in View mode)
 
 ## Requirements
 
@@ -33,26 +35,7 @@ Thanks for your work, you are the biggest contributor to this project!
 
 ## Usage
 
-Run the TUI:
-
-```bash
-display-tui
-```
-
-Everything is controlled using the keyboard, and the interface provides direct hints at the bottom.
-You can navigate through the list of displays using the arrow keys or `j`/`k`.
-
-- `m`: Move mode (use arrow keys or `h`/`j`/`k`/`l` to arrange displays)
-- `r`: Resolution mode
-- `s`: Scale mode
-- `o`: Cycle rotation
-- `1-9`: Assign workspace to the selected display (`0` to clear)
-- `e`/`d`: Enable/Disable display
-- `K`: Open the keybindings help modal (View/Normal mode only)
-- `w`: Save the configuration to your hyprland config
-- `q`: Quit the application
-
-When saving, the app will automatically validate your layout. If any displays are separated too far, have overlapping regions, or if there are duplicate workspace assignments, a warning pop-up will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
+(See [docs/usage.md](docs/usage.md) for detailed usage instructions)
 
 ## Installation
 

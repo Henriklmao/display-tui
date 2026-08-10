@@ -2,6 +2,7 @@
 
 pub mod actions;
 pub mod app;
+pub mod cli;
 pub mod config;
 pub mod errors;
 pub mod monitor;
@@ -12,6 +13,7 @@ pub mod utils;
 pub mod validation;
 
 pub use app::App;
+pub use cli::CliAction;
 pub use errors::{AppError, AppResult};
 pub use monitor::Monitor;
 pub use utils::TUIMode;

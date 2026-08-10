@@ -1,5 +1,6 @@
 //! Popup component for errors and messages.
 
+use crate::ui::layouts::centered_rect;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -7,7 +8,6 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use crate::ui::layouts::centered_rect;
 
 // Popup message display.
 pub struct Popup {
@@ -26,10 +26,14 @@ impl Popup {
         }
         if self.is_error {
             text.push(Line::from(
-                "Press <f> to force, or <Esc>/<Enter>/<q> to close.".gray(),
+                "Press <f> to force, or <Esc/Enter/q> to close.".gray(),
             ));
         }
-        let color = if self.is_error { Color::Red } else { Color::Yellow };
+        let color = if self.is_error {
+            Color::Red
+        } else {
+            Color::Yellow
+        };
         let border_style = Style::default().fg(color);
         let title = Line::from(self.title.clone().bold().white());
 

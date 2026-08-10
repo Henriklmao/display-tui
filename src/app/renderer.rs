@@ -1,5 +1,8 @@
 //! UI rendering for the display-tui application.
 
+use super::state::App;
+use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
+use crate::utils::TUIMode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -7,9 +10,6 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use super::state::App;
-use crate::ui::components::{HelpModal, MonitorList, Map, Resolutions, Scale};
-use crate::utils::TUIMode;
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -72,10 +72,10 @@ impl Widget for &App {
             }
             if popup.is_error && popup.is_forceable {
                 text.push(Line::from(
-                    "Press <f> to force write, or <Esc>/<Enter> to close.".gray(),
+                    "Press <f> to force write, or <Esc/Enter> to close.".gray(),
                 ));
             } else if popup.is_error {
-                text.push(Line::from("<Esc>/<Enter> to close.".gray()));
+                text.push(Line::from("<Esc/Enter> to close.".gray()));
             }
             let color = if popup.is_error {
                 Color::Red

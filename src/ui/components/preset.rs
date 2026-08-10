@@ -108,6 +108,13 @@ impl PresetMenu {
 
         match &mut self.state {
             MenuState::List => match key {
+                KeyCode::Char(c @ '1'..='9') => {
+                    let idx = c.to_digit(10).unwrap() as usize - 1;
+                    if idx < self.presets.len() {
+                        self.selected_index = idx;
+                    }
+                    MenuEvent::Handled
+                }
                 KeyCode::Char('n') => {
                     self.state = MenuState::CreateName(String::new());
                     MenuEvent::Handled
@@ -256,12 +263,13 @@ impl PresetMenu {
                             format!("{} ({} monitors)", entry.name, entry.enabled_count)
                         };
                         let marker = if i == self.selected_index { " > " } else { "   " };
+                        let number = format!("{:>2}. ", i + 1);
                         // Presets with 0 enabled monitors get a dimmed indicator.
                         if entry.enabled_count == 0 {
-                            lines.push(Line::from(format!("{} {} ", marker, display)).dark_gray());
+                            lines.push(Line::from(format!("{}{}{}", marker, number, display)).dark_gray());
                             continue;
                         }
-                        let mut line = Line::from(format!("{} {} ", marker, display));
+                        let mut line = Line::from(format!("{}{}{}", marker, number, display));
                         if entry.has_mismatch {
                             line = line.red();
                             if i == self.selected_index {

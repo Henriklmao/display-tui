@@ -205,17 +205,22 @@ impl App {
                                         });
                                     }
                                     Ok(()) => {
-                                        // Block presets with 0 enabled monitors
+                                        // Warn for presets with 0 enabled monitors but allow applying (state only, no write)
                                         if crate::config::count_enabled_monitors_in_preset(&name) == Some(0) {
+                                            // Apply preset state but don't write
+                                            let _ = crate::config::apply_preset(&name, &mut self.monitors);
+                                            self.active_preset = Some(name.clone());
+                                            self.preset_backup = None;
                                             self.show_preset_menu = None;
-                                            self.restore_preset_backup();
+                                            // Show warning popup with only <Enter> Accept
                                             self.show_popup = Some(Popup {
-                                                title: " Preset Mismatch ".to_string(),
+                                                title: " Preset Warning ".to_string(),
                                                 lines: vec![
                                                     "This preset has 0 enabled monitors.".to_string(),
-                                                    "Enable at least one monitor in the preset to apply it.".to_string(),
+                                                    "".to_string(),
+                                                    "<Enter> Accept".to_string(),
                                                 ],
-                                                is_error: true,
+                                                is_error: false,
                                                 apply_preset: None,
                                             });
                                         } else {

@@ -72,7 +72,7 @@ impl Widget for &App {
             }
             if popup.is_error {
                 text.push(Line::from(
-                    "Press <f> to force write anyway, or <Esc>, <Enter>, <q> to close.".gray(),
+                    "Press <f> to force write, or <Esc>/<Enter> to close.".gray(),
                 ));
             }
             let color = if popup.is_error {

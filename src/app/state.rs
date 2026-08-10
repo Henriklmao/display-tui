@@ -33,6 +33,7 @@ pub struct Popup {
     pub title: String,
     pub lines: Vec<String>,
     pub is_error: bool,
+    pub apply_preset: Option<String>,
 }
 
 impl App {
@@ -93,13 +94,18 @@ impl App {
             return;
         }
 
-        if let Some(ref _popup) = self.show_popup {
+        if let Some(popup) = self.show_popup.take() {
             match key_event.code {
-                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => {
-                    self.show_popup = None
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
+                    // Close popup without action
                 }
-                KeyCode::Char('f') | KeyCode::Char('F') => {
-                    self.show_popup = None;
+                KeyCode::Enter => {
+                    if let Some(preset_name) = popup.apply_preset {
+                        // Apply preset to monitor_state only (don't write)
+                        let _ = crate::config::apply_preset(&preset_name, &mut self.monitors);
+                    }
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') if popup.is_error => {
                     self.write();
                 }
                 _ => {}
@@ -180,16 +186,22 @@ impl App {
                                         // State change is intentional, so no restore.
                                         self.preset_backup = None;
                                         self.show_preset_menu = None;
+                                        let mut popup_lines = vec![
+                                            "Preset does not match connected monitors.".to_string(),
+                                            "".to_string(),
+                                            "Missing monitors:".to_string(),
+                                        ];
+                                        for m in &missing {
+                                            popup_lines.push(format!("  \u{2022} {}", m));
+                                        }
+                                        popup_lines.push("".to_string());
+                                        popup_lines.push("<Enter> Accept anyway, or <Esc> Cancel".to_string());
+
                                         self.show_popup = Some(Popup {
                                             title: " Preset Mismatch ".to_string(),
-                                            lines: {
-                                                let mut lines = vec!["Preset does not match connected monitors:".to_string()];
-                                                for m in &missing {
-                                                    lines.push(format!("  \u{2022} {}", m));
-                                                }
-                                                lines
-                                            },
-                                            is_error: true,
+                                            lines: popup_lines,
+                                            is_error: false,  // Not a hard error
+                                            apply_preset: Some(name),
                                         });
                                     }
                                     Ok(()) => {
@@ -204,6 +216,7 @@ impl App {
                                                     "Enable at least one monitor in the preset to apply it.".to_string(),
                                                 ],
                                                 is_error: true,
+                                                apply_preset: None,
                                             });
                                         } else {
                                             let _ = crate::config::save_state_as_last(&self.monitors);
@@ -286,6 +299,7 @@ impl App {
                         title: " Error ".to_string(),
                         lines: errs,
                         is_error: true,
+                        apply_preset: None,
                     })
                 }
             },
@@ -490,6 +504,17 @@ impl App {
     }
 
     fn write(&mut self) {
+        // Check that at least one monitor is enabled (not forceable)
+        if !self.monitors.iter().any(|m| m.enabled) {
+            self.show_popup = Some(Popup {
+                title: " Error ".to_string(),
+                lines: vec!["At least one monitor must be enabled.".to_string()],
+                is_error: true,
+                apply_preset: None,
+            });
+            return;
+        }
+
         let path = self
             .config
             .monitors_config_path
@@ -503,6 +528,7 @@ impl App {
                 title: " Error ".to_string(),
                 lines,
                 is_error: true,
+                apply_preset: None,
             });
         } else {
             let _ = std::process::Command::new("hyprctl")

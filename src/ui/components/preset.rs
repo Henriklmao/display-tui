@@ -23,6 +23,8 @@ pub enum PresetAction {
 pub enum MenuEvent {
     // A concrete action should be performed by the caller.
     Action(PresetAction),
+    // The preset under the cursor should be previewed (live preview).
+    Preview(String),
     // The key was consumed by the menu (navigation, typing, cancel-to-list).
     Handled,
     // The key was not handled by the menu (caller may act, e.g. close on Esc).
@@ -130,11 +132,18 @@ impl PresetMenu {
                     if self.selected_index > 0 {
                         self.selected_index -= 1;
                     }
+                    // Return preview of the newly selected preset.
+                    if let Some(entry) = self.presets.get(self.selected_index) {
+                        return MenuEvent::Preview(entry.name.clone());
+                    }
                     MenuEvent::Handled
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if self.selected_index < self.presets.len().saturating_sub(1) {
                         self.selected_index += 1;
+                    }
+                    if let Some(entry) = self.presets.get(self.selected_index) {
+                        return MenuEvent::Preview(entry.name.clone());
                     }
                     MenuEvent::Handled
                 }

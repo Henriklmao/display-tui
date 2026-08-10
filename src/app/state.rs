@@ -2,14 +2,14 @@
 //!
 //! Contains the main App struct, its methods, and the Popup type.
 
+use crate::config::{Configuration, load_monitor_state, save_monitor_state};
+use crate::monitor::Monitor;
+use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
+use crate::utils::TUIMode;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
 use std::io;
-use crate::config::{Configuration, save_monitor_state, load_monitor_state};
-use crate::monitor::Monitor;
-use crate::ui::components::{MonitorList, Map, Resolutions, Scale, PresetMenu};
-use crate::utils::TUIMode;
 
 // Main application state.
 #[derive(Default)]
@@ -133,10 +133,14 @@ impl App {
                                         Ok(()) => {
                                             *menu = crate::ui::components::PresetMenu::new(
                                                 crate::config::list_presets(),
-                                                &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                                &self
+                                                    .monitors
+                                                    .iter()
+                                                    .map(|m| m.name.clone())
+                                                    .collect::<Vec<String>>(),
                                                 self.active_preset.clone(),
                                             );
-                                        },
+                                        }
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -155,11 +159,17 @@ impl App {
                                 let result = self.delete_preset(&name);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
-                                            crate::config::list_presets(),
-                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
-                                            self.active_preset.clone(),
-                                        ),
+                                        Ok(()) => {
+                                            *menu = crate::ui::components::PresetMenu::new(
+                                                crate::config::list_presets(),
+                                                &self
+                                                    .monitors
+                                                    .iter()
+                                                    .map(|m| m.name.clone())
+                                                    .collect::<Vec<String>>(),
+                                                self.active_preset.clone(),
+                                            )
+                                        }
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -168,22 +178,32 @@ impl App {
                                 let result = self.rename_preset(&old, &new);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
-                                            crate::config::list_presets(),
-                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
-                                            self.active_preset.clone(),
-                                        ),
+                                        Ok(()) => {
+                                            *menu = crate::ui::components::PresetMenu::new(
+                                                crate::config::list_presets(),
+                                                &self
+                                                    .monitors
+                                                    .iter()
+                                                    .map(|m| m.name.clone())
+                                                    .collect::<Vec<String>>(),
+                                                self.active_preset.clone(),
+                                            )
+                                        }
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
                             }
                             crate::ui::components::PresetAction::Apply(name) => {
                                 // Validate hardware match first
-                                match crate::config::validate_preset_monitors_match(&name, &self.monitors) {
+                                match crate::config::validate_preset_monitors_match(
+                                    &name,
+                                    &self.monitors,
+                                ) {
                                     Err(missing) => {
                                         // Mismatch: apply into monitor_state, but NO write
                                         let _ = crate::config::save_state_as_last(&self.monitors);
-                                        let _ = crate::config::apply_preset(&name, &mut self.monitors);
+                                        let _ =
+                                            crate::config::apply_preset(&name, &mut self.monitors);
                                         // State change is intentional, so no restore.
                                         self.preset_backup = None;
                                         self.show_preset_menu = None;
@@ -196,21 +216,28 @@ impl App {
                                             popup_lines.push(format!("  \u{2022} {}", m));
                                         }
                                         popup_lines.push("".to_string());
-                                        popup_lines.push("<Enter> Accept anyway, or <Esc> Cancel".to_string());
+                                        popup_lines.push(
+                                            "<Enter> Accept anyway, or <Esc> Cancel".to_string(),
+                                        );
 
                                         self.show_popup = Some(Popup {
                                             title: " Preset Mismatch ".to_string(),
                                             lines: popup_lines,
-                                            is_error: false,  // Not a hard error
+                                            is_error: false, // Not a hard error
                                             apply_preset: Some(name),
                                             is_forceable: true,
                                         });
                                     }
                                     Ok(()) => {
                                         // Warn for presets with 0 enabled monitors but allow applying (state only, no write)
-                                        if crate::config::count_enabled_monitors_in_preset(&name) == Some(0) {
+                                        if crate::config::count_enabled_monitors_in_preset(&name)
+                                            == Some(0)
+                                        {
                                             // Apply preset state but don't write
-                                            let _ = crate::config::apply_preset(&name, &mut self.monitors);
+                                            let _ = crate::config::apply_preset(
+                                                &name,
+                                                &mut self.monitors,
+                                            );
                                             self.active_preset = Some(name.clone());
                                             self.preset_backup = None;
                                             self.show_preset_menu = None;
@@ -218,7 +245,8 @@ impl App {
                                             self.show_popup = Some(Popup {
                                                 title: " Preset Warning ".to_string(),
                                                 lines: vec![
-                                                    "This preset has 0 enabled monitors.".to_string(),
+                                                    "This preset has 0 enabled monitors."
+                                                        .to_string(),
                                                     "".to_string(),
                                                     "<Enter> Accept".to_string(),
                                                 ],
@@ -227,8 +255,12 @@ impl App {
                                                 is_forceable: false,
                                             });
                                         } else {
-                                            let _ = crate::config::save_state_as_last(&self.monitors);
-                                            match crate::config::apply_preset(&name, &mut self.monitors) {
+                                            let _ =
+                                                crate::config::save_state_as_last(&self.monitors);
+                                            match crate::config::apply_preset(
+                                                &name,
+                                                &mut self.monitors,
+                                            ) {
                                                 Ok(()) => {
                                                     // Successful apply: don't restore the backup.
                                                     self.active_preset = Some(name.clone());
@@ -237,7 +269,9 @@ impl App {
                                                     self.write();
                                                 }
                                                 Err(err_text) => {
-                                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                                    if let Some(menu) =
+                                                        self.show_preset_menu.as_mut()
+                                                    {
                                                         menu.set_error(err_text);
                                                     }
                                                 }
@@ -256,10 +290,14 @@ impl App {
                                         Ok(()) => {
                                             *menu = crate::ui::components::PresetMenu::new(
                                                 crate::config::list_presets(),
-                                                &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                                &self
+                                                    .monitors
+                                                    .iter()
+                                                    .map(|m| m.name.clone())
+                                                    .collect::<Vec<String>>(),
                                                 self.active_preset.clone(),
                                             );
-                                        },
+                                        }
                                         Err(err_text) => menu.set_error(err_text),
                                     }
                                 }
@@ -315,11 +353,16 @@ impl App {
             KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
             _ => match self.mode {
                 TUIMode::View => {
-                    if key_event.code == KeyCode::Char('p') {
+                    if key_event.code == KeyCode::Char('p') || key_event.code == KeyCode::Char('P')
+                    {
                         self.save_preset_backup();
                         self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(
                             crate::config::list_presets(),
-                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                            &self
+                                .monitors
+                                .iter()
+                                .map(|m| m.name.clone())
+                                .collect::<Vec<String>>(),
                             self.active_preset.clone(),
                         ));
                         // Preview the first preset immediately.
@@ -334,19 +377,19 @@ impl App {
                         MonitorList::handle_events(self, key_event);
                         self.clear_active_preset_if_changed();
                     }
-                },
+                }
                 TUIMode::Move => {
                     Map::handle_events(self, key_event);
                     self.clear_active_preset_if_changed();
-                },
+                }
                 TUIMode::Resolution => {
                     Resolutions::handle_events(self, key_event);
                     self.clear_active_preset_if_changed();
-                },
+                }
                 TUIMode::Scale => {
                     Scale::handle_events(self, key_event);
                     self.clear_active_preset_if_changed();
-                },
+                }
             },
         }
     }
@@ -388,7 +431,9 @@ impl App {
         if let Some(ref active) = self.active_preset.clone() {
             if let Some(state) = crate::config::load_preset(active) {
                 for monitor_state in &state {
-                    if let Some(monitor) = self.monitors.iter().find(|m| m.name == monitor_state.name) {
+                    if let Some(monitor) =
+                        self.monitors.iter().find(|m| m.name == monitor_state.name)
+                    {
                         let changed = monitor.position != monitor_state.position
                             || monitor.scale != monitor_state.scale
                             || monitor.workspace != monitor_state.workspace
@@ -435,7 +480,10 @@ impl App {
             }
         }
         if !duplicated_ws.is_empty() {
-            errors.push(format!("Duplicate workspace assignment detected: {}", duplicated_ws.join(", ")));
+            errors.push(format!(
+                "Duplicate workspace assignment detected: {}",
+                duplicated_ws.join(", ")
+            ));
         }
 
         let enabled_indices: Vec<usize> = self
@@ -505,11 +553,18 @@ impl App {
                         disconnected.push(self.monitors[enabled_indices[idx]].name.clone());
                     }
                 }
-                errors.push(format!("Monitors not contiguous. Disconnected: {}", disconnected.join(", ")));
+                errors.push(format!(
+                    "Monitors not contiguous. Disconnected: {}",
+                    disconnected.join(", ")
+                ));
             }
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 
     fn write(&mut self) {

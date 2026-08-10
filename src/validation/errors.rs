@@ -50,7 +50,7 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidName => {
                 write!(
                     f,
-                    "Preset name is invalid (must be alphanumeric and hyphens)"
+                    "Preset name is invalid (must contain only letters, numbers, and hyphens)"
                 )
             }
         }

@@ -1,6 +1,6 @@
 //! Preset menu component for managing saved monitor configurations.
 
-use crate::config::count_enabled_monitors_in_preset;
+use crate::config::{count_enabled_monitors_in_preset, load_preset};
 use crate::ui::layouts::centered_rect;
 use crossterm::event::KeyCode;
 use ratatui::{
@@ -37,11 +37,12 @@ pub enum MenuState {
     RenameName(String, String), // (old_name, new_name)
 }
 
-// Preset entry with name and enabled monitor count.
+// Preset entry with name, enabled monitor count, and hardware-match status.
 #[derive(Debug, Clone)]
 pub struct PresetEntry {
     pub name: String,
     pub enabled_count: usize,
+    pub has_mismatch: bool,
 }
 
 /// PresetMenu component.
@@ -53,12 +54,30 @@ pub struct PresetMenu {
 }
 
 impl PresetMenu {
-    pub fn new(preset_names: Vec<String>) -> Self {
+    pub fn new(preset_names: Vec<String>, connected_names: &[String]) -> Self {
         let presets = preset_names
             .into_iter()
             .map(|name| {
                 let enabled_count = count_enabled_monitors_in_preset(&name).unwrap_or(0);
-                PresetEntry { name, enabled_count }
+                let has_mismatch = match load_preset(&name) {
+                    Some(state) => {
+                        let enabled_in_preset: Vec<&str> = state
+                            .iter()
+                            .filter(|m| m.enabled)
+                            .map(|m| m.name.as_str())
+                            .collect();
+                        !enabled_in_preset.is_empty()
+                            && !enabled_in_preset
+                                .iter()
+                                .all(|n| connected_names.iter().any(|c| c == *n))
+                    }
+                    None => false,
+                };
+                PresetEntry {
+                    name,
+                    enabled_count,
+                    has_mismatch,
+                }
             })
             .collect();
         Self {
@@ -220,7 +239,13 @@ impl PresetMenu {
                         } else {
                             format!("{} ({} monitors)", entry.name, entry.enabled_count)
                         };
-                        if i == self.selected_index {
+                        if entry.has_mismatch {
+                            if i == self.selected_index {
+                                lines.push(Line::from(format!(" > {} ", display)).red());
+                            } else {
+                                lines.push(Line::from(format!("   {} ", display)).red());
+                            }
+                        } else if i == self.selected_index {
                             if is_last {
                                 lines.push(Line::from(format!(" > {} ", display)).cyan().dim());
                             } else {

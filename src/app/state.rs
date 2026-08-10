@@ -118,16 +118,30 @@ impl App {
                     if let Some(action) = action_to_take {
                         match action {
                             crate::ui::components::PresetAction::Create(name) => {
+                                // Save the pre-menu state, not the live-preview values
+                                self.restore_preset_backup();
                                 let result = self.create_preset(&name);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
-                                            crate::config::list_presets(),
-                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
-                                            self.active_preset.clone(),
-                                        ),
+                                        Ok(()) => {
+                                            *menu = crate::ui::components::PresetMenu::new(
+                                                crate::config::list_presets(),
+                                                &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                                self.active_preset.clone(),
+                                            );
+                                        },
                                         Err(err_text) => menu.set_error(err_text),
                                     }
+                                }
+                                // Re-save backup and preview first preset
+                                self.save_preset_backup();
+                                if let Some(entry) = self
+                                    .show_preset_menu
+                                    .as_ref()
+                                    .and_then(|menu| menu.presets.first())
+                                {
+                                    let name = entry.name.clone();
+                                    self.preview_preset(&name);
                                 }
                             }
                             crate::ui::components::PresetAction::Delete(name) => {
@@ -179,18 +193,32 @@ impl App {
                                         });
                                     }
                                     Ok(()) => {
-                                        let _ = crate::config::save_state_as_last(&self.monitors);
-                                        match crate::config::apply_preset(&name, &mut self.monitors) {
-                                            Ok(()) => {
-                                                // Successful apply: don't restore the backup.
-                                                self.active_preset = Some(name.clone());
-                                                self.preset_backup = None;
-                                                self.show_preset_menu = None;
-                                                self.write();
-                                            }
-                                            Err(err_text) => {
-                                                if let Some(menu) = self.show_preset_menu.as_mut() {
-                                                    menu.set_error(err_text);
+                                        // Block presets with 0 enabled monitors
+                                        if crate::config::count_enabled_monitors_in_preset(&name) == Some(0) {
+                                            self.show_preset_menu = None;
+                                            self.restore_preset_backup();
+                                            self.show_popup = Some(Popup {
+                                                title: " Preset Mismatch ".to_string(),
+                                                lines: vec![
+                                                    "This preset has 0 enabled monitors.".to_string(),
+                                                    "Enable at least one monitor in the preset to apply it.".to_string(),
+                                                ],
+                                                is_error: true,
+                                            });
+                                        } else {
+                                            let _ = crate::config::save_state_as_last(&self.monitors);
+                                            match crate::config::apply_preset(&name, &mut self.monitors) {
+                                                Ok(()) => {
+                                                    // Successful apply: don't restore the backup.
+                                                    self.active_preset = Some(name.clone());
+                                                    self.preset_backup = None;
+                                                    self.show_preset_menu = None;
+                                                    self.write();
+                                                }
+                                                Err(err_text) => {
+                                                    if let Some(menu) = self.show_preset_menu.as_mut() {
+                                                        menu.set_error(err_text);
+                                                    }
                                                 }
                                             }
                                         }
@@ -201,7 +229,7 @@ impl App {
                                 // Restore pre-menu state so override saves the real
                                 // monitor_state, not the live-preview values.
                                 self.restore_preset_backup();
-                                let result = crate::config::override_preset(&name, &mut self.monitors);
+                                let result = crate::config::override_preset(&name, &self.monitors);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
                                         Ok(()) => {

@@ -197,10 +197,12 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
     }
 }
 
-// Override current configuration with a preset (merge preset settings on top of current config).
-// Currently behaves the same as apply_preset, but reserved for future merge behavior.
-pub fn override_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> {
-    apply_preset(name, monitors)
+// Override the preset with the current monitor configuration: saves the
+// current monitor state under the given preset name, replacing any existing
+// preset with that name.
+pub fn override_preset(name: &str, monitors: &[Monitor]) -> Result<(), String> {
+    save_preset(name, monitors)
+        .map_err(|e| format!("Failed to save preset '{}': {}", name, e))
 }
 
 // Count the number of enabled monitors in a preset.

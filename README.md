@@ -49,6 +49,10 @@ paru -S display-tui-git
 
 AUR installation is fully automatic and adds `display-tui` as a .desktop shortcut, so you can launch it from your application launcher.
 
+> [!NOTE]
+> The .desktop shortcut is broken if you install from the AUR!
+> [See here for a fix](docs/aur-fix.md)
+
 ### AppImage (Universal / All Distributions)
 
 You can download the latest AppImage from the [Releases](https://github.com/Henriklmao/display-tui/releases) page. The AppImage is built automatically and includes everything needed to run `display-tui` on any Linux distribution.

@@ -2,6 +2,7 @@
 //!
 //! Contains the main App struct, its methods, and the Popup type.
 
+use crate::CliAction;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state};
 use crate::monitor::Monitor;
 use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
@@ -26,6 +27,7 @@ pub struct App {
     pub show_preset_menu: Option<PresetMenu>,
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
     pub active_preset: Option<String>,
+    pub cli_action: Option<CliAction>,
 }
 
 // Popup message displayed to the user.
@@ -38,6 +40,14 @@ pub struct Popup {
 }
 
 impl App {
+    // Create a new App with an optional CLI action.
+    pub fn new(action: Option<CliAction>) -> Self {
+        App {
+            cli_action: action,
+            ..Default::default()
+        }
+    }
+
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         self.monitors = Monitor::get_monitors();
 
@@ -63,11 +73,118 @@ impl App {
         self.selected_monitor = 0;
         self.config = Configuration::get();
 
+        // Handle CLI actions before entering the main loop.
+        let cli_action = self.cli_action.take();
+        match cli_action {
+            Some(CliAction::LoadPreset(ref name)) => {
+                self.handle_cli_preset_load(name);
+            }
+            Some(CliAction::OpenPresetMenu) => {
+                self.handle_cli_open_preset_menu();
+            }
+            _ => {}
+        }
+
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
         }
         Ok(())
+    }
+
+    // CLI: load, validate, and apply a preset. On failure, show an error
+    // popup and fall through to the normal TUI so the user can fix things.
+    fn handle_cli_preset_load(&mut self, name: &str) {
+        // Validate preset exists and name is valid
+        match crate::config::validate_preset_monitors_match(name, &self.monitors) {
+            Err(missing) => {
+                // Apply the preset anyway but show mismatch popup
+                let _ = crate::config::save_state_as_last(&self.monitors);
+                let _ = crate::config::apply_preset(name, &mut self.monitors);
+                self.active_preset = Some(name.to_string());
+
+                let mut lines = vec![
+                    "Preset does not match connected monitors.".to_string(),
+                    "".to_string(),
+                    "Missing monitors:".to_string(),
+                ];
+                for m in &missing {
+                    lines.push(format!("  • {}", m));
+                }
+                lines.push("".to_string());
+                lines.push("<Enter> Accept anyway, or <Esc> Cancel".to_string());
+                self.show_popup = Some(Popup {
+                    title: " Preset Mismatch ".to_string(),
+                    lines,
+                    is_error: false,
+                    apply_preset: None,
+                    is_forceable: true,
+                });
+            }
+            Ok(()) => {
+                // Check for zero-monitor preset
+                if crate::config::count_enabled_monitors_in_preset(name) == Some(0) {
+                    let _ = crate::config::apply_preset(name, &mut self.monitors);
+                    self.active_preset = Some(name.to_string());
+                    self.show_popup = Some(Popup {
+                        title: " Preset Warning ".to_string(),
+                        lines: vec![
+                            "This preset has 0 enabled monitors.".to_string(),
+                            "".to_string(),
+                            "<Enter> Accept".to_string(),
+                        ],
+                        is_error: false,
+                        apply_preset: None,
+                        is_forceable: false,
+                    });
+                } else {
+                    // Apply and write
+                    let _ = crate::config::save_state_as_last(&self.monitors);
+                    match crate::config::apply_preset(name, &mut self.monitors) {
+                        Ok(()) => {
+                            self.active_preset = Some(name.to_string());
+                            self.write();
+                            // If write succeeded (no popup shown), exit.
+                            if self.show_popup.is_none() {
+                                let _ = save_monitor_state(&self.monitors);
+                                self.exit = true;
+                            }
+                        }
+                        Err(err_text) => {
+                            self.show_popup = Some(Popup {
+                                title: " Error ".to_string(),
+                                lines: vec![err_text],
+                                is_error: true,
+                                apply_preset: None,
+                                is_forceable: false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // CLI: open the preset menu immediately on startup.
+    fn handle_cli_open_preset_menu(&mut self) {
+        self.save_preset_backup();
+        self.show_preset_menu = Some(crate::ui::components::PresetMenu::new(
+            crate::config::list_presets(),
+            &self
+                .monitors
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<String>>(),
+            self.active_preset.clone(),
+        ));
+        // Preview the first preset.
+        let first_preset = self
+            .show_preset_menu
+            .as_ref()
+            .and_then(|menu| menu.presets.first().map(|entry| entry.name.clone()));
+        if let Some(name) = first_preset {
+            self.preview_preset(&name);
+        }
     }
 
     fn draw(&self, frame: &mut Frame) {

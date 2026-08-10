@@ -46,7 +46,7 @@ pub struct PresetEntry {
     pub has_mismatch: bool,
 }
 
-/// PresetMenu component.
+// PresetMenu component.
 pub struct PresetMenu {
     pub state: MenuState,
     pub presets: Vec<PresetEntry>,

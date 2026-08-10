@@ -65,6 +65,16 @@ impl App {
                     if let Some(workspace) = saved_state.workspace {
                         monitor.workspace = Some(workspace);
                     }
+                    monitor.transform = saved_state.rotation.clone();
+                    if let Some(ref res) = saved_state.resolution
+                        && let Some(idx) = monitor.modes.iter().position(|m| {
+                            m.width == res.width
+                                && m.height == res.height
+                                && (m.refresh - res.refresh_rate).abs() < 0.1
+                        })
+                    {
+                        monitor.set_current_resolution(idx);
+                    }
                 }
             }
         }
@@ -517,12 +527,23 @@ impl App {
         self.preset_backup = Some(
             self.monitors
                 .iter()
-                .map(|m| crate::config::MonitorState {
-                    name: m.name.clone(),
-                    enabled: m.enabled,
-                    position: m.position.clone(),
-                    scale: m.scale,
-                    workspace: m.workspace,
+                .map(|m| {
+                    let resolution =
+                        m.get_current_resolution()
+                            .map(|r| crate::config::ResolutionState {
+                                width: r.width,
+                                height: r.height,
+                                refresh_rate: r.refresh,
+                            });
+                    crate::config::MonitorState {
+                        name: m.name.clone(),
+                        enabled: m.enabled,
+                        position: m.position.clone(),
+                        scale: m.scale,
+                        workspace: m.workspace,
+                        rotation: m.transform.clone(),
+                        resolution,
+                    }
                 })
                 .collect(),
         );
@@ -537,6 +558,16 @@ impl App {
                     monitor.position = state.position;
                     monitor.scale = state.scale;
                     monitor.workspace = state.workspace;
+                    monitor.transform = state.rotation;
+                    if let Some(ref res) = state.resolution
+                        && let Some(idx) = monitor.modes.iter().position(|m| {
+                            m.width == res.width
+                                && m.height == res.height
+                                && (m.refresh - res.refresh_rate).abs() < 0.1
+                        })
+                    {
+                        monitor.set_current_resolution(idx);
+                    }
                 }
             }
         }
@@ -551,10 +582,22 @@ impl App {
                     if let Some(monitor) =
                         self.monitors.iter().find(|m| m.name == monitor_state.name)
                     {
+                        let current_res = monitor.get_current_resolution();
+                        let resolution_changed = match (&monitor_state.resolution, current_res) {
+                            (Some(pr), Some(cr)) => {
+                                pr.width != cr.width
+                                    || pr.height != cr.height
+                                    || (pr.refresh_rate - cr.refresh).abs() >= 0.1
+                            }
+                            (None, None) => false,
+                            _ => true,
+                        };
                         let changed = monitor.position != monitor_state.position
                             || monitor.scale != monitor_state.scale
                             || monitor.workspace != monitor_state.workspace
-                            || monitor.enabled != monitor_state.enabled;
+                            || monitor.enabled != monitor_state.enabled
+                            || monitor.transform != monitor_state.rotation
+                            || resolution_changed;
                         if changed {
                             self.active_preset = None;
                             return;

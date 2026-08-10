@@ -123,9 +123,12 @@ mod tests {
             .iter()
             .map(|m| MonitorState {
                 name: m.name.clone(),
+                enabled: m.enabled,
                 position: m.position.clone(),
                 scale: m.scale,
                 workspace: m.workspace,
+                rotation: None,
+                resolution: None,
             })
             .collect();
 

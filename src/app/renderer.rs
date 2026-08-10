@@ -1,5 +1,8 @@
 //! UI rendering for the display-tui application.
 
+use super::state::App;
+use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
+use crate::utils::TUIMode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -7,19 +10,20 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use super::state::App;
-use crate::ui::components::{HelpModal, MonitorList, Map, Resolutions, Scale};
-use crate::utils::TUIMode;
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let is_previewing = self.show_preset_menu.is_some();
+
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
 
         let canvas = Map {
             selected: self.selected_monitor,
             monitors: &self.monitors,
+            is_previewing,
         };
+        monitor_list.is_previewing = is_previewing;
         let outer_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -51,6 +55,10 @@ impl Widget for &App {
         }
         monitor_list.render(outer_layout[1], buf);
 
+        if let Some(ref preset_menu) = self.show_preset_menu {
+            preset_menu.render(area, buf);
+        }
+
         if self.show_help {
             HelpModal::render(area, buf);
         }
@@ -62,10 +70,12 @@ impl Widget for &App {
                 text.push(Line::from(line.clone()));
                 text.push(Line::from(""));
             }
-            if popup.is_error {
+            if popup.is_error && popup.is_forceable {
                 text.push(Line::from(
-                    "Press <f> to force write anyway, or <Esc>, <Enter>, <q> to close.".gray(),
+                    "Press <f> to force write, or <Esc/Enter> to close.".gray(),
                 ));
+            } else if popup.is_error {
+                text.push(Line::from("<Esc/Enter> to close.".gray()));
             }
             let color = if popup.is_error {
                 Color::Red

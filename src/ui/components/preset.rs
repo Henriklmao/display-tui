@@ -258,12 +258,15 @@ impl PresetMenu {
                         let marker = if i == self.selected_index { " > " } else { "   " };
                         // Presets with 0 enabled monitors get a dimmed indicator.
                         if entry.enabled_count == 0 {
-                            lines.push(Line::from(format!("   {} ", display)).dark_gray());
+                            lines.push(Line::from(format!("{} {} ", marker, display)).dark_gray());
                             continue;
                         }
                         let mut line = Line::from(format!("{} {} ", marker, display));
                         if entry.has_mismatch {
                             line = line.red();
+                            if i == self.selected_index {
+                                line = line.bold();
+                            }
                         } else if i == self.selected_index {
                             line = line.cyan();
                             if is_last {

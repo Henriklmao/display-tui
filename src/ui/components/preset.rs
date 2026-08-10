@@ -102,7 +102,7 @@ impl PresetMenu {
 
     // Handles key events for the preset menu and returns how the event was consumed.
     pub fn handle_event(&mut self, key: KeyCode) -> MenuEvent {
-        // Clear any stae error message from a previous key press.
+        // Clear any stale error message from a previous key press.
         self.error_message = None;
 
         match &mut self.state {

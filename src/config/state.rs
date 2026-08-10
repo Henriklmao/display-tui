@@ -151,6 +151,35 @@ pub fn load_preset(name: &str) -> Option<Vec<MonitorState>> {
     serde_json::from_str(&content).ok()
 }
 
+// Check whether all enabled monitors in a preset are currently physically connected.
+// Returns Ok(()) on a match, otherwise Err with the list of missing monitor names.
+pub fn validate_preset_monitors_match(
+    preset_name: &str,
+    connected_monitors: &[Monitor],
+) -> Result<(), Vec<String>> {
+    let state = match load_preset(preset_name) {
+        Some(state) => state,
+        None => return Err(vec![format!("Preset '{}' not found", preset_name)]),
+    };
+
+    let connected_names: Vec<&str> = connected_monitors
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    let missing: Vec<String> = state
+        .iter()
+        .filter(|m| m.enabled)
+        .map(|m| m.name.clone())
+        .filter(|name| !connected_names.contains(&name.as_str()))
+        .collect();
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(missing)
+    }
+}
+
 // Apply a preset to the current monitors configuration.
 pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> {
     if let Some(state) = load_preset(name) {

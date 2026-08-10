@@ -28,42 +28,36 @@ pub fn parse_args() -> CliAction {
         return CliAction::Normal;
     }
 
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--help" | "-h" => return CliAction::Help,
+    match args[0].as_str() {
+        "--help" | "-h" => CliAction::Help,
 
-            // Combined short forms: -pl, -pm
-            s if s.starts_with("-p") && s.len() > 2 => {
-                let rest = &s[2..];
-                match rest {
-                    "l" => return CliAction::ListPresets,
-                    "m" => return CliAction::OpenPresetMenu,
-                    _ => return CliAction::LoadPreset(rest.to_string()),
-                }
-            }
-
-            "-p" => {
-                i += 1;
-                if i >= args.len() {
-                    eprintln!("display-tui: -p requires an argument (preset name, -l, or -m)");
-                    return CliAction::Help;
-                }
-                match args[i].as_str() {
-                    "-l" | "l" => return CliAction::ListPresets,
-                    "-m" | "m" => return CliAction::OpenPresetMenu,
-                    name => return CliAction::LoadPreset(name.to_string()),
-                }
-            }
-
-            other => {
-                eprintln!("display-tui: unknown argument '{}'", other);
-                return CliAction::Help;
+        // Combined short forms: -pl, -pm, -p<name>
+        s if s.starts_with("-p") && s.len() > 2 => {
+            let rest = &s[2..];
+            match rest {
+                "l" => CliAction::ListPresets,
+                "m" => CliAction::OpenPresetMenu,
+                _ => CliAction::LoadPreset(rest.to_string()),
             }
         }
-    }
 
-    CliAction::Normal
+        "-p" => {
+            if args.len() < 2 {
+                eprintln!("display-tui: -p requires an argument (preset name, -l, or -m)");
+                return CliAction::Help;
+            }
+            match args[1].as_str() {
+                "-l" | "l" => CliAction::ListPresets,
+                "-m" | "m" => CliAction::OpenPresetMenu,
+                name => CliAction::LoadPreset(name.to_string()),
+            }
+        }
+
+        other => {
+            eprintln!("display-tui: unknown argument '{}'", other);
+            CliAction::Help
+        }
+    }
 }
 
 // Print the CLI help text and exit.

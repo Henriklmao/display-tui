@@ -66,7 +66,7 @@ In this case spawns a kitty terminal window with the preset menu open, allowing 
   hl.bind("SUPER + CTRL + D", hl.dsp.exec_cmd("kitty display-tui -pm"))
 ```
 
-### Load a preset directly
+#### Load a preset directly
 
 This will load the preset named `my-setup` and apply.
 

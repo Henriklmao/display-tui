@@ -24,6 +24,7 @@ pub struct MonitorList<'a> {
     pub selected_row: Option<usize>,
     pub state: TableState,
     pub monitors: &'a [Monitor],
+    pub is_previewing: bool,
 }
 
 impl<'a> MonitorList<'a> {
@@ -33,6 +34,7 @@ impl<'a> MonitorList<'a> {
             selected_row,
             state: TableState::default().with_selected(selected_row),
             monitors,
+            is_previewing: false,
         }
     }
 
@@ -175,13 +177,10 @@ impl<'a> MonitorList<'a> {
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(
-            if self.monitors.len() > 1 {
-                " Displays "
-            } else {
-                " Display "
-            }
-            .white()
-            .bold(),
+            format!("{}{}",
+                if self.monitors.len() > 1 { " Displays " } else { " Display " },
+                if self.is_previewing { "(Preview)" } else { "" }
+            ).white().bold(),
         );
         let mut instructions_items = vec![];
 
@@ -349,6 +348,7 @@ mod tests {
             selected_row: Some(0),
             mode: TUIMode::View,
             monitors: &test_monitors(),
+            is_previewing: false,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
 

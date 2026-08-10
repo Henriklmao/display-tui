@@ -13,13 +13,17 @@ use crate::utils::TUIMode;
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let is_previewing = self.show_preset_menu.is_some();
+
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
 
         let canvas = Map {
             selected: self.selected_monitor,
             monitors: &self.monitors,
+            is_previewing,
         };
+        monitor_list.is_previewing = is_previewing;
         let outer_layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])

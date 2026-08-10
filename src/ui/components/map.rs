@@ -31,6 +31,7 @@ use crate::{
 pub struct Map<'a>{
     pub selected: usize,
     pub monitors:&'a Vec<Monitor>,
+    pub is_previewing: bool,
 }
 
 impl<'a> Widget for Map<'a>{
@@ -39,7 +40,12 @@ impl<'a> Widget for Map<'a>{
 
         let monitor_canvas = Monitor::get_monitors_canvas(self.monitors,&area);
 
-        let title = Line::from(" Map ".white().bold());
+        let title_text = if self.is_previewing {
+            " Map (Preview) "
+        } else {
+            " Map "
+        };
+        let title = Line::from(title_text.white().bold());
 
         let block = Block::bordered()
             .title(title.centered())
@@ -189,6 +195,7 @@ mod tests {
         let map = Map {
             selected: 0,
             monitors: &test_monitors(),
+            is_previewing: false,
         }; 
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         

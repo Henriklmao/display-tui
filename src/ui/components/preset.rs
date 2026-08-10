@@ -1,11 +1,10 @@
 //! Preset menu component for managing saved monitor configurations.
 
 use crate::config::{count_enabled_monitors_in_preset, load_preset};
-use crate::ui::layouts::centered_rect;
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
@@ -244,8 +243,30 @@ impl PresetMenu {
         }
     }
 
+}
+// Responsive popup rect for preset menu
+fn preset_rect(area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Max(30),
+            Constraint::Min(1),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Max(60),
+            Constraint::Min(1),
+        ])
+        .split(vertical[1])[1]
+}
+impl PresetMenu {
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
-        let popup_area = centered_rect(50, 40, area);
+        let popup_area = preset_rect(area);
         Clear.render(popup_area, buf);
 
         let mut text: Vec<Line> = match &self.state {
@@ -291,9 +312,14 @@ impl PresetMenu {
                     }
                 }
                 lines.push(Line::from(""));
-                lines.push(Line::from(
-                    "[Enter/Space] Apply  [o] Override  [n] New  [d] Delete  [r] Rename  [Esc] Close".dim(),
-                ));
+                // Responsive hints
+                if popup_area.width >= 60 {
+                    lines.push(Line::from("[Enter/Space] Apply  [o] Override  [n] New").dim());
+                    lines.push(Line::from("[d] Delete  [r] Rename  [Esc] Close").dim());
+                } else {
+                    lines.push(Line::from("[Enter] Apply [o] Override [n] New").dim());
+                    lines.push(Line::from("[d] Delete [r] Rename [Esc] Close").dim());
+                }
                 lines
             }
             MenuState::CreateName(name) => {
@@ -302,7 +328,11 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Name: {} ", name).yellow()),
                     Line::from(""),
-                    Line::from("[Enter] Save  [Esc] Cancel".dim()),
+                    if popup_area.width >= 60 {
+                        Line::from("[Enter] Save  [Esc] Cancel").dim()
+                    } else {
+                        Line::from("[Enter] Save [Esc] Cancel").dim()
+                    },
                 ]
             }
             MenuState::DeleteConfirm(name) => {
@@ -311,7 +341,11 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Are you sure you want to delete '{}'? ", name).yellow()),
                     Line::from(""),
-                    Line::from("[y] Yes  [n] No  [Esc] Cancel".dim()),
+                    if popup_area.width >= 60 {
+                        Line::from("[y] Yes  [n] No  [Esc] Cancel").dim()
+                    } else {
+                        Line::from("[y] Yes [n] No [Esc] Cancel").dim()
+                    },
                 ]
             }
             MenuState::RenameName(old_name, new_name) => {
@@ -320,7 +354,11 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Rename '{}' to: {} ", old_name, new_name).yellow()),
                     Line::from(""),
-                    Line::from("[Enter] Save  [Esc] Cancel".dim()),
+                    if popup_area.width >= 60 {
+                        Line::from("[Enter] Save  [Esc] Cancel").dim()
+                    } else {
+                        Line::from("[Enter] Save [Esc] Cancel").dim()
+                    },
                 ]
             }
         };

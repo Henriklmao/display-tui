@@ -70,10 +70,12 @@ impl Widget for &App {
                 text.push(Line::from(line.clone()));
                 text.push(Line::from(""));
             }
-            if popup.is_error {
+            if popup.is_error && popup.is_forceable {
                 text.push(Line::from(
                     "Press <f> to force write, or <Esc>/<Enter> to close.".gray(),
                 ));
+            } else if popup.is_error {
+                text.push(Line::from("<Esc>/<Enter> to close.".gray()));
             }
             let color = if popup.is_error {
                 Color::Red

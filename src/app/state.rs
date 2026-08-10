@@ -34,6 +34,7 @@ pub struct Popup {
     pub lines: Vec<String>,
     pub is_error: bool,
     pub apply_preset: Option<String>,
+    pub is_forceable: bool,
 }
 
 impl App {
@@ -202,6 +203,7 @@ impl App {
                                             lines: popup_lines,
                                             is_error: false,  // Not a hard error
                                             apply_preset: Some(name),
+                                            is_forceable: true,
                                         });
                                     }
                                     Ok(()) => {
@@ -222,6 +224,7 @@ impl App {
                                                 ],
                                                 is_error: false,
                                                 apply_preset: None,
+                                                is_forceable: false,
                                             });
                                         } else {
                                             let _ = crate::config::save_state_as_last(&self.monitors);
@@ -305,6 +308,7 @@ impl App {
                         lines: errs,
                         is_error: true,
                         apply_preset: None,
+                        is_forceable: false,
                     })
                 }
             },
@@ -516,6 +520,7 @@ impl App {
                 lines: vec!["At least one monitor must be enabled.".to_string()],
                 is_error: true,
                 apply_preset: None,
+                is_forceable: false,
             });
             return;
         }
@@ -534,6 +539,7 @@ impl App {
                 lines,
                 is_error: true,
                 apply_preset: None,
+                is_forceable: true,
             });
         } else {
             let _ = std::process::Command::new("hyprctl")

@@ -198,16 +198,33 @@ impl App {
                                 }
                             }
                             crate::ui::components::PresetAction::Override(name) => {
+                                // Restore pre-menu state so override saves the real
+                                // monitor_state, not the live-preview values.
+                                self.restore_preset_backup();
                                 let result = crate::config::override_preset(&name, &mut self.monitors);
                                 if let Some(menu) = self.show_preset_menu.as_mut() {
                                     match result {
-                                        Ok(()) => *menu = crate::ui::components::PresetMenu::new(
-                                            crate::config::list_presets(),
-                                            &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
-                                            self.active_preset.clone(),
-                                        ),
+                                        Ok(()) => {
+                                            *menu = crate::ui::components::PresetMenu::new(
+                                                crate::config::list_presets(),
+                                                &self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<String>>(),
+                                                self.active_preset.clone(),
+                                            );
+                                        },
                                         Err(err_text) => menu.set_error(err_text),
                                     }
+                                }
+                                // Re-save backup and preview first preset (the
+                                // menu borrow above has ended, so self methods
+                                // are safe to call here).
+                                self.save_preset_backup();
+                                if let Some(entry) = self
+                                    .show_preset_menu
+                                    .as_ref()
+                                    .and_then(|menu| menu.presets.first())
+                                {
+                                    let name = entry.name.clone();
+                                    self.preview_preset(&name);
                                 }
                             }
                         }

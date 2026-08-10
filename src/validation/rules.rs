@@ -8,7 +8,10 @@ pub fn validate_workspaces_unique(monitors: &[Monitor]) -> Result<(), Vec<Valida
     let mut ws_counts = std::collections::HashMap::new();
     for monitor in monitors {
         if let Some(ws) = monitor.workspace {
-            ws_counts.entry(ws).or_insert_with(Vec::new).push(monitor.name.clone());
+            ws_counts
+                .entry(ws)
+                .or_insert_with(Vec::new)
+                .push(monitor.name.clone());
         }
     }
 
@@ -120,12 +123,13 @@ pub fn validate_contiguous(monitors: &[Monitor]) -> Result<(), Vec<ValidationErr
                 disconnected.push(monitors[enabled_indices[idx]].name.clone());
             }
         }
-        Err(vec![ValidationError::NonContiguousMonitors { disconnected }])
+        Err(vec![ValidationError::NonContiguousMonitors {
+            disconnected,
+        }])
     } else {
         Ok(())
     }
 }
-
 
 // Validates that a preset name only contains ASCII alphanumeric characters and hyphens.
 pub fn validate_preset_name(name: &str) -> Result<(), Vec<ValidationError>> {
@@ -135,7 +139,6 @@ pub fn validate_preset_name(name: &str) -> Result<(), Vec<ValidationError>> {
         Err(vec![ValidationError::InvalidName])
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -148,6 +151,7 @@ mod tests {
         assert!(validate_preset_name("A").is_ok());
         assert!(validate_preset_name("123").is_ok());
         assert!(validate_preset_name("a-b-c-42").is_ok());
+        assert!(validate_preset_name("-").is_ok()); // single hyphen is allowed
     }
 
     #[test]
@@ -163,6 +167,5 @@ mod tests {
         assert!(validate_preset_name("slash/name").is_err());
         assert!(validate_preset_name("../escape").is_err());
         assert!(validate_preset_name("unicode-é").is_err());
-        assert!(validate_preset_name("-").is_ok()); // single hyphen is allowed
     }
 }

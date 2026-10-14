@@ -51,3 +51,101 @@ pub fn validate_preset_name(name: &str) -> Result<(), Vec<String>> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{validate, validate_preset_name};
+    use crate::monitor::{Monitor, Position, Resolution};
+
+    // A rectangular enabled monitor occupying (x, y) .. (x+w, y+h).
+    fn box_at(name: &str, x: i32, y: i32, workspace: Option<u8>) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            enabled: true,
+            position: Some(Position { x, y }),
+            scale: Some(1.0),
+            workspace,
+            modes: vec![Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn valid_layout_is_accepted() {
+        let monitors = vec![
+            box_at("A", 0, 0, Some(1)),
+            box_at("B", 1920, 0, Some(2)),
+            box_at("C", 3840, 0, None),
+        ];
+
+        assert_eq!(validate(&monitors), Ok(()));
+    }
+
+    #[test]
+    fn empty_configuration_is_accepted() {
+        assert_eq!(validate(&[]), Ok(()));
+    }
+
+    #[test]
+    fn every_violation_is_collected_as_a_message() {
+        // A and B share a workspace and overlap; C is far away.
+        let monitors = vec![
+            box_at("A", 0, 0, Some(1)),
+            box_at("B", 100, 0, Some(1)),
+            box_at("C", 50_000, 0, None),
+        ];
+
+        let errors = validate(&monitors).unwrap_err();
+
+        assert_eq!(errors.len(), 3, "got: {errors:?}");
+        assert_eq!(
+            errors[0],
+            "Workspace 1 is assigned to multiple monitors: A, B"
+        );
+        assert_eq!(errors[1], "Monitors overlap: A and B");
+        assert_eq!(errors[2], "Monitors not contiguous. Disconnected: C");
+    }
+
+    #[test]
+    fn messages_are_reported_in_rule_order() {
+        // Overlap and contiguity both fail; rules run in a fixed order.
+        let monitors = vec![
+            box_at("A", 0, 0, None),
+            box_at("B", 100, 0, None),
+            box_at("C", 50_000, 0, None),
+        ];
+
+        let errors = validate(&monitors).unwrap_err();
+
+        assert_eq!(
+            errors,
+            vec![
+                "Monitors overlap: A and B".to_string(),
+                "Monitors not contiguous. Disconnected: C".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn preset_name_wrapper_accepts_valid_names() {
+        assert_eq!(validate_preset_name("gaming-desk"), Ok(()));
+    }
+
+    #[test]
+    fn preset_name_wrapper_explains_rejections() {
+        let errors = validate_preset_name("my preset").unwrap_err();
+        assert_eq!(
+            errors,
+            vec![
+                "Preset name is invalid (must contain only letters, numbers, and hyphens)"
+                    .to_string()
+            ]
+        );
+    }
+}

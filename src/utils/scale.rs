@@ -27,3 +27,81 @@ impl ScaleValue {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ScaleValue;
+
+    #[test]
+    fn new_stores_name_and_value() {
+        let scale = ScaleValue::new("150%", 1.5);
+        assert_eq!(scale.name, "150%");
+        assert_eq!(scale.value, 1.5);
+    }
+
+    #[test]
+    fn table_contains_expected_entries() {
+        let table = ScaleValue::table();
+        assert_eq!(table.len(), 9);
+        assert_eq!(table.first().unwrap().name, "50%");
+        assert_eq!(table.last().unwrap().name, "200%");
+    }
+
+    #[test]
+    fn table_contents_are_pinned() {
+        // Snapshot of the whole table so accidental edits to labels or values
+        // are caught. Kept as-is: "66%" is a rounded label for the stored
+        // 0.6 step.
+        let table: Vec<(&str, f32)> = ScaleValue::table()
+            .iter()
+            .map(|s| (s.name, s.value))
+            .collect();
+        assert_eq!(
+            table,
+            vec![
+                ("50%", 0.5),
+                ("66%", 0.6),
+                ("75%", 0.75),
+                ("80%", 0.8),
+                ("100%", 1.0),
+                ("125%", 1.25),
+                ("160%", 1.6),
+                ("175%", 1.75),
+                ("200%", 2.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn table_labels_are_percentages() {
+        for scale in ScaleValue::table() {
+            assert!(
+                scale.name.ends_with('%') && scale.name.len() > 1,
+                "unexpected label {:?}",
+                scale.name
+            );
+        }
+    }
+
+    #[test]
+    fn table_is_sorted_ascending_and_duplicate_free() {
+        let table = ScaleValue::table();
+        for pair in table.windows(2) {
+            assert!(
+                pair[1].value > pair[0].value,
+                "values must strictly increase: {} then {}",
+                pair[0].value,
+                pair[1].value
+            );
+            assert_ne!(pair[0].name, pair[1].name);
+        }
+    }
+
+    #[test]
+    fn table_includes_the_default_scale() {
+        assert!(
+            ScaleValue::table().iter().any(|s| s.value == 1.0),
+            "100% must be selectable"
+        );
+    }
+}

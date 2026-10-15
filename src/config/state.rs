@@ -748,4 +748,254 @@ mod tests {
 
         cleanup(&dir);
     }
+
+    #[test]
+    fn apply_preset_overwrites_every_tracked_field() {
+        let dir = temp_dir("apply");
+
+        let mut source = valid_layout();
+        source[0].position = Some(Position { x: 5, y: 6 });
+        source[0].scale = Some(0.5);
+        source[0].workspace = Some(4);
+        source[0].transform = Some("90".to_string());
+        source[1].enabled = false;
+        save_preset_in(&dir, "p", &source).unwrap();
+
+        let mut live = valid_layout();
+        apply_preset_in(&dir, "p", &mut live).unwrap();
+
+        assert_eq!(live[0].position, Some(Position { x: 5, y: 6 }));
+        assert_eq!(live[0].scale, Some(0.5));
+        assert_eq!(live[0].workspace, Some(4));
+        assert_eq!(live[0].transform.as_deref(), Some("90"));
+        assert!(!live[1].enabled, "preset may disable a monitor");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn apply_preset_switches_to_the_saved_resolution() {
+        let dir = temp_dir("apply-res");
+
+        let mut two_modes = valid_layout();
+        two_modes[0].modes.push(Resolution {
+            width: 1280,
+            height: 720,
+            refresh: 75.0,
+            preferred: false,
+            current: true,
+        });
+        two_modes[0].modes[0].current = false;
+        // With the second mode current, DP-1 is only 1024 logical pixels
+        // wide, so HDMI has to sit at 1024 for the layout to stay contiguous.
+        two_modes[1].position = Some(Position { x: 1024, y: 0 });
+        save_preset_in(&dir, "p", &two_modes).unwrap();
+
+        // Live monitor still runs on its first mode.
+        let mut live = valid_layout();
+        live[0].modes.push(Resolution {
+            width: 1280,
+            height: 720,
+            refresh: 75.0,
+            preferred: false,
+            current: false,
+        });
+        assert!(live[0].modes[0].current);
+
+        apply_preset_in(&dir, "p", &mut live).unwrap();
+
+        assert!(!live[0].modes[0].current);
+        assert!(live[0].modes[1].current, "1280x720@75 must become current");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn apply_preset_keeps_the_current_mode_when_no_mode_matches() {
+        let dir = temp_dir("apply-nomatch");
+
+        let mut source = valid_layout();
+        source[0].modes.push(Resolution {
+            width: 800,
+            height: 600,
+            refresh: 60.0,
+            preferred: false,
+            current: true,
+        });
+        source[0].modes[0].current = false;
+        // 800x600 at 125% scale is 640 logical pixels wide.
+        source[1].position = Some(Position { x: 640, y: 0 });
+        save_preset_in(&dir, "p", &source).unwrap();
+
+        // Live monitor has no 800x600 mode at all.
+        let mut live = valid_layout();
+        apply_preset_in(&dir, "p", &mut live).unwrap();
+
+        assert!(live[0].modes[0].current, "unmatched mode is ignored");
+        assert_eq!(live[0].modes.len(), 1);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn apply_preset_leaves_unknown_monitors_alone() {
+        let dir = temp_dir("apply-unknown");
+
+        save_preset_in(&dir, "p", &valid_layout()).unwrap();
+
+        let mut live = vec![
+            monitor("DP-1", 999, None),
+            monitor("NOT-IN-PRESET", 0, Some(7)),
+        ];
+        apply_preset_in(&dir, "p", &mut live).unwrap();
+
+        assert_eq!(
+            live[0].position,
+            Some(Position { x: 0, y: 0 }),
+            "DP-1 was in the preset, so it was reset"
+        );
+        assert_eq!(
+            live[1].position,
+            Some(Position { x: 0, y: 0 }),
+            "monitors absent from the preset keep their values"
+        );
+        assert_eq!(live[1].workspace, Some(7));
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn apply_preset_reports_a_missing_preset() {
+        let dir = temp_dir("apply-missing");
+
+        let mut live = valid_layout();
+        let err = apply_preset_in(&dir, "ghost", &mut live).unwrap_err();
+
+        assert_eq!(err, "Preset 'ghost' not found");
+        assert_eq!(
+            live[0].position,
+            Some(Position { x: 0, y: 0 }),
+            "nothing may change on failure"
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn count_only_includes_enabled_monitors() {
+        let dir = temp_dir("count");
+
+        let mut layout = valid_layout();
+        layout[1].enabled = false;
+        save_preset_in(&dir, "p", &layout).unwrap();
+
+        assert_eq!(count_enabled_monitors_in_preset_in(&dir, "p"), Some(1));
+
+        save_preset_in(&dir, "all", &valid_layout()).unwrap();
+        assert_eq!(count_enabled_monitors_in_preset_in(&dir, "all"), Some(2));
+
+        assert_eq!(count_enabled_monitors_in_preset_in(&dir, "ghost"), None);
+        assert_eq!(count_enabled_monitors_in_preset_in(&dir, "bad name"), None);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn preset_match_is_ok_when_every_enabled_monitor_is_connected() {
+        let dir = temp_dir("match-ok");
+
+        let mut layout = valid_layout();
+        layout[1].enabled = false;
+        save_preset_in(&dir, "p", &layout).unwrap();
+
+        // Only DP-1 is enabled in the preset, so it is the only requirement.
+        let connected = vec![monitor("DP-1", 0, None)];
+        assert_eq!(
+            validate_preset_monitors_match_in(&dir, "p", &connected),
+            Ok(())
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn preset_match_lists_the_missing_monitors() {
+        let dir = temp_dir("match-missing");
+        save_preset_in(&dir, "p", &valid_layout()).unwrap();
+
+        let connected = vec![monitor("DP-1", 0, None)];
+        let missing = validate_preset_monitors_match_in(&dir, "p", &connected).unwrap_err();
+
+        assert_eq!(missing, vec!["HDMI-A-1".to_string()]);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn preset_match_reports_an_unknown_preset() {
+        let dir = temp_dir("match-unknown");
+
+        let err = validate_preset_monitors_match_in(&dir, "ghost", &[]).unwrap_err();
+
+        assert_eq!(err, vec!["Preset 'ghost' not found".to_string()]);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn override_wraps_save_errors_with_context() {
+        let dir = temp_dir("override-err");
+
+        let err = override_preset_in(&dir, "broken", &overlapping_layout()).unwrap_err();
+
+        assert!(
+            err.starts_with("Failed to save preset 'broken': "),
+            "unexpected message: {}",
+            err
+        );
+        assert!(!dir.join("broken.json").exists());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn override_saves_a_valid_layout() {
+        let dir = temp_dir("override-ok");
+
+        override_preset_in(&dir, "desk", &valid_layout()).expect("save");
+
+        assert_eq!(list_presets_in(&dir), vec!["desk".to_string()]);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_state_as_last_skips_layout_validation() {
+        let dir = temp_dir("last-invalid");
+
+        // An overlapping layout may never be rejected: it is the live state.
+        save_state_as_last_in(&dir, &overlapping_layout()).expect("must not validate");
+
+        let loaded = load_preset_in(&dir, "last").expect("last preset loads");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].position, loaded[1].position);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_state_as_last_replaces_a_previous_snapshot() {
+        let dir = temp_dir("last-replace");
+
+        save_state_as_last_in(&dir, &valid_layout()).unwrap();
+        let mut changed = valid_layout();
+        changed[0].scale = Some(2.0);
+
+        save_state_as_last_in(&dir, &changed).unwrap();
+
+        let loaded = load_preset_in(&dir, "last").unwrap();
+        assert_eq!(loaded[0].scale, Some(2.0));
+
+        cleanup(&dir);
+    }
 }

@@ -429,4 +429,172 @@ mod tests {
         // We skip exact buffer comparison here due to length variations,
         // the test already ran and exercised the render path which is the main goal.
     }
+
+    fn text_of(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in buf.area.top()..buf.area.bottom() {
+            for x in buf.area.left()..buf.area.right() {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn render_list_to(monitors: &[Monitor], mode: TUIMode, selected: usize, area: Rect) -> Buffer {
+        let mut list = MonitorList {
+            state: TableState::default(),
+            selected_row: Some(selected),
+            mode,
+            monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+        buf
+    }
+
+    #[test]
+    fn narrow_terminals_get_a_short_instruction_line() {
+        let monitors = test_monitors();
+        let text = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 100, 8),
+        ));
+
+        assert!(text.contains("Keybinds"), "got: {text}");
+        assert!(!text.contains("<m>"), "compact mode drops hints: {text}");
+        assert!(!text.contains("<s>"), "compact mode drops hints: {text}");
+    }
+
+    #[test]
+    fn wide_terminals_get_the_full_instruction_line() {
+        let monitors = test_monitors();
+        let text = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 130, 8),
+        ));
+
+        for hint in ["<m>", "<r>", "<s>", "<o>", "<0-9>", "<w>", "<q>", "<K>"] {
+            assert!(text.contains(hint), "missing hint {hint}: {text}");
+        }
+    }
+
+    #[test]
+    fn duplicate_workspace_assignments_are_flagged() {
+        let mut monitors = test_monitors();
+        for monitor in &mut monitors {
+            monitor.workspace = Some(3);
+        }
+
+        let text = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 130, 9),
+        ));
+
+        assert!(
+            text.contains("Duplicate workspace assignment"),
+            "warning missing: {text}"
+        );
+    }
+
+    #[test]
+    fn distinct_workspace_assignments_are_not_flagged() {
+        let mut monitors = test_monitors();
+        monitors[0].workspace = Some(1);
+        monitors[1].workspace = Some(2);
+
+        let text = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 130, 9),
+        ));
+
+        assert!(!text.contains("Duplicate workspace"), "false alarm: {text}");
+    }
+
+    #[test]
+    fn preview_mode_is_marked_in_the_title() {
+        let monitors = test_monitors();
+        let mut list = MonitorList {
+            state: TableState::default(),
+            selected_row: Some(0),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: true,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 130, 8));
+        list.render(buf.area, &mut buf);
+
+        assert!(text_of(&buf).contains("Preview"));
+    }
+
+    #[test]
+    fn border_colour_follows_the_current_mode() {
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 130, 8);
+
+        let view = render_list_to(&monitors, TUIMode::View, 0, area);
+        assert_eq!(view[(0, 0)].style().fg, Some(Color::Yellow));
+
+        let other = render_list_to(&monitors, TUIMode::Resolution, 0, area);
+        assert_eq!(other[(0, 0)].style().fg, Some(Color::White));
+    }
+
+    #[test]
+    fn enable_hint_follows_the_selected_monitor_state() {
+        let monitors = test_monitors(); // monitor 0 enabled, monitor 1 disabled
+        let wide = Rect::new(0, 0, 130, 8);
+
+        let enabled = text_of(&render_list_to(&monitors, TUIMode::View, 0, wide));
+        assert!(enabled.contains("<d>"), "expected Disable: {enabled}");
+        assert!(!enabled.contains("<e>"), "unexpected Enable: {enabled}");
+
+        let disabled = text_of(&render_list_to(&monitors, TUIMode::View, 1, wide));
+        assert!(disabled.contains("<e>"), "expected Enable: {disabled}");
+        assert!(!disabled.contains("<d>"), "unexpected Disable: {disabled}");
+    }
+
+    #[test]
+    fn sub_modes_add_apply_and_drop_help() {
+        let monitors = test_monitors();
+        let wide = Rect::new(0, 0, 130, 8);
+
+        let view = text_of(&render_list_to(&monitors, TUIMode::View, 0, wide));
+        assert!(view.contains("<K>"), "help hint missing: {view}");
+        assert!(!view.contains("Apply"), "apply is a sub-mode key: {view}");
+
+        let moving = text_of(&render_list_to(&monitors, TUIMode::Move, 0, wide));
+        assert!(moving.contains("Apply"), "apply missing: {moving}");
+        assert!(moving.contains("<Enter>"), "apply key missing: {moving}");
+        assert!(!moving.contains("Help"), "help is view-only: {moving}");
+        assert!(moving.contains("Snapmove"), "move hints missing: {moving}");
+    }
+
+    #[test]
+    fn every_mode_renders_without_panicking_on_small_areas() {
+        for (width, height) in [(30u16, 6), (60, 8), (100, 10), (130, 20)] {
+            let monitors = test_monitors();
+            for mode in [
+                TUIMode::View,
+                TUIMode::Move,
+                TUIMode::Resolution,
+                TUIMode::Scale,
+            ] {
+                render_list_to(
+                    &monitors,
+                    mode,
+                    1,
+                    Rect::new(0, 0, width, height),
+                );
+            }
+        }
+    }
 }

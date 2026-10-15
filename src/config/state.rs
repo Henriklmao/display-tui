@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use crate::monitor::{Monitor, Position};
 use super::paths::{get_state_path, get_presets_dir};
 use crate::validation::{validate, validate_preset_name};
@@ -95,7 +96,14 @@ pub fn load_monitor_state() -> Option<Vec<MonitorState>> {
 // No layout validation — live state can be invalid.
 // No name validation — "last" is always valid.
 pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
-    let preset_path = get_presets_dir().join("last.json");
+    save_state_as_last_in(&get_presets_dir(), monitors)
+}
+
+pub(crate) fn save_state_as_last_in(
+    dir: &Path,
+    monitors: &[Monitor],
+) -> std::io::Result<()> {
+    let preset_path = dir.join("last.json");
     if let Some(parent) = preset_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
@@ -108,6 +116,14 @@ pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
 
 // Save a preset to the presets directory.
 pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
+    save_preset_in(&get_presets_dir(), name, monitors)
+}
+
+pub(crate) fn save_preset_in(
+    dir: &Path,
+    name: &str,
+    monitors: &[Monitor],
+) -> std::io::Result<()> {
     if is_last_preset(name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -130,7 +146,7 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
         ));
     }
 
-    let preset_path = get_presets_dir().join(format!("{}.json", name));
+    let preset_path = dir.join(format!("{}.json", name));
 
     if let Some(parent) = preset_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
@@ -147,10 +163,14 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
 
 // Load a preset from the presets directory.
 pub fn load_preset(name: &str) -> Option<Vec<MonitorState>> {
+    load_preset_in(&get_presets_dir(), name)
+}
+
+pub(crate) fn load_preset_in(dir: &Path, name: &str) -> Option<Vec<MonitorState>> {
     if validate_preset_name(name).is_err() {
         return None;
     }
-    let preset_path = get_presets_dir().join(format!("{}.json", name));
+    let preset_path = dir.join(format!("{}.json", name));
 
     if !preset_path.exists() {
         return None;
@@ -166,7 +186,15 @@ pub fn validate_preset_monitors_match(
     preset_name: &str,
     connected_monitors: &[Monitor],
 ) -> Result<(), Vec<String>> {
-    let state = match load_preset(preset_name) {
+    validate_preset_monitors_match_in(&get_presets_dir(), preset_name, connected_monitors)
+}
+
+pub(crate) fn validate_preset_monitors_match_in(
+    dir: &Path,
+    preset_name: &str,
+    connected_monitors: &[Monitor],
+) -> Result<(), Vec<String>> {
+    let state = match load_preset_in(dir, preset_name) {
         Some(state) => state,
         None => return Err(vec![format!("Preset '{}' not found", preset_name)]),
     };
@@ -191,7 +219,15 @@ pub fn validate_preset_monitors_match(
 
 // Apply a preset to the current monitors configuration.
 pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> {
-    if let Some(state) = load_preset(name) {
+    apply_preset_in(&get_presets_dir(), name, monitors)
+}
+
+pub(crate) fn apply_preset_in(
+    dir: &Path,
+    name: &str,
+    monitors: &mut [Monitor],
+) -> Result<(), String> {
+    if let Some(state) = load_preset_in(dir, name) {
         for monitor_state in state {
             if let Some(monitor) = monitors.iter_mut().find(|m| m.name == monitor_state.name) {
                 monitor.position = monitor_state.position;
@@ -220,19 +256,34 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
 // current monitor state under the given preset name, replacing any existing
 // preset with that name.
 pub fn override_preset(name: &str, monitors: &[Monitor]) -> Result<(), String> {
-    save_preset(name, monitors)
+    override_preset_in(&get_presets_dir(), name, monitors)
+}
+
+pub(crate) fn override_preset_in(
+    dir: &Path,
+    name: &str,
+    monitors: &[Monitor],
+) -> Result<(), String> {
+    save_preset_in(dir, name, monitors)
         .map_err(|e| format!("Failed to save preset '{}': {}", name, e))
 }
 
 // Count the number of enabled monitors in a preset.
 pub fn count_enabled_monitors_in_preset(name: &str) -> Option<usize> {
-    let state = load_preset(name)?;
+    count_enabled_monitors_in_preset_in(&get_presets_dir(), name)
+}
+
+pub(crate) fn count_enabled_monitors_in_preset_in(dir: &Path, name: &str) -> Option<usize> {
+    let state = load_preset_in(dir, name)?;
     Some(state.iter().filter(|m| m.enabled).count())
 }
 
 // List all preset names in the presets directory.
 pub fn list_presets() -> Vec<String> {
-    let dir = get_presets_dir();
+    list_presets_in(&get_presets_dir())
+}
+
+pub(crate) fn list_presets_in(dir: &Path) -> Vec<String> {
     if !dir.exists() {
         return Vec::new();
     }
@@ -264,6 +315,10 @@ pub fn list_presets() -> Vec<String> {
 
 // Delete a preset from the presets directory.
 pub fn delete_preset(name: &str) -> std::io::Result<()> {
+    delete_preset_in(&get_presets_dir(), name)
+}
+
+pub(crate) fn delete_preset_in(dir: &Path, name: &str) -> std::io::Result<()> {
     if is_last_preset(name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -276,7 +331,7 @@ pub fn delete_preset(name: &str) -> std::io::Result<()> {
             format!("Preset name validation failed: {}", errors.join(", ")),
         ));
     }
-    let preset_path = get_presets_dir().join(format!("{}.json", name));
+    let preset_path = dir.join(format!("{}.json", name));
 
     if preset_path.exists() {
         fs::remove_file(preset_path)?;
@@ -288,6 +343,14 @@ pub fn delete_preset(name: &str) -> std::io::Result<()> {
 // Rename a preset: copy the old file to the new name, then remove the old file.
 // Non-destructive: refuses to overwrite an existing preset or rename to the same name.
 pub fn rename_preset(old_name: &str, new_name: &str) -> std::io::Result<()> {
+    rename_preset_in(&get_presets_dir(), old_name, new_name)
+}
+
+pub(crate) fn rename_preset_in(
+    dir: &Path,
+    old_name: &str,
+    new_name: &str,
+) -> std::io::Result<()> {
     if is_last_preset(old_name) || is_last_preset(new_name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -308,8 +371,8 @@ pub fn rename_preset(old_name: &str, new_name: &str) -> std::io::Result<()> {
         ));
     }
 
-    let old_path = get_presets_dir().join(format!("{}.json", old_name));
-    let new_path = get_presets_dir().join(format!("{}.json", new_name));
+    let old_path = dir.join(format!("{}.json", old_name));
+    let new_path = dir.join(format!("{}.json", new_name));
 
     if !old_path.exists() {
         return Err(std::io::Error::new(

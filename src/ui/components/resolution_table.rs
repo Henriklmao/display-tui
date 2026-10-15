@@ -213,4 +213,142 @@ mod tests {
 
         assert_eq!(buf, expected);
     }
+
+    // --- key handling ---------------------------------------------------
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crate::monitor::{Position, Resolution};
+
+    fn monitor(modes: usize) -> Monitor {
+        let modes = (0..modes)
+            .map(|i| Resolution {
+                width: 1920 - i as i32 * 320,
+                height: 1080 - i as i32 * 180,
+                refresh: 60.0 + i as f32 * 15.0,
+                preferred: i == 0,
+                current: i == 0,
+            })
+            .collect();
+        Monitor {
+            name: "DP-1".to_string(),
+            enabled: true,
+            position: Some(Position { x: 0, y: 0 }),
+            scale: Some(1.0),
+            modes,
+            ..Default::default()
+        }
+    }
+
+    fn app(mode_count: usize) -> App {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor(mode_count), monitor(mode_count)];
+        app.selected_monitor = 0;
+        app.mode = TUIMode::Resolution;
+        app
+    }
+
+    fn press(a: &mut App, code: KeyCode) {
+        Resolutions::handle_events(a, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn current_index(m: &Monitor) -> usize {
+        m.modes
+            .iter()
+            .position(|mode| mode.current)
+            .expect("a mode must be selected")
+    }
+
+    #[test]
+    fn j_and_k_walk_through_the_mode_list_and_wrap() {
+        let mut a = app(3);
+
+        press(&mut a, KeyCode::Char('j'));
+        assert_eq!(a.selected_resolution, 1);
+
+        press(&mut a, KeyCode::Down);
+        assert_eq!(a.selected_resolution, 2);
+
+        // At the last entry the next step wraps around to the first.
+        press(&mut a, KeyCode::Char('j'));
+        assert_eq!(a.selected_resolution, 0);
+
+        // And backwards from the first entry goes to the last.
+        press(&mut a, KeyCode::Char('k'));
+        assert_eq!(a.selected_resolution, 2);
+
+        press(&mut a, KeyCode::Up);
+        assert_eq!(a.selected_resolution, 1);
+    }
+
+    #[test]
+    fn navigation_is_confined_to_the_selected_monitor() {
+        let mut a = app(2);
+        a.selected_monitor = 1;
+        a.selected_resolution = 1;
+
+        press(&mut a, KeyCode::Char(' '));
+
+        assert_eq!(current_index(&a.monitors[1]), 1, "selected monitor changed");
+        assert_eq!(current_index(&a.monitors[0]), 0, "other monitor untouched");
+    }
+
+    #[test]
+    fn space_marks_the_highlighted_mode_as_current() {
+        let mut a = app(3);
+        a.selected_resolution = 2;
+
+        press(&mut a, KeyCode::Char(' '));
+
+        let modes = &a.monitors[0].modes;
+        assert!(!modes[0].current, "previous mode deselected");
+        assert!(!modes[1].current);
+        assert!(modes[2].current, "highlighted mode selected");
+        // Mode data itself must not be altered.
+        assert_eq!((modes[2].width, modes[2].height, modes[2].refresh), (1280, 720, 90.0));
+    }
+
+    #[test]
+    fn enter_selects_and_returns_to_view_mode() {
+        let mut a = app(3);
+        a.selected_resolution = 1;
+
+        press(&mut a, KeyCode::Enter);
+
+        assert_eq!(a.mode, TUIMode::View);
+        assert_eq!(current_index(&a.monitors[0]), 1);
+    }
+
+    #[test]
+    fn escape_leaves_without_selecting_anything() {
+        let mut a = app(3);
+        a.selected_resolution = 2;
+
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+        assert_eq!(current_index(&a.monitors[0]), 0, "nothing was applied");
+    }
+
+    #[test]
+    fn unrelated_keys_are_ignored() {
+        let mut a = app(3);
+        a.selected_resolution = 1;
+
+        for code in [KeyCode::Char('x'), KeyCode::Char('w'), KeyCode::Tab, KeyCode::F(1)] {
+            press(&mut a, code);
+            assert_eq!(a.selected_resolution, 1, "{:?} must not navigate", code);
+            assert_eq!(a.mode, TUIMode::Resolution, "{:?} must not leave", code);
+        }
+    }
+
+    #[test]
+    fn a_single_mode_list_stays_on_that_mode() {
+        let mut a = app(1);
+
+        press(&mut a, KeyCode::Char('j'));
+        assert_eq!(a.selected_resolution, 0, "wraps onto itself");
+
+        press(&mut a, KeyCode::Char('k'));
+        assert_eq!(a.selected_resolution, 0);
+    }
 }

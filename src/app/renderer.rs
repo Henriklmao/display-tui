@@ -119,3 +119,173 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         ])
         .split(popup_layout[1])[1]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::tests::test_monitors;
+    use crate::ui::components::PresetMenu;
+    use ratatui::widgets::Widget;
+
+    use super::super::state::Popup;
+
+    fn app(mode: TUIMode) -> App {
+        let mut app = App::new(None);
+        app.monitors = test_monitors();
+        app.mode = mode;
+        app
+    }
+
+    fn render_app(app: &App, area: Rect) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        app.render(area, &mut buf);
+        buf
+    }
+
+    fn text_of(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in buf.area.top()..buf.area.bottom() {
+            for x in buf.area.left()..buf.area.right() {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn error_popup(is_forceable: bool) -> Popup {
+        Popup {
+            title: "Write failed".to_string(),
+            lines: vec!["hyprctl refused".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable,
+        }
+    }
+
+    #[test]
+    fn view_mode_shows_map_and_display_list() {
+        let text = text_of(&render_app(&app(TUIMode::View), Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("Map"), "no map: {text}");
+        assert!(text.contains("Displays"), "no monitor list: {text}");
+        assert!(text.contains("Monitor 1"), "monitor missing: {text}");
+        assert!(!text.contains("Resolutions"), "wrong mode rendered: {text}");
+    }
+
+    #[test]
+    fn resolution_mode_adds_the_resolution_table() {
+        let text = text_of(&render_app(&app(TUIMode::Resolution), Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("Map"), "map must stay visible: {text}");
+        assert!(text.contains("Resolutions"), "table missing: {text}");
+        assert!(text.contains("1920x1080"), "modes missing: {text}");
+    }
+
+    #[test]
+    fn scale_mode_adds_the_scale_table() {
+        let text = text_of(&render_app(&app(TUIMode::Scale), Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("Map"), "map must stay visible: {text}");
+        assert!(text.contains("Scale"), "scale table missing: {text}");
+        assert!(text.contains("100%"), "scale steps missing: {text}");
+    }
+
+    #[test]
+    fn help_overlay_is_drawn_on_top_of_the_normal_view() {
+        let mut a = app(TUIMode::View);
+        a.show_help = true;
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("Keybindings/Help"), "help missing: {text}");
+        assert!(text.contains("Map"), "background must stay: {text}");
+    }
+
+    #[test]
+    fn preset_menu_overlay_is_drawn_when_open() {
+        let mut a = app(TUIMode::View);
+        a.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("Presets"), "menu missing: {text}");
+        assert!(text.contains("No presets found"), "placeholder missing: {text}");
+    }
+
+    #[test]
+    fn forceable_error_popup_advertises_the_force_key() {
+        let mut a = app(TUIMode::View);
+        a.show_popup = Some(error_popup(true));
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("hyprctl refused"), "message missing: {text}");
+        assert!(
+            text.contains("Press <f> to force write"),
+            "force hint missing: {text}"
+        );
+    }
+
+    #[test]
+    fn error_popup_without_force_only_offers_to_close() {
+        let mut a = app(TUIMode::View);
+        a.show_popup = Some(error_popup(false));
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(text.contains("<Esc/Enter> to close."), "close hint missing: {text}");
+        assert!(!text.contains("force write"), "force must not be offered: {text}");
+    }
+
+    #[test]
+    fn popup_border_colour_follows_the_error_flag() {
+        let area = Rect::new(0, 0, 120, 40);
+        let popup_area = centered_rect(50, 40, area);
+
+        let mut error = app(TUIMode::View);
+        error.show_popup = Some(error_popup(false));
+        let buf = render_app(&error, area);
+        assert_eq!(buf[(popup_area.x, popup_area.y)].style().fg, Some(Color::Red));
+
+        let mut info = app(TUIMode::View);
+        info.show_popup = Some(Popup {
+            title: "Saved".to_string(),
+            lines: vec!["Preset written".to_string()],
+            is_error: false,
+            apply_preset: None,
+            is_forceable: false,
+        });
+        let buf = render_app(&info, area);
+        assert_eq!(
+            buf[(popup_area.x, popup_area.y)].style().fg,
+            Some(Color::Yellow)
+        );
+    }
+
+    #[test]
+    fn every_mode_survives_tiny_terminals() {
+        for (width, height) in [(1u16, 1u16), (5, 3), (10, 5), (20, 8), (40, 12)] {
+            let area = Rect::new(0, 0, width, height);
+            for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution, TUIMode::Scale] {
+                let mut a = app(mode);
+                a.show_help = true;
+                render_app(&a, area);
+            }
+        }
+    }
+
+    #[test]
+    fn renderer_centered_rect_matches_the_shared_helper() {
+        for (px, py) in [(0u16, 0u16), (10, 20), (50, 40), (100, 100)] {
+            let area = Rect::new(3, 7, 96, 31);
+            assert_eq!(
+                centered_rect(px, py, area),
+                crate::ui::layouts::centered_rect(px, py, area),
+                "the local copy has drifted for {}x{}%",
+                px,
+                py
+            );
+        }
+    }
+}

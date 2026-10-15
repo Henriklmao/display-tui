@@ -189,6 +189,79 @@ mod tests {
     use super::*;
     use ratatui::style::Style;
     use crate::test_utils::tests::test_monitors;
+    use crate::monitor::{Position, Resolution};
+
+    fn monitor(name: &str, x: i32, y: i32) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            enabled: true,
+            position: Some(Position { x, y }),
+            scale: Some(1.0),
+            modes: vec![Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn app(monitors: Vec<Monitor>, selected: usize) -> App {
+        let mut app = App::new(None);
+        app.monitors = monitors;
+        app.selected_monitor = selected;
+        app
+    }
+
+    fn press(a: &mut App, code: KeyCode) {
+        Map::handle_events(a, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn press_with(a: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        Map::handle_events(a, KeyEvent::new(code, modifiers));
+    }
+
+    fn position_of(m: &Monitor) -> (i32, i32) {
+        let p = m.position.clone().unwrap();
+        (p.x, p.y)
+    }
+
+    // Returns the top-left cell of the first row containing `needle`.
+    //
+    // Symbols are multi-byte UTF-8, so a plain `String::find` would yield a
+    // byte offset instead of a column; the columns are tracked alongside.
+    fn find_text(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        for y in buf.area.top()..buf.area.bottom() {
+            let mut row = String::new();
+            let mut columns = Vec::new();
+            for x in buf.area.left()..buf.area.right() {
+                let symbol = buf[(x, y)].symbol();
+                if symbol.is_empty() {
+                    continue;
+                }
+                row.push_str(symbol);
+                columns.push(x);
+            }
+            if let Some(byte_offset) = row.find(needle) {
+                let char_offset = row[..byte_offset].chars().count();
+                return Some((*columns.get(char_offset)?, y));
+            }
+        }
+        None
+    }
+
+    fn text_of(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in buf.area.top()..buf.area.bottom() {
+            for x in buf.area.left()..buf.area.right() {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
 
     #[test]
     fn render_map() {
@@ -269,5 +342,234 @@ mod tests {
         expected.set_style(Rect::new(9, 3, 9, 1), horizontal_line_style);
 
         assert_eq!(buf, expected);
+    }
+
+    #[test]
+    fn only_enabled_monitors_are_drawn() {
+        // test_monitors() has a disabled second monitor.
+        let monitors = test_monitors();
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        let text = text_of(&buf);
+        assert!(text.contains("Monitor 1"), "enabled monitor missing: {text}");
+        assert!(!text.contains("Monitor 2"), "disabled monitor drawn: {text}");
+    }
+
+    #[test]
+    fn preview_mode_is_marked_in_the_title() {
+        let monitors = test_monitors();
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: true,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        assert!(text_of(&buf).contains("Map (Preview)"));
+    }
+
+    #[test]
+    fn every_enabled_monitor_gets_a_label() {
+        let monitors = vec![monitor("Alpha", 0, 0), monitor("Beta", 1920, 0)];
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        let text = text_of(&buf);
+        assert!(text.contains("Alpha"), "first label missing: {text}");
+        assert!(text.contains("Beta"), "second label missing: {text}");
+    }
+
+    #[test]
+    fn the_selected_monitor_is_highlighted() {
+        let monitors = vec![monitor("Alpha", 0, 0), monitor("Beta", 1920, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+
+        let first_selected = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(area);
+        first_selected.render(area, &mut buf);
+        let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
+        let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
+        let first_styles = (
+            buf[(ax, ay)].style().fg,
+            buf[(bx, by)].style().fg,
+        );
+
+        let second_selected = Map {
+            selected: 1,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(area);
+        second_selected.render(area, &mut buf);
+        let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
+        let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
+        let second_styles = (
+            buf[(ax, ay)].style().fg,
+            buf[(bx, by)].style().fg,
+        );
+
+        assert_ne!(
+            first_styles.0, second_styles.0,
+            "the selected label must change colour"
+        );
+        assert_ne!(
+            first_styles.1, second_styles.1,
+            "the deselected label must change colour"
+        );
+        assert_eq!(
+            first_styles.0, Some(Color::Yellow),
+            "selected monitor is yellow"
+        );
+        assert_eq!(
+            first_styles.1, Some(Color::Blue),
+            "other monitors are blue"
+        );
+    }
+
+    #[test]
+    fn capital_keys_nudge_the_selected_monitor_by_ten() {
+        let mut a = app(vec![monitor("A", 100, 100)], 0);
+
+        press(&mut a, KeyCode::Char('H'));
+        assert_eq!(position_of(&a.monitors[0]), (90, 100));
+
+        press(&mut a, KeyCode::Char('L'));
+        assert_eq!(position_of(&a.monitors[0]), (100, 100));
+
+        press(&mut a, KeyCode::Char('K'));
+        assert_eq!(position_of(&a.monitors[0]), (100, 90));
+
+        press(&mut a, KeyCode::Char('J'));
+        assert_eq!(position_of(&a.monitors[0]), (100, 100));
+    }
+
+    #[test]
+    fn lowercase_keys_snap_to_the_neighbour() {
+        // Second monitor sits right/below the first one, so snapping moves it
+        // onto the shared edge.
+        let mut a = app(
+            vec![monitor("A", 0, 0), monitor("B", 3000, 2000)],
+            1,
+        );
+
+        press(&mut a, KeyCode::Char('h'));
+        assert_eq!(position_of(&a.monitors[1]), (1920, 2000));
+
+        press(&mut a, KeyCode::Char('k'));
+        assert_eq!(position_of(&a.monitors[1]), (1920, 1080));
+    }
+
+    #[test]
+    fn arrow_keys_snap_unless_shift_is_held() {
+        let mut a = app(
+            vec![monitor("A", 0, 0), monitor("B", 3000, 2000)],
+            1,
+        );
+
+        press_with(&mut a, KeyCode::Left, KeyModifiers::NONE);
+        assert_eq!(
+            position_of(&a.monitors[1]),
+            (1920, 2000),
+            "plain arrow snaps"
+        );
+
+        press_with(&mut a, KeyCode::Left, KeyModifiers::SHIFT);
+        assert_eq!(
+            position_of(&a.monitors[1]),
+            (1910, 2000),
+            "shifted arrow moves by ten"
+        );
+
+        press_with(&mut a, KeyCode::Up, KeyModifiers::SHIFT);
+        assert_eq!(position_of(&a.monitors[1]), (1910, 1990));
+
+        press_with(&mut a, KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(
+            position_of(&a.monitors[1]),
+            (1910, 1990),
+            "nothing to snap onto below"
+        );
+    }
+
+    #[test]
+    fn unrelated_keys_are_ignored() {
+        let mut a = app(vec![monitor("A", 100, 100)], 0);
+
+        for code in [
+            KeyCode::Char('z'),
+            KeyCode::Char('w'),
+            KeyCode::Esc,
+            KeyCode::Enter,
+            KeyCode::Tab,
+            KeyCode::F(5),
+            KeyCode::Delete,
+        ] {
+            let before = position_of(&a.monitors[0]);
+            press(&mut a, code);
+            assert_eq!(
+                position_of(&a.monitors[0]),
+                before,
+                "{:?} must not move the monitor",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn escape_returns_from_sub_modes_to_view() {
+        // Only modes other than Move/Scale are exercised here: leaving those
+        // persists the monitor state into the user's real config directory.
+        let mut a = app(vec![monitor("A", 0, 0)], 0);
+        a.mode = TUIMode::Resolution;
+
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+
+        let mut a = app(vec![monitor("A", 0, 0)], 0);
+        a.mode = TUIMode::Resolution;
+
+        press(&mut a, KeyCode::Enter);
+
+        assert_eq!(a.mode, TUIMode::View);
+    }
+
+    #[test]
+    fn escape_from_view_mode_stays_in_view_mode() {
+        let mut a = app(vec![monitor("A", 0, 0)], 0);
+
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+    }
+
+    #[test]
+    fn map_survives_tiny_areas() {
+        for (width, height) in [(1u16, 1u16), (3, 2), (10, 5), (40, 12)] {
+            let monitors = vec![monitor("A", 0, 0), monitor("B", 1920, 0)];
+            let map = Map {
+                selected: 0,
+                monitors: &monitors,
+                is_previewing: false,
+            };
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
+            map.render(buf.area, &mut buf);
+        }
     }
 }

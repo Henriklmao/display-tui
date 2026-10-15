@@ -392,3 +392,360 @@ pub(crate) fn rename_preset_in(
     fs::remove_file(old_path)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitor::Resolution;
+    use std::path::PathBuf;
+
+    // A fresh, isolated presets directory for one test.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "display-tui-test-{}-state-{}",
+            std::process::id(),
+            tag
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn monitor(name: &str, x: i32, workspace: Option<u8>) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            enabled: true,
+            position: Some(Position { x, y: 0 }),
+            scale: Some(1.25),
+            workspace,
+            modes: vec![Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    // Two monitors side by side: passes every validation rule.
+    // At 125% scale each monitor is 1536 logical pixels wide, so the second
+    // one has to start at 1536 to stay contiguous.
+    fn valid_layout() -> Vec<Monitor> {
+        vec![
+            monitor("DP-1", 0, Some(1)),
+            monitor("HDMI-A-1", 1536, Some(2)),
+        ]
+    }
+
+    // Two monitors stacked on top of each other: fails validate().
+    fn overlapping_layout() -> Vec<Monitor> {
+        vec![monitor("DP-1", 0, Some(1)), monitor("HDMI-A-1", 0, Some(2))]
+    }
+
+    #[test]
+    fn only_the_exact_last_name_is_reserved() {
+        assert!(is_last_preset(LAST_PRESET_NAME));
+        assert!(is_last_preset("last"));
+        assert!(!is_last_preset("Last"));
+        assert!(!is_last_preset("last-2"));
+        assert!(!is_last_preset("latest"));
+        assert!(!is_last_preset(""));
+    }
+
+    #[test]
+    fn save_then_load_round_trips_every_field() {
+        let dir = temp_dir("roundtrip");
+
+        save_preset_in(&dir, "desk", &valid_layout()).expect("save");
+
+        let loaded = load_preset_in(&dir, "desk").expect("preset must load");
+        assert_eq!(loaded.len(), 2);
+
+        let first = &loaded[0];
+        assert_eq!(first.name, "DP-1");
+        assert!(first.enabled);
+        assert_eq!(first.position, Some(Position { x: 0, y: 0 }));
+        assert_eq!(first.scale, Some(1.25));
+        assert_eq!(first.workspace, Some(1));
+        assert_eq!(first.rotation.as_deref(), None);
+        let resolution = first.resolution.as_ref().expect("resolution saved");
+        assert_eq!((resolution.width, resolution.height), (1920, 1080));
+        assert_eq!(resolution.refresh_rate, 60.0);
+
+        assert_eq!(loaded[1].name, "HDMI-A-1");
+        assert_eq!(loaded[1].position, Some(Position { x: 1536, y: 0 }));
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_writes_a_json_file_named_after_the_preset() {
+        let dir = temp_dir("file");
+
+        save_preset_in(&dir, "gaming", &valid_layout()).expect("save");
+
+        let path = dir.join("gaming.json");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        let parsed: Vec<MonitorState> = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed.len(), 2);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_rejects_the_reserved_last_preset() {
+        let dir = temp_dir("lastsave");
+
+        let err = save_preset_in(&dir, "last", &valid_layout()).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("read-only preset 'last'"));
+        assert!(!dir.join("last.json").exists(), "nothing may be written");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_rejects_invalid_names() {
+        let dir = temp_dir("badname");
+
+        for name in ["", "with space", "../escape", "under_score"] {
+            let err = save_preset_in(&dir, name, &valid_layout()).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "name: {:?}", name);
+            assert!(
+                err.to_string().contains("Preset name validation failed"),
+                "unexpected message: {}",
+                err
+            );
+        }
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_rejects_an_invalid_layout() {
+        let dir = temp_dir("badlayout");
+
+        let err = save_preset_in(&dir, "overlapping", &overlapping_layout()).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string()
+                .contains("Monitor configuration validation failed"),
+            "unexpected message: {}",
+            err
+        );
+        assert!(!dir.join("overlapping.json").exists());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn save_creates_the_directory_when_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "display-tui-test-{}-state-nested/deep",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(dir.parent().unwrap());
+
+        save_preset_in(&dir, "desk", &valid_layout()).expect("parent dirs are created");
+
+        assert!(dir.join("desk.json").exists());
+
+        let _ = fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn save_overwrites_an_existing_preset() {
+        let dir = temp_dir("overwrite");
+
+        save_preset_in(&dir, "desk", &valid_layout()).unwrap();
+        let mut replacement = valid_layout();
+        replacement[0].workspace = Some(9);
+
+        save_preset_in(&dir, "desk", &replacement).unwrap();
+
+        let loaded = load_preset_in(&dir, "desk").unwrap();
+        assert_eq!(loaded[0].workspace, Some(9), "the second save must win");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn load_returns_none_for_unknown_or_invalid_names() {
+        let dir = temp_dir("loadmiss");
+
+        assert!(load_preset_in(&dir, "does-not-exist").is_none());
+        assert!(load_preset_in(&dir, "bad name").is_none());
+        assert!(load_preset_in(&dir, "../escape").is_none());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn load_returns_none_for_corrupt_json() {
+        let dir = temp_dir("corrupt");
+        fs::write(dir.join("broken.json"), "{ not json").unwrap();
+
+        assert!(load_preset_in(&dir, "broken").is_none());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn load_returns_none_for_a_mismatched_json_shape() {
+        let dir = temp_dir("shape");
+        fs::write(dir.join("wrong.json"), r#"{"name": "DP-1"}"#).unwrap();
+
+        assert!(load_preset_in(&dir, "wrong").is_none());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn list_presets_is_empty_for_missing_or_unused_directories() {
+        let missing = std::env::temp_dir().join(format!(
+            "display-tui-test-{}-state-missing",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&missing);
+        assert_eq!(list_presets_in(&missing), Vec::<String>::new());
+
+        let empty = temp_dir("empty");
+        assert_eq!(list_presets_in(&empty), Vec::<String>::new());
+        cleanup(&empty);
+    }
+
+    #[test]
+    fn list_presets_returns_sorted_valid_names_only() {
+        let dir = temp_dir("listing");
+        for name in ["b", "a", "M-1"] {
+            save_preset_in(&dir, name, &valid_layout()).unwrap();
+        }
+        // "last" is written through the dedicated entry point.
+        save_state_as_last_in(&dir, &valid_layout()).unwrap();
+        fs::write(dir.join("notes.txt"), "").unwrap();
+        fs::write(dir.join("bad name.json"), "[]").unwrap();
+        fs::write(dir.join(".hidden.json"), "[]").unwrap();
+
+        assert_eq!(
+            list_presets_in(&dir),
+            vec![
+                "M-1".to_string(),
+                "a".to_string(),
+                "b".to_string(),
+                "last".to_string()
+            ]
+        );
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn delete_removes_only_the_named_preset() {
+        let dir = temp_dir("delete");
+        save_preset_in(&dir, "keep", &valid_layout()).unwrap();
+        save_preset_in(&dir, "drop", &valid_layout()).unwrap();
+
+        delete_preset_in(&dir, "drop").expect("delete");
+
+        assert!(!dir.join("drop.json").exists());
+        assert!(dir.join("keep.json").exists());
+        assert_eq!(list_presets_in(&dir), vec!["keep".to_string()]);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn delete_is_idempotent_for_missing_presets() {
+        let dir = temp_dir("delete-missing");
+
+        assert!(delete_preset_in(&dir, "never-existed").is_ok());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn delete_refuses_the_reserved_preset_and_invalid_names() {
+        let dir = temp_dir("delete-guard");
+
+        let err = delete_preset_in(&dir, "last").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+        let err = delete_preset_in(&dir, "bad name").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn rename_moves_the_file_and_keeps_its_content() {
+        let dir = temp_dir("rename");
+        save_preset_in(&dir, "old", &valid_layout()).unwrap();
+
+        rename_preset_in(&dir, "old", "new").expect("rename");
+
+        assert!(!dir.join("old.json").exists());
+        assert!(dir.join("new.json").exists());
+        let loaded = load_preset_in(&dir, "new").expect("renamed preset loads");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(list_presets_in(&dir), vec!["new".to_string()]);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn rename_rejects_a_collision_without_touching_either_file() {
+        let dir = temp_dir("rename-collision");
+        save_preset_in(&dir, "a", &valid_layout()).unwrap();
+        save_preset_in(&dir, "b", &valid_layout()).unwrap();
+
+        let err = rename_preset_in(&dir, "a", "b").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(dir.join("a.json").exists(), "source must survive");
+        assert!(dir.join("b.json").exists(), "target must survive");
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn rename_rejects_degenerate_targets() {
+        let dir = temp_dir("rename-guards");
+        save_preset_in(&dir, "a", &valid_layout()).unwrap();
+
+        let same = rename_preset_in(&dir, "a", "a").unwrap_err();
+        assert_eq!(same.kind(), std::io::ErrorKind::InvalidInput);
+
+        let bad_name = rename_preset_in(&dir, "a", "bad name").unwrap_err();
+        assert_eq!(bad_name.kind(), std::io::ErrorKind::InvalidData);
+
+        let reserved_old = rename_preset_in(&dir, "last", "b").unwrap_err();
+        assert_eq!(reserved_old.kind(), std::io::ErrorKind::InvalidInput);
+
+        let reserved_new = rename_preset_in(&dir, "a", "last").unwrap_err();
+        assert_eq!(reserved_new.kind(), std::io::ErrorKind::InvalidInput);
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn rename_reports_a_missing_source() {
+        let dir = temp_dir("rename-missing");
+
+        let err = rename_preset_in(&dir, "ghost", "target").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        assert!(!dir.join("target.json").exists());
+
+        cleanup(&dir);
+    }
+}

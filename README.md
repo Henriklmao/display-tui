@@ -41,13 +41,25 @@ Thanks for your work, you are the biggest contributor to this project!
 
 ### AUR
 
+download and install `display-tui` from the AUR using your preferred AUR helper:
+
 ```bash
-yay -S display-tui-git
+yay -S display-tui
 # or
-paru -S display-tui-git
+paru -S display-tui
 ```
 
-AUR installation is fully automatic and adds `display-tui` as a .desktop shortcut, so you can launch it from your application launcher.
+alternatively you can use the prebuilt package `display-tui-bin`:
+
+```bash
+yay -S display-tui-bin
+# or
+paru -S display-tui-bin
+```
+
+for bleeding edge features, you can use `display-tui-git`.
+
+AUR installation adds `display-tui` as a .desktop shortcut, so you can launch it from your application launcher.
 
 ### AppImage (Universal / All Distributions)
 

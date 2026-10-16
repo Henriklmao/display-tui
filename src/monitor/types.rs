@@ -134,14 +134,18 @@ impl Monitor {
     }
 
     // Returns the monitor's 2D geometry (x, y, width, height) as floats.
+    //
+    // A monitor without a position (or without a usable resolution) has no
+    // place on the canvas, so its geometry is zeroed out instead of panicking.
     pub fn get_geometry(&self) -> (f64, f64, f64, f64) {
         let (logical_width, logical_height) = self.get_logical_dimensions();
+        let (x, y) = match &self.position {
+            Some(position) => (position.x as f64, position.y as f64),
+            None => return (0.0, 0.0, 0.0, 0.0),
+        };
         if logical_width == 0.0 && logical_height == 0.0 {
             return (0.0, 0.0, 0.0, 0.0);
         }
-
-        let x = self.position.clone().unwrap().x as f64;
-        let y = self.position.clone().unwrap().y as f64;
 
         (x, y, logical_width, logical_height)
     }
@@ -353,6 +357,16 @@ mod tests {
     fn geometry_is_zeroed_without_modes() {
         let mut m = monitor(vec![]);
         m.position = Some(Position { x: 100, y: 200 });
+        assert_eq!(m.get_geometry(), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn geometry_is_zeroed_without_a_position() {
+        // The parser always fills the position in, but losing it must not
+        // take the whole layout down with a panic.
+        let mut m = active(monitor(vec![resolution(1920, 1080, 60.0)]));
+        m.position = None;
+
         assert_eq!(m.get_geometry(), (0.0, 0.0, 0.0, 0.0));
     }
 

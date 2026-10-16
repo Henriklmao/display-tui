@@ -158,9 +158,14 @@ impl<'a> Map<'a> {
         monitor: &Monitor,
         color: Color,
     ) {
+        // A monitor without a position cannot be drawn.
+        let position = match &monitor.position {
+            Some(position) => position,
+            None => return,
+        };
         let (width, height) = monitor.get_logical_dimensions();
-        let x = monitor.position.clone().unwrap().x as f64;
-        let y = (monitor_canvas.top - monitor_canvas.offset_y - monitor.position.clone().unwrap().y) as f64 - height ;  
+        let x = position.x as f64;
+        let y = (monitor_canvas.top - monitor_canvas.offset_y - position.y) as f64 - height ;  
 
         let x_margin = width * 0.07; 
         let y_margin = height * 0.07;
@@ -557,6 +562,25 @@ mod tests {
         press(&mut a, KeyCode::Esc);
 
         assert_eq!(a.mode, TUIMode::View);
+    }
+
+    #[test]
+    fn a_monitor_without_a_position_is_skipped_rather_than_panicking() {
+        let mut unplaced = monitor("Ghost", 0, 0);
+        unplaced.position = None;
+        let monitors = vec![unplaced, monitor("A", 0, 0)];
+
+        let map = Map {
+            selected: 1,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        let text = text_of(&buf);
+        assert!(text.contains("A"), "placed monitor missing: {text}");
+        assert!(!text.contains("Ghost"), "unplaced monitor drawn: {text}");
     }
 
     #[test]

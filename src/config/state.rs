@@ -397,22 +397,12 @@ pub(crate) fn rename_preset_in(
 mod tests {
     use super::*;
     use crate::monitor::Resolution;
-    use std::path::PathBuf;
+    use crate::test_utils::tests::TempDir;
 
-    // A fresh, isolated presets directory for one test.
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-state-{}",
-            std::process::id(),
-            tag
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn cleanup(dir: &Path) {
-        let _ = fs::remove_dir_all(dir);
+    // A fresh, isolated presets directory for one test; it removes itself
+    // when the test ends, even on a panic.
+    fn temp_dir(tag: &str) -> TempDir {
+        TempDir::new(&format!("state-{}", tag))
     }
 
     fn monitor(name: &str, x: i32, workspace: Option<u8>) -> Monitor {
@@ -481,7 +471,6 @@ mod tests {
         assert_eq!(loaded[1].name, "HDMI-A-1");
         assert_eq!(loaded[1].position, Some(Position { x: 1536, y: 0 }));
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -496,7 +485,6 @@ mod tests {
         let parsed: Vec<MonitorState> = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed.len(), 2);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -509,7 +497,6 @@ mod tests {
         assert!(err.to_string().contains("read-only preset 'last'"));
         assert!(!dir.join("last.json").exists(), "nothing may be written");
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -527,7 +514,6 @@ mod tests {
         }
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -545,22 +531,16 @@ mod tests {
         );
         assert!(!dir.join("overlapping.json").exists());
 
-        cleanup(&dir);
     }
 
     #[test]
     fn save_creates_the_directory_when_missing() {
-        let dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-state-nested/deep",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(dir.parent().unwrap());
+        let dir = temp_dir("state-nested");
+        let nested = dir.path().join("deep");
 
-        save_preset_in(&dir, "desk", &valid_layout()).expect("parent dirs are created");
+        save_preset_in(&nested, "desk", &valid_layout()).expect("parent dirs are created");
 
-        assert!(dir.join("desk.json").exists());
-
-        let _ = fs::remove_dir_all(dir.parent().unwrap());
+        assert!(nested.join("desk.json").exists());
     }
 
     #[test]
@@ -576,7 +556,6 @@ mod tests {
         let loaded = load_preset_in(&dir, "desk").unwrap();
         assert_eq!(loaded[0].workspace, Some(9), "the second save must win");
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -587,7 +566,6 @@ mod tests {
         assert!(load_preset_in(&dir, "bad name").is_none());
         assert!(load_preset_in(&dir, "../escape").is_none());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -597,7 +575,6 @@ mod tests {
 
         assert!(load_preset_in(&dir, "broken").is_none());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -607,7 +584,6 @@ mod tests {
 
         assert!(load_preset_in(&dir, "wrong").is_none());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -621,7 +597,6 @@ mod tests {
 
         let empty = temp_dir("empty");
         assert_eq!(list_presets_in(&empty), Vec::<String>::new());
-        cleanup(&empty);
     }
 
     #[test]
@@ -646,7 +621,6 @@ mod tests {
             ]
         );
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -661,7 +635,6 @@ mod tests {
         assert!(dir.join("keep.json").exists());
         assert_eq!(list_presets_in(&dir), vec!["keep".to_string()]);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -670,7 +643,6 @@ mod tests {
 
         assert!(delete_preset_in(&dir, "never-existed").is_ok());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -683,7 +655,6 @@ mod tests {
         let err = delete_preset_in(&dir, "bad name").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -699,7 +670,6 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(list_presets_in(&dir), vec!["new".to_string()]);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -714,7 +684,6 @@ mod tests {
         assert!(dir.join("a.json").exists(), "source must survive");
         assert!(dir.join("b.json").exists(), "target must survive");
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -734,7 +703,6 @@ mod tests {
         let reserved_new = rename_preset_in(&dir, "a", "last").unwrap_err();
         assert_eq!(reserved_new.kind(), std::io::ErrorKind::InvalidInput);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -746,7 +714,6 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
         assert!(!dir.join("target.json").exists());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -770,7 +737,6 @@ mod tests {
         assert_eq!(live[0].transform.as_deref(), Some("90"));
         assert!(!live[1].enabled, "preset may disable a monitor");
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -807,7 +773,6 @@ mod tests {
         assert!(!live[0].modes[0].current);
         assert!(live[0].modes[1].current, "1280x720@75 must become current");
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -834,7 +799,6 @@ mod tests {
         assert!(live[0].modes[0].current, "unmatched mode is ignored");
         assert_eq!(live[0].modes.len(), 1);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -861,7 +825,6 @@ mod tests {
         );
         assert_eq!(live[1].workspace, Some(7));
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -878,7 +841,6 @@ mod tests {
             "nothing may change on failure"
         );
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -897,7 +859,6 @@ mod tests {
         assert_eq!(count_enabled_monitors_in_preset_in(&dir, "ghost"), None);
         assert_eq!(count_enabled_monitors_in_preset_in(&dir, "bad name"), None);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -915,7 +876,6 @@ mod tests {
             Ok(())
         );
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -928,7 +888,6 @@ mod tests {
 
         assert_eq!(missing, vec!["HDMI-A-1".to_string()]);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -939,7 +898,6 @@ mod tests {
 
         assert_eq!(err, vec!["Preset 'ghost' not found".to_string()]);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -955,7 +913,6 @@ mod tests {
         );
         assert!(!dir.join("broken.json").exists());
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -966,7 +923,6 @@ mod tests {
 
         assert_eq!(list_presets_in(&dir), vec!["desk".to_string()]);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -980,7 +936,6 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].position, loaded[1].position);
 
-        cleanup(&dir);
     }
 
     #[test]
@@ -996,6 +951,5 @@ mod tests {
         let loaded = load_preset_in(&dir, "last").unwrap();
         assert_eq!(loaded[0].scale, Some(2.0));
 
-        cleanup(&dir);
     }
 }

@@ -12,7 +12,7 @@ jobs:
   aur-publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate PKGBUILD
         run: bash ./generate-pkgbuild.bash "${{ github.ref_name }}"
@@ -31,7 +31,7 @@ jobs:
   aur-publish-bin:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Generate PKGBUILD for pre-built binary
         run: bash ./generate-pkgbuild-bin.bash "${{ github.ref_name }}"

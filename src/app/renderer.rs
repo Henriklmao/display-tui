@@ -2,6 +2,7 @@
 
 use super::state::App;
 use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
+use crate::ui::layouts::centered_rect;
 use crate::utils::TUIMode;
 use ratatui::{
     buffer::Buffer,
@@ -98,26 +99,6 @@ impl Widget for &App {
             p.render(popup_area, buf);
         }
     }
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 #[cfg(test)]
@@ -272,20 +253,6 @@ mod tests {
                 a.show_help = true;
                 render_app(&a, area);
             }
-        }
-    }
-
-    #[test]
-    fn renderer_centered_rect_matches_the_shared_helper() {
-        for (px, py) in [(0u16, 0u16), (10, 20), (50, 40), (100, 100)] {
-            let area = Rect::new(3, 7, 96, 31);
-            assert_eq!(
-                centered_rect(px, py, area),
-                crate::ui::layouts::centered_rect(px, py, area),
-                "the local copy has drifted for {}x{}%",
-                px,
-                py
-            );
         }
     }
 }

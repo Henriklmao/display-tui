@@ -200,7 +200,7 @@ impl<'a> Map<'a> {
 mod tests {
     use super::*;
     use ratatui::style::Style;
-    use crate::test_utils::tests::test_monitors;
+    use crate::test_utils::tests::{TempDir, test_monitors};
     use crate::monitor::{Position, Resolution};
 
     fn monitor(name: &str, x: i32, y: i32) -> Monitor {
@@ -545,8 +545,8 @@ mod tests {
 
     #[test]
     fn escape_returns_from_sub_modes_to_view() {
-        // Only modes other than Move/Scale are exercised here: leaving those
-        // persists the monitor state into the user's real config directory.
+        // Non-persisting modes only here; leaving Move/Scale writes the
+        // monitor state and is covered by the dedicated test below.
         let mut a = app(vec![monitor("A", 0, 0)], 0);
         a.mode = TUIMode::Resolution;
 
@@ -560,6 +560,28 @@ mod tests {
         press(&mut a, KeyCode::Enter);
 
         assert_eq!(a.mode, TUIMode::View);
+    }
+
+    #[test]
+    fn escape_from_move_mode_persists_the_moved_monitor() {
+        let dir = TempDir::new("map-state");
+        let mut a = app(vec![monitor("A", 100, 100)], 0);
+        a.mode = TUIMode::Move;
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+
+        press(&mut a, KeyCode::Char('L')); // nudge +10 on x
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+        let content = std::fs::read_to_string(dir.path().join("monitor_state.json"))
+            .expect("leaving Move mode must have written the state file");
+        let saved: Vec<crate::config::MonitorState> =
+            serde_json::from_str(&content).expect("state file must hold valid JSON");
+        assert_eq!(
+            saved[0].position,
+            Some(Position { x: 110, y: 100 }),
+            "the moved position is persisted"
+        );
     }
 
     #[test]

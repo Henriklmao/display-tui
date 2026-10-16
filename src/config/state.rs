@@ -65,9 +65,14 @@ fn monitors_to_state(monitors: &[Monitor]) -> Vec<MonitorState> {
 
 // Save monitor state to file.
 pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
-    let state_path = get_state_path();
+    save_monitor_state_in(&get_state_path(), monitors)
+}
 
-    if let Some(parent) = state_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+pub(crate) fn save_monitor_state_in(
+    path: &Path,
+    monitors: &[Monitor],
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
 
@@ -75,7 +80,7 @@ pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
 
     let json = serde_json::to_string_pretty(&state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    fs::write(state_path, json)?;
+    fs::write(path, json)?;
 
     Ok(())
 }

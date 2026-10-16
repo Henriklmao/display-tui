@@ -28,6 +28,10 @@ pub struct App {
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
     pub active_preset: Option<String>,
     pub cli_action: Option<CliAction>,
+    // Overrides where leaving Move/Scale persists the monitor state.
+    // None (production) uses the real config path; tests point it at a
+    // temp dir so the exit path can be exercised.
+    pub state_path: Option<std::path::PathBuf>,
 }
 
 // Popup message displayed to the user.
@@ -46,6 +50,13 @@ impl App {
             cli_action: action,
             ..Default::default()
         }
+    }
+
+    // Resolves the monitor state file, honouring the injectable override.
+    pub fn state_path(&self) -> std::path::PathBuf {
+        self.state_path
+            .clone()
+            .unwrap_or_else(crate::config::get_state_path)
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {

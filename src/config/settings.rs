@@ -141,11 +141,8 @@ mod tests {
 
     #[test]
     fn test_create_default_config_populates_missing_file() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-missing",
-            std::process::id()
-        ));
-        let config_path = temp_dir.join("config.json");
+        let temp_dir = crate::test_utils::tests::TempDir::new("config-missing");
+        let config_path = temp_dir.path().join("config.json");
 
         let config = Configuration::create_default_config(&config_path);
 
@@ -160,19 +157,12 @@ mod tests {
             parsed.monitors_config_path.as_deref(),
             Some("~/.config/hypr/monitors.conf")
         );
-
-        let _ = std::fs::remove_file(&config_path);
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
     fn test_create_default_config_populates_empty_file() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-empty",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let config_path = temp_dir.join("config.json");
+        let temp_dir = crate::test_utils::tests::TempDir::new("config-empty");
+        let config_path = temp_dir.path().join("config.json");
         std::fs::write(&config_path, "").unwrap();
 
         let config = Configuration::create_default_config(&config_path);
@@ -188,8 +178,5 @@ mod tests {
             parsed.monitors_config_path.as_deref(),
             Some("~/.config/hypr/monitors.conf")
         );
-
-        let _ = std::fs::remove_file(&config_path);
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

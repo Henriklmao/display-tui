@@ -352,12 +352,8 @@ mod tests {
     // files in the developer's home directory would make it machine dependent.
     #[test]
     fn save_hyprland_config_writes_lua_file_with_workspace_section() {
-        let dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-lua",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("monitors.lua");
+        let dir = crate::test_utils::tests::TempDir::new("lua");
+        let path = dir.path().join("monitors.lua");
 
         let mut with_ws = monitor("DP-1");
         with_ws.workspace = Some(2);
@@ -388,19 +384,12 @@ mod tests {
             .matches("hl.workspace_rule")
             .count();
         assert_eq!(rules, 1, "only the monitor with a workspace gets a rule");
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn save_hyprland_config_omits_workspace_section_when_unassigned() {
-        let dir = std::env::temp_dir().join(format!(
-            "display-tui-test-{}-lua-nows",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("monitors.lua");
+        let dir = crate::test_utils::tests::TempDir::new("lua-nows");
+        let path = dir.path().join("monitors.lua");
 
         Monitor::save_hyprland_config(
             "unused-in-this-branch",
@@ -412,8 +401,5 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains("-- Workspace assignments"));
         assert!(!content.contains("hl.workspace_rule"));
-
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

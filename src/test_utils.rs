@@ -3,6 +3,53 @@
 #[cfg(test)]
 pub mod tests {
     use crate::monitor::{Monitor, Resolution, Position};
+    use std::path::{Path, PathBuf};
+
+    // A unique per-process temporary directory that removes itself on drop —
+    // also when a test aborts on a failed assertion, so nothing is left
+    // behind in /tmp.
+    pub struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        // Creates the directory, clearing any leftover from an earlier run.
+        pub fn new(tag: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "display-tui-test-{}-{}",
+                std::process::id(),
+                tag
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            TempDir { path }
+        }
+
+        // The directory's path.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    // Lets guards be used wherever a &Path is expected.
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl AsRef<Path> for TempDir {
+        fn as_ref(&self) -> &Path {
+            &self.path
+        }
+    }
 
     // Creates a standard set of test monitors.
     pub fn test_monitors() -> Vec<Monitor> {

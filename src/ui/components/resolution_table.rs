@@ -38,14 +38,11 @@ impl<'a> Resolutions<'a> {
             KeyCode::Char(' ') => Resolutions::select(app),
             KeyCode::Enter => {
                 Resolutions::select(app);
-                Resolutions::change_mode(app, TUIMode::View);
+                crate::utils::change_mode(app, TUIMode::View);
             }
-            KeyCode::Esc => Resolutions::change_mode(app,TUIMode::View),
+            KeyCode::Esc => crate::utils::change_mode(app, TUIMode::View),
             _ => {}
         }
-    }
-    fn change_mode(app:&mut App,mode: TUIMode) {
-        app.mode = mode;
     }
 
     fn next(app:&mut App) {

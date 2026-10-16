@@ -44,9 +44,9 @@ impl<'a> MonitorList<'a> {
             KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
             KeyCode::Char('e') => MonitorList::enable_monitor(app),
             KeyCode::Char('d') => MonitorList::disable_monitor(app),
-            KeyCode::Char('m') => MonitorList::change_mode(app, TUIMode::Move),
-            KeyCode::Char('r') => MonitorList::change_mode(app, TUIMode::Resolution),
-            KeyCode::Char('s') => MonitorList::change_mode(app, TUIMode::Scale),
+            KeyCode::Char('m') => crate::utils::change_mode(app, TUIMode::Move),
+            KeyCode::Char('r') => crate::utils::change_mode(app, TUIMode::Resolution),
+            KeyCode::Char('s') => crate::utils::change_mode(app, TUIMode::Scale),
             KeyCode::Char('o') => MonitorList::cycle_rotation(app),
             KeyCode::Char(c) if c.is_ascii_digit() => {
                 let ws = c.to_digit(10).unwrap() as u8;
@@ -69,10 +69,6 @@ impl<'a> MonitorList<'a> {
         let current_rotation = Rotation::from_transform(&monitor.transform);
         let next_rotation = current_rotation.cycle();
         monitor.transform = Some(next_rotation.to_transform().to_string());
-    }
-
-    fn change_mode(app: &mut App, mode: TUIMode) {
-        app.mode = mode;
     }
 
     fn next_monitor(app: &mut App) {

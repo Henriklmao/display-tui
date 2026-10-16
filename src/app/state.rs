@@ -3,7 +3,7 @@
 //! Contains the main App struct, its methods, and the Popup type.
 
 use crate::CliAction;
-use crate::config::{Configuration, load_monitor_state, save_monitor_state};
+use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
 use crate::utils::TUIMode;
@@ -28,9 +28,9 @@ pub struct App {
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
     pub active_preset: Option<String>,
     pub cli_action: Option<CliAction>,
-    // Overrides where leaving Move/Scale persists the monitor state.
-    // None (production) uses the real config path; tests point it at a
-    // temp dir so the exit path can be exercised.
+    // Overrides where the monitor state is persisted: mode changes, exit and
+    // preset apply all honour it. None (production) uses the real config path;
+    // tests point it at a temp dir so those paths can be exercised.
     pub state_path: Option<std::path::PathBuf>,
 }
 
@@ -167,7 +167,9 @@ impl App {
                             self.write();
                             // If write succeeded (no popup shown), exit.
                             if self.show_popup.is_none() {
-                                let _ = save_monitor_state(&self.monitors);
+                                if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
+                                    eprintln!("✗ Failed to save monitor state: {}", e);
+                                }
                                 self.exit = true;
                             }
                         }
@@ -638,7 +640,7 @@ impl App {
     }
 
     fn exit(&mut self) {
-        if let Err(e) = save_monitor_state(&self.monitors) {
+        if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
             eprintln!("Warning: Failed to save monitor state on exit: {}", e);
         }
         self.exit = true;
@@ -784,7 +786,7 @@ impl App {
                 .spawn();
         }
 
-        if let Err(e) = save_monitor_state(&self.monitors) {
+        if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
         }
     }
@@ -802,5 +804,39 @@ impl App {
     pub fn rename_preset(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
         crate::config::rename_preset(old_name, new_name)
             .map_err(|e| format!("Failed to rename preset: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitor::Position;
+    use crate::test_utils::tests::TempDir;
+
+    fn monitor() -> Monitor {
+        Monitor {
+            name: "DP-1".to_string(),
+            enabled: true,
+            position: Some(Position { x: 0, y: 0 }),
+            ..Default::default()
+        }
+    }
+
+    // Every persistence path has to honour the override, otherwise a test
+    // driving an exit path would write into the real config directory.
+    #[test]
+    fn exit_persists_into_the_injected_state_path() {
+        let dir = TempDir::new("app-exit");
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+
+        app.exit();
+
+        assert!(app.exit, "the app must be marked for shutdown");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "App::exit must persist through the injected state path"
+        );
     }
 }

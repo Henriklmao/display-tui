@@ -44,12 +44,14 @@ pub struct Resolution {
 }
 
 // Canvas representation of monitor layout for 2D rendering.
+//
+// The bounds are the only bookkeeping needed: the map mirrors monitor
+// positions around the centre of `y_bounds`, so monitor coordinates that
+// grow downwards render from top to bottom.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MonitorCanvas {
-    pub top: i32,
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],
-    pub offset_y: i32,
 }
 
 // JSON structure from hyprctl monitors -j output.

@@ -6,8 +6,8 @@ use super::types::{Monitor, MonitorCanvas};
 impl Monitor {
     // Computes the bounding canvas for all enabled monitors.
     //
-    // Returns a `MonitorCanvas` that defines the 2D bounds and offsets needed
-    // to render monitors within a given terminal area.
+    // Returns a `MonitorCanvas` that defines the 2D bounds needed to render
+    // monitors within a given terminal area.
     pub fn get_monitors_canvas(monitors: &Vec<Monitor>, _area: &Rect) -> MonitorCanvas {
         let mut left = 10000.0;
         let mut bottom = 10000.0;
@@ -54,16 +54,9 @@ impl Monitor {
         let x_bounds = [left, right];
         let y_bounds = [bottom, top];
 
-        let mut offset_y = 0.0;
-        if bottom < 0.0 {
-            offset_y = -bottom;
-        }
-
         MonitorCanvas {
-            top: top as i32,
             x_bounds,
             y_bounds,
-            offset_y: offset_y as i32,
         }
     }
 }
@@ -102,9 +95,9 @@ mod tests {
         let canvas = Monitor::get_monitors_canvas(&vec![monitor("A", 0, 0, 1.0, true)], &area());
 
         assert_eq!(canvas.x_bounds, [-MARGIN, 1920.0 + MARGIN]);
+        // y = 0 sits exactly one margin above the bottom of the canvas: the
+        // margin alone must not push any origin-lifting bookkeeping around.
         assert_eq!(canvas.y_bounds, [-MARGIN, 1080.0 + MARGIN]);
-        assert_eq!(canvas.top, (1080.0 + MARGIN) as i32);
-        assert_eq!(canvas.offset_y, MARGIN as i32, "origin sits above 0");
     }
 
     #[test]
@@ -119,7 +112,6 @@ mod tests {
 
         assert_eq!(canvas.x_bounds, [-MARGIN, 3840.0 + MARGIN]);
         assert_eq!(canvas.y_bounds, [-MARGIN, 2160.0 + MARGIN]);
-        assert_eq!(canvas.top, (2160.0 + MARGIN) as i32);
     }
 
     #[test]
@@ -136,25 +128,12 @@ mod tests {
     }
 
     #[test]
-    fn offset_y_lifts_negative_bottom_to_the_origin() {
+    fn negative_monitors_keep_the_margin_on_both_sides() {
         let monitors = vec![monitor("A", 0, -1080, 1.0, true)];
 
         let canvas = Monitor::get_monitors_canvas(&monitors, &area());
 
-        // bottom = -1080 - 50, so the offset has to cancel it out.
-        assert_eq!(canvas.offset_y, (1080.0 + MARGIN) as i32);
-        assert_eq!(canvas.y_bounds[0], -(1080.0 + MARGIN));
-    }
-
-    #[test]
-    fn offset_y_is_zero_when_bottom_is_already_non_negative() {
-        // y = 100 keeps the margin-adjusted bottom at +50, so no lift is needed.
-        let monitors = vec![monitor("A", 0, 100, 1.0, true)];
-
-        let canvas = Monitor::get_monitors_canvas(&monitors, &area());
-
-        assert_eq!(canvas.y_bounds[0], 100.0 - MARGIN);
-        assert_eq!(canvas.offset_y, 0);
+        assert_eq!(canvas.y_bounds, [-(1080.0 + MARGIN), MARGIN]);
     }
 
     #[test]
@@ -192,7 +171,6 @@ mod tests {
 
         assert_eq!(canvas.x_bounds, [-MARGIN, 960.0 + MARGIN]);
         assert_eq!(canvas.y_bounds, [-MARGIN, 540.0 + MARGIN]);
-        assert_eq!(canvas.top, (540.0 + MARGIN) as i32);
     }
 
     #[test]
@@ -207,6 +185,6 @@ mod tests {
         );
 
         assert!(two.x_bounds[1] > one.x_bounds[1]);
-        assert!(two.top >= one.top);
+        assert!(two.y_bounds[1] >= one.y_bounds[1]);
     }
 }

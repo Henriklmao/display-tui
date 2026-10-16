@@ -165,7 +165,14 @@ impl<'a> Map<'a> {
         };
         let (width, height) = monitor.get_logical_dimensions();
         let x = position.x as f64;
-        let y = (monitor_canvas.top - monitor_canvas.offset_y - position.y) as f64 - height ;  
+        // Monitor coordinates grow downwards, the canvas y axis grows
+        // upwards: mirror the position around the centre of the bounds so
+        // that stacked monitors render in their real order. Deriving the
+        // mirror from the bounds keeps the drawing centred with its margin
+        // no matter where the monitors sit — a monitor at y = 0 gets the
+        // same 50px border on both sides.
+        let y = monitor_canvas.y_bounds[0] + monitor_canvas.y_bounds[1] - position.y as f64
+            - height;
 
         let x_margin = width * 0.07; 
         let y_margin = height * 0.07;
@@ -581,6 +588,58 @@ mod tests {
         let text = text_of(&buf);
         assert!(text.contains("A"), "placed monitor missing: {text}");
         assert!(!text.contains("Ghost"), "unplaced monitor drawn: {text}");
+    }
+
+    #[test]
+    fn stacked_monitors_render_in_their_real_vertical_order() {
+        // In Hyprland coordinates y grows downwards, so the monitor at
+        // y = -1080 sits above the one at y = 0 and must render above it.
+        let monitors = vec![monitor("Lower", 0, 0), monitor("Upper", 0, -1080)];
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        let (_, upper_y) = find_text(&buf, "Upper").expect("Upper label");
+        let (_, lower_y) = find_text(&buf, "Lower").expect("Lower label");
+        assert!(
+            upper_y < lower_y,
+            "Upper (y=-1080) must render above Lower (y=0): rows {upper_y} vs {lower_y}"
+        );
+    }
+
+    #[test]
+    fn a_monitor_away_from_the_origin_is_still_drawn_centred() {
+        // y = 100 keeps the whole layout on positive coordinates; the box
+        // must still get the same margin above and below instead of sitting
+        // flush against the bottom edge of the canvas.
+        let monitors = vec![monitor("A", 0, 100)];
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+        };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        map.render(buf.area, &mut buf);
+
+        let box_rows: Vec<u16> = (buf.area.top()..buf.area.bottom())
+            .filter(|&y| {
+                (buf.area.left()..buf.area.right()).any(|x| buf[(x, y)].symbol() == "█")
+            })
+            .collect();
+        let first = *box_rows.first().expect("top edge of the box");
+        let last = *box_rows.last().expect("bottom edge of the box");
+
+        // Interior rows run from 1 to bottom - 2; equal distances to both
+        // edges prove the centring.
+        assert_eq!(
+            first - buf.area.top() - 1,
+            buf.area.bottom() - 2 - last,
+            "box spans rows {first}..{last}, not centred"
+        );
     }
 
     #[test]

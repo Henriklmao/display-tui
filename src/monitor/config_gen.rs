@@ -17,14 +17,21 @@ impl Monitor {
         };
         if self.enabled {
             let rotation = Rotation::from_transform(&self.transform);
+            // A monitor without a position falls back to the origin instead of
+            // panicking: the file is already truncated when this line is built,
+            // so a panic here would leave the user's config empty.
+            let (pos_x, pos_y) = match &self.position {
+                Some(position) => (position.x, position.y),
+                None => (0, 0),
+            };
             format!(
                 "monitor = {}, {}x{}@{}, {}x{}, {}, {}",
                 self.name,
                 mode.width,
                 mode.height,
                 mode.refresh,
-                self.position.clone().unwrap().x,
-                self.position.clone().unwrap().y,
+                pos_x,
+                pos_y,
                 self.scale.unwrap_or(1.0),
                 rotation.to_hyprland()
             )
@@ -243,6 +250,20 @@ mod tests {
     fn legacy_config_line_defaults_scale_to_one() {
         let mut m = monitor("DP-1");
         m.scale = None;
+
+        assert_eq!(
+            m.to_hyprland_config(),
+            "monitor = DP-1, 1920x1080@60, 0x0, 1, "
+        );
+    }
+
+    #[test]
+    fn legacy_config_line_defaults_missing_position_to_origin() {
+        // A positionless monitor must not panic: save_hyprland_config
+        // truncates the target file before any line is generated, so a panic
+        // here would leave the user's config empty.
+        let mut m = monitor("DP-1");
+        m.position = None;
 
         assert_eq!(
             m.to_hyprland_config(),

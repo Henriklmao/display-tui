@@ -21,25 +21,46 @@ pub mod tests {
     // Returns the top-left cell of the first row containing `needle`.
     //
     // Symbols are multi-byte UTF-8, so a plain `String::find` would yield a
-    // byte offset instead of a column; the columns are tracked alongside.
+    // byte offset instead of a column; the columns are tracked alongside. A
+    // symbol may also hold several chars, so every char of it maps back to
+    // the single cell holding it — otherwise the columns after it drift and a
+    // too-large offset would abandon the row (and the rows below it) instead
+    // of reporting the match.
     pub fn find_text(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
         for y in buf.area.top()..buf.area.bottom() {
             let mut row = String::new();
-            let mut columns = Vec::new();
+            let mut columns: Vec<u16> = Vec::new();
             for x in buf.area.left()..buf.area.right() {
                 let symbol = buf[(x, y)].symbol();
                 if symbol.is_empty() {
                     continue;
                 }
                 row.push_str(symbol);
-                columns.push(x);
+                for _ in symbol.chars() {
+                    columns.push(x);
+                }
             }
             if let Some(byte_offset) = row.find(needle) {
                 let char_offset = row[..byte_offset].chars().count();
-                return Some((*columns.get(char_offset)?, y));
+                if let Some(&column) = columns.get(char_offset) {
+                    return Some((column, y));
+                }
             }
         }
         None
+    }
+
+    // Regression: a cell whose symbol spans several chars must not shift the
+    // reported column of the cells after it.
+    #[test]
+    fn find_text_stays_on_column_with_multi_char_symbols() {
+        use ratatui::layout::Rect;
+        let mut buf = Buffer::empty(Rect::new(0, 0, 6, 1));
+        buf[(0, 0)].set_symbol("ab");
+        buf[(1, 0)].set_symbol("cd");
+        buf[(2, 0)].set_symbol("X");
+
+        assert_eq!(find_text(&buf, "X"), Some((2, 0)));
     }
 
     // Returns the position of the first cell holding exactly `symbol`.

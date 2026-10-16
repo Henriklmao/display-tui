@@ -9,13 +9,17 @@ if [[ -z "$TAG" ]]; then
   echo "usage: $0 <tag>" >&2
   exit 1
 fi
-PKGVER="${TAG#v}"
+# pkgver must not contain hyphens/colons/slashes: turn e.g. "v0.9.6-1" into "0.9.6.1".
+# SRCVER keeps the real tag spelling, which the tarball URL and the extracted
+# directory name (display-tui-0.9.6-1) must use.
+SRCVER="${TAG#v}"
+PKGVER="${SRCVER//-/.}"
 
 URL="https://github.com/${REPO}"
 
 # Download the release tarball to compute its checksum
-TARBALL="/tmp/v${PKGVER}.tar.gz"
-curl -fsSL -o "$TARBALL" "${URL}/archive/refs/tags/v${PKGVER}.tar.gz"
+TARBALL="/tmp/v${SRCVER}.tar.gz"
+curl -fsSL -o "$TARBALL" "${URL}/archive/refs/tags/v${SRCVER}.tar.gz"
 SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
 
 cat > PKGBUILD <<EOF
@@ -30,23 +34,23 @@ license=('GPL-3.0-or-later')
 depends=('glibc' 'gcc-libs')
 makedepends=('cargo')
 options=('!lto')
-source=("${PKGVER}.tar.gz::${URL}/archive/refs/tags/v${PKGVER}.tar.gz")
+source=("${SRCVER}.tar.gz::${URL}/archive/refs/tags/v${SRCVER}.tar.gz")
 sha256sums=('${SHA256}')
 
 prepare() {
-  cd "display-tui-${PKGVER}"
+  cd "display-tui-${SRCVER}"
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked
 }
 
 build() {
-  cd "display-tui-${PKGVER}"
+  cd "display-tui-${SRCVER}"
   export RUSTUP_TOOLCHAIN=stable
   cargo build --frozen --release
 }
 
 package() {
-  cd "display-tui-${PKGVER}"
+  cd "display-tui-${SRCVER}"
   install -Dm755 target/release/display-tui "\${pkgdir}/usr/bin/display-tui"
   install -Dm644 assets/display-tui.desktop "\${pkgdir}/usr/share/applications/display-tui.desktop"
   install -Dm644 assets/desktop-icon.png "\${pkgdir}/usr/share/pixmaps/display-tui.png"

@@ -10,7 +10,9 @@ if [[ -z "$TAG" ]]; then
   echo "usage: $0 <tag>" >&2
   exit 1
 fi
+# pkgver must not contain hyphens/colons/slashes: turn e.g. "v0.9.6-1" into "0.9.6.1"
 PKGVER="${TAG#v}"
+PKGVER="${PKGVER//-/.}"
 
 URL="https://github.com/${REPO}"
 BIN_NAME="display-tui-${TAG}-x86_64-unknown-linux-gnu"

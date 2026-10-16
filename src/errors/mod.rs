@@ -163,10 +163,18 @@ mod tests {
 
     #[test]
     fn app_result_alias_propagates_both_outcomes() {
-        let ok: AppResult<i32> = Ok(7);
-        assert_eq!(ok.unwrap(), 7);
+        // Wrapped in helpers so the outcomes are not statically known.
+        fn produce_ok() -> AppResult<i32> {
+            Ok(7)
+        }
+        fn produce_err() -> AppResult<i32> {
+            Err(AppError::Monitor("boom".to_string()))
+        }
 
-        let err: AppResult<i32> = Err(AppError::Monitor("boom".to_string()));
-        assert_eq!(err.unwrap_err().to_string(), "Monitor error: boom");
+        assert_eq!(produce_ok().unwrap(), 7);
+        assert_eq!(
+            produce_err().unwrap_err().to_string(),
+            "Monitor error: boom"
+        );
     }
 }

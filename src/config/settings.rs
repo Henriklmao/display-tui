@@ -142,6 +142,10 @@ mod tests {
     #[test]
     fn test_create_default_config_populates_missing_file() {
         let temp_dir = crate::test_utils::tests::TempDir::new("config-missing");
+        // The guard pre-creates its directory; take it away again so the
+        // parent-directory creation inside create_default_config stays
+        // covered (the guard still cleans up afterwards).
+        std::fs::remove_dir_all(temp_dir.path()).unwrap();
         let config_path = temp_dir.path().join("config.json");
 
         let config = Configuration::create_default_config(&config_path);
@@ -150,7 +154,10 @@ mod tests {
             config.monitors_config_path.as_deref(),
             Some("~/.config/hypr/monitors.conf")
         );
-        assert!(config_path.exists());
+        assert!(
+            config_path.exists(),
+            "create_default_config must create the missing parent directory"
+        );
         let content = std::fs::read_to_string(&config_path).unwrap();
         let parsed: Configuration = serde_json::from_str(&content).unwrap();
         assert_eq!(

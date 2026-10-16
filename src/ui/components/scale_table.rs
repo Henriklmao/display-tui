@@ -166,4 +166,150 @@ mod tests {
 
         assert_eq!(buf, expected);
     }
+
+    // --- key handling ---------------------------------------------------
+
+    use crossterm::event::KeyModifiers;
+    use crate::monitor::{Monitor, Position};
+
+    fn monitor() -> Monitor {
+        Monitor {
+            name: "DP-1".to_string(),
+            enabled: true,
+            position: Some(Position { x: 0, y: 0 }),
+            modes: vec![crate::monitor::Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    // The mode is deliberately not TUIMode::Scale: leaving Scale mode
+    // persists the monitor state into the user's real config directory,
+    // which a unit test must not do.
+    fn app() -> App {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor(), monitor()];
+        app.selected_monitor = 0;
+        app.mode = TUIMode::Resolution;
+        app
+    }
+
+    fn press(a: &mut App, code: KeyCode) {
+        Scale::handle_events(a, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn last_scale_index() -> usize {
+        ScaleValue::table().len() - 1
+    }
+
+    #[test]
+    fn j_and_k_walk_through_the_scale_table_and_wrap() {
+        let mut a = app();
+
+        press(&mut a, KeyCode::Char('j'));
+        assert_eq!(a.selected_scale, 1);
+
+        press(&mut a, KeyCode::Down);
+        assert_eq!(a.selected_scale, 2);
+
+        while a.selected_scale != last_scale_index() {
+            press(&mut a, KeyCode::Char('j'));
+        }
+        assert_eq!(a.selected_scale, last_scale_index());
+
+        // Past the end it wraps back to the first entry.
+        press(&mut a, KeyCode::Char('j'));
+        assert_eq!(a.selected_scale, 0);
+
+        // And backwards from the start goes to the last entry.
+        press(&mut a, KeyCode::Char('k'));
+        assert_eq!(a.selected_scale, last_scale_index());
+
+        press(&mut a, KeyCode::Up);
+        assert_eq!(a.selected_scale, last_scale_index() - 1);
+    }
+
+    #[test]
+    fn space_applies_the_highlighted_scale() {
+        let mut a = app();
+        a.selected_scale = last_scale_index();
+
+        press(&mut a, KeyCode::Char(' '));
+
+        assert_eq!(a.monitors[0].scale, Some(2.0));
+        assert_eq!(
+            a.monitors[0].scale,
+            Some(ScaleValue::table()[last_scale_index()].value)
+        );
+    }
+
+    #[test]
+    fn every_table_entry_maps_to_its_value() {
+        for (index, scale) in ScaleValue::table().iter().enumerate() {
+            let mut a = app();
+            a.selected_scale = index;
+
+            press(&mut a, KeyCode::Char(' '));
+
+            assert_eq!(
+                a.monitors[0].scale,
+                Some(scale.value),
+                "entry {} ({}) did not apply",
+                index,
+                scale.name
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_selected_monitor_is_re_scaled() {
+        let mut a = app();
+        a.selected_monitor = 1;
+        a.selected_scale = 4; // 100%
+
+        press(&mut a, KeyCode::Char(' '));
+
+        assert_eq!(a.monitors[1].scale, Some(1.0));
+        assert_eq!(a.monitors[0].scale, None, "untouched monitor keeps its scale");
+    }
+
+    #[test]
+    fn enter_applies_and_returns_to_view_mode() {
+        let mut a = app();
+        a.selected_scale = 8;
+
+        press(&mut a, KeyCode::Enter);
+
+        assert_eq!(a.mode, TUIMode::View);
+        assert_eq!(a.monitors[0].scale, Some(2.0));
+    }
+
+    #[test]
+    fn escape_leaves_without_applying_anything() {
+        let mut a = app();
+        a.selected_scale = 8;
+
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+        assert_eq!(a.monitors[0].scale, None, "nothing was applied");
+    }
+
+    #[test]
+    fn unrelated_keys_are_ignored() {
+        let mut a = app();
+        a.selected_scale = 3;
+
+        for code in [KeyCode::Char('x'), KeyCode::Char('w'), KeyCode::Tab, KeyCode::F(1)] {
+            press(&mut a, code);
+            assert_eq!(a.selected_scale, 3, "{:?} must not navigate", code);
+            assert_eq!(a.monitors[0].scale, None, "{:?} must not apply", code);
+            assert_eq!(a.mode, TUIMode::Resolution, "{:?} must not leave", code);
+        }
+    }
 }

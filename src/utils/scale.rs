@@ -16,7 +16,7 @@ impl ScaleValue {
     pub fn table() -> Vec<Self> {
         vec![
             ScaleValue::new("50%", 0.5),
-            ScaleValue::new("66%", 0.6),
+            ScaleValue::new("66%", 0.66),
             ScaleValue::new("75%", 0.75),
             ScaleValue::new("80%", 0.8),
             ScaleValue::new("100%", 1.0),
@@ -50,8 +50,8 @@ mod tests {
     #[test]
     fn table_contents_are_pinned() {
         // Snapshot of the whole table so accidental edits to labels or values
-        // are caught. Kept as-is: "66%" is a rounded label for the stored
-        // 0.6 step.
+        // are caught. Every label must match its stored value, so "66%"
+        // maps to 0.66.
         let table: Vec<(&str, f32)> = ScaleValue::table()
             .iter()
             .map(|s| (s.name, s.value))
@@ -60,7 +60,7 @@ mod tests {
             table,
             vec![
                 ("50%", 0.5),
-                ("66%", 0.6),
+                ("66%", 0.66),
                 ("75%", 0.75),
                 ("80%", 0.8),
                 ("100%", 1.0),

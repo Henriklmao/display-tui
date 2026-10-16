@@ -237,4 +237,126 @@ mod tests {
         // modal still renders (border + bulk of the title) without panicking.
         assert!(text.contains("Keybindings"));
     }
+
+    #[test]
+    fn every_section_is_listed_in_both_layouts() {
+        let sections = [
+            "Global",
+            "View Mode",
+            "Move Mode",
+            "Res / Scale Mode",
+            "Tip",
+        ];
+        let bindings = [
+            "Save <w>",
+            "Quit <q>",
+            "Preset Menu <p>",
+            "Freemove",
+            "Snapmove",
+            "Select <Space",
+            "Up/Down <k/j>",
+        ];
+
+        for (width, height) in [(120u16, 40u16), (60, 30)] {
+            let text = as_text(&render_help(width, height));
+            for needle in sections.iter().chain(bindings.iter()) {
+                assert!(
+                    text.contains(needle),
+                    "{:?} missing at {}x{}",
+                    needle,
+                    width,
+                    height
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn version_line_reports_the_package_version() {
+        let text = as_text(&render_help(120, 40));
+
+        assert!(
+            text.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
+            "version line missing: {text}"
+        );
+    }
+
+    #[test]
+    fn help_rect_stays_inside_the_area_and_respects_its_caps() {
+        for (width, height) in [
+            (1u16, 1u16),
+            (10, 4),
+            (20, 8),
+            (40, 15),
+            (60, 30),
+            (80, 24),
+            (120, 40),
+            (200, 60),
+        ] {
+            let area = Rect::new(0, 0, width, height);
+            let popup = responsive_help_rect(area);
+
+            assert!(
+                popup.x >= area.x
+                    && popup.y >= area.y
+                    && popup.x + popup.width <= area.x + area.width
+                    && popup.y + popup.height <= area.y + area.height,
+                "{:?} escapes {:?}",
+                popup,
+                area
+            );
+            assert!(
+                popup.width <= 60 && popup.height <= 30,
+                "{:?} exceeds its caps",
+                popup
+            );
+        }
+    }
+
+    #[test]
+    fn help_frame_uses_the_cyan_border() {
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+
+        assert_eq!(buf[(popup.x, popup.y)].style().fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn help_clears_only_the_popup_area() {
+        let area = Rect::new(0, 0, 120, 40);
+        let popup = responsive_help_rect(area);
+        let mut buf = Buffer::empty(area);
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)].set_symbol("x");
+            }
+        }
+
+        HelpModal::render(area, &mut buf);
+
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                let inside = x >= popup.x
+                    && x < popup.x + popup.width
+                    && y >= popup.y
+                    && y < popup.y + popup.height;
+                let symbol = buf[(x, y)].symbol();
+                if inside {
+                    assert_ne!(
+                        symbol, "x",
+                        "popup did not overwrite ({}, {})",
+                        x,
+                        y
+                    );
+                } else {
+                    assert_eq!(
+                        symbol, "x",
+                        "background was clobbered at ({}, {})",
+                        x,
+                        y
+                    );
+                }
+            }
+        }
+    }
 }

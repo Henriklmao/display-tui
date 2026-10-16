@@ -13,12 +13,18 @@ pub mod tests {
     }
 
     impl TempDir {
-        // Creates the directory, clearing any leftover from an earlier run.
+        // Creates a directory unique to this call, clearing any leftover
+        // from an earlier run. The counter keeps parallel tests that pass
+        // the same tag from clobbering each other's directory.
         pub fn new(tag: &str) -> Self {
+            static NEXT_ID: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(0);
+            let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "display-tui-test-{}-{}",
+                "display-tui-test-{}-{}-{}",
                 std::process::id(),
-                tag
+                tag,
+                id
             ));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir_all(&path).unwrap();

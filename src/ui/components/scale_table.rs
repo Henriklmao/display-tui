@@ -11,10 +11,8 @@ use ratatui::{
 };
 
 use ratatui::layout::Constraint;
-use crate::utils::ScaleValue;
-use crate::utils::TUIMode;
+use crate::utils::{ScaleValue, TUIMode, change_mode};
 use crate::App;
-use crate::config::save_monitor_state;
 
 #[derive(Debug)]
 pub struct Scale{
@@ -37,18 +35,11 @@ impl Scale{
             KeyCode::Char(' ') => Scale::select(app),
             KeyCode::Enter => {
                 Scale::select(app);
-                Scale::change_mode(app, TUIMode::View);
+                change_mode(app, TUIMode::View);
             }
-            KeyCode::Esc => Scale::change_mode(app, TUIMode::View),
+            KeyCode::Esc => change_mode(app, TUIMode::View),
             _ => {}
         }
-    }
-    fn change_mode(app:&mut App,mode: TUIMode) {
-        // Save monitor state when exiting Scale mode
-        if app.mode == TUIMode::Scale {
-            let _ = save_monitor_state(&app.monitors);
-        }
-        app.mode = mode;
     }
 
     fn next(app:&mut App) {
@@ -171,6 +162,7 @@ mod tests {
 
     use crossterm::event::KeyModifiers;
     use crate::monitor::{Monitor, Position};
+    use crate::test_utils::tests::TempDir;
 
     fn monitor() -> Monitor {
         Monitor {
@@ -188,15 +180,30 @@ mod tests {
         }
     }
 
-    // The mode is deliberately not TUIMode::Scale: leaving Scale mode
-    // persists the monitor state into the user's real config directory,
-    // which a unit test must not do.
+    // Key handling without persistence: the mode is deliberately not
+    // TUIMode::Scale so leaving the table writes nothing. The Scale exit
+    // path itself is exercised through app_in_scale() below.
     fn app() -> App {
         let mut app = App::new(None);
         app.monitors = vec![monitor(), monitor()];
         app.selected_monitor = 0;
         app.mode = TUIMode::Resolution;
         app
+    }
+
+    // An app inside Scale mode that persists leaving it into a temp dir.
+    fn app_in_scale() -> (App, TempDir) {
+        let dir = TempDir::new("scale-state");
+        let mut a = app();
+        a.mode = TUIMode::Scale;
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        (a, dir)
+    }
+
+    fn saved_state(dir: &TempDir) -> Vec<crate::config::MonitorState> {
+        let content = std::fs::read_to_string(dir.path().join("monitor_state.json"))
+            .expect("leaving Scale mode must have written the state file");
+        serde_json::from_str(&content).expect("state file must hold valid JSON")
     }
 
     fn press(a: &mut App, code: KeyCode) {
@@ -298,6 +305,38 @@ mod tests {
 
         assert_eq!(a.mode, TUIMode::View);
         assert_eq!(a.monitors[0].scale, None, "nothing was applied");
+    }
+
+    #[test]
+    fn enter_in_scale_mode_applies_and_persists_the_new_scale() {
+        let (mut a, dir) = app_in_scale();
+        a.selected_scale = 8; // 200%
+
+        press(&mut a, KeyCode::Enter);
+
+        assert_eq!(a.mode, TUIMode::View);
+        let saved = saved_state(&dir);
+        assert_eq!(saved[0].scale, Some(2.0), "the applied scale is persisted");
+        assert_eq!(
+            saved[1].scale, None,
+            "only the selected monitor is re-scaled"
+        );
+    }
+
+    #[test]
+    fn escape_in_scale_mode_persists_without_applying() {
+        let (mut a, dir) = app_in_scale();
+        a.selected_scale = 8;
+
+        press(&mut a, KeyCode::Esc);
+
+        assert_eq!(a.mode, TUIMode::View);
+        assert_eq!(a.monitors[0].scale, None, "nothing was applied");
+        let saved = saved_state(&dir);
+        assert_eq!(
+            saved[0].scale, None,
+            "leaving Scale mode still persists the untouched state"
+        );
     }
 
     #[test]

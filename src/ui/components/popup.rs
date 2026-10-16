@@ -54,6 +54,7 @@ impl Popup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::tests::text_of;
     use crate::ui::layouts::centered_rect;
 
     fn popup(is_error: bool, lines: &[&str]) -> Popup {
@@ -62,18 +63,6 @@ mod tests {
             lines: lines.iter().map(|l| l.to_string()).collect(),
             is_error,
         }
-    }
-
-    // Flattens the buffer into readable text so content can be asserted on.
-    fn text_of(buf: &Buffer) -> String {
-        let mut out = String::new();
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
     }
 
     fn render(p: &Popup, area: Rect) -> Buffer {

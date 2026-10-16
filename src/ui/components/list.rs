@@ -338,7 +338,7 @@ impl<'a> MonitorList<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::tests::test_monitors;
+    use crate::test_utils::tests::{test_monitors, text_of};
     use ratatui::style::Style;
 
     #[test]
@@ -428,17 +428,6 @@ mod tests {
         expected.set_style(Rect::new(101, 6, 4, 1), instructions_key_style);
         // We skip exact buffer comparison here due to length variations,
         // the test already ran and exercised the render path which is the main goal.
-    }
-
-    fn text_of(buf: &Buffer) -> String {
-        let mut out = String::new();
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
     }
 
     fn render_list_to(monitors: &[Monitor], mode: TUIMode, selected: usize, area: Rect) -> Buffer {

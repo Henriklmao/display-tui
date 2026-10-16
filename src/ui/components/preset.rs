@@ -390,6 +390,7 @@ fn is_valid_name_char(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::tests::{find_cell, text_of};
     use ratatui::style::Color;
 
     fn entry(name: &str, enabled_count: usize) -> PresetEntry {
@@ -431,28 +432,6 @@ mod tests {
         let mut m = two_presets();
         m.state = MenuState::DeleteConfirm(name.to_string());
         m
-    }
-
-    fn text_of(buf: &Buffer) -> String {
-        let mut out = String::new();
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
-    }
-
-    fn find_cell(buf: &Buffer, symbol: &str) -> Option<(u16, u16)> {
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                if buf[(x, y)].symbol() == symbol {
-                    return Some((x, y));
-                }
-            }
-        }
-        None
     }
 
     fn render(m: &PresetMenu, area: Rect) -> Buffer {

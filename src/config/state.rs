@@ -104,7 +104,7 @@ pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
     save_state_as_last_in(&get_presets_dir(), monitors)
 }
 
-pub(crate) fn save_state_as_last_in(
+fn save_state_as_last_in(
     dir: &Path,
     monitors: &[Monitor],
 ) -> std::io::Result<()> {
@@ -124,7 +124,7 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
     save_preset_in(&get_presets_dir(), name, monitors)
 }
 
-pub(crate) fn save_preset_in(
+fn save_preset_in(
     dir: &Path,
     name: &str,
     monitors: &[Monitor],
@@ -171,7 +171,7 @@ pub fn load_preset(name: &str) -> Option<Vec<MonitorState>> {
     load_preset_in(&get_presets_dir(), name)
 }
 
-pub(crate) fn load_preset_in(dir: &Path, name: &str) -> Option<Vec<MonitorState>> {
+fn load_preset_in(dir: &Path, name: &str) -> Option<Vec<MonitorState>> {
     if validate_preset_name(name).is_err() {
         return None;
     }
@@ -194,7 +194,7 @@ pub fn validate_preset_monitors_match(
     validate_preset_monitors_match_in(&get_presets_dir(), preset_name, connected_monitors)
 }
 
-pub(crate) fn validate_preset_monitors_match_in(
+fn validate_preset_monitors_match_in(
     dir: &Path,
     preset_name: &str,
     connected_monitors: &[Monitor],
@@ -227,7 +227,7 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
     apply_preset_in(&get_presets_dir(), name, monitors)
 }
 
-pub(crate) fn apply_preset_in(
+fn apply_preset_in(
     dir: &Path,
     name: &str,
     monitors: &mut [Monitor],
@@ -264,7 +264,7 @@ pub fn override_preset(name: &str, monitors: &[Monitor]) -> Result<(), String> {
     override_preset_in(&get_presets_dir(), name, monitors)
 }
 
-pub(crate) fn override_preset_in(
+fn override_preset_in(
     dir: &Path,
     name: &str,
     monitors: &[Monitor],
@@ -278,7 +278,7 @@ pub fn count_enabled_monitors_in_preset(name: &str) -> Option<usize> {
     count_enabled_monitors_in_preset_in(&get_presets_dir(), name)
 }
 
-pub(crate) fn count_enabled_monitors_in_preset_in(dir: &Path, name: &str) -> Option<usize> {
+fn count_enabled_monitors_in_preset_in(dir: &Path, name: &str) -> Option<usize> {
     let state = load_preset_in(dir, name)?;
     Some(state.iter().filter(|m| m.enabled).count())
 }
@@ -288,7 +288,7 @@ pub fn list_presets() -> Vec<String> {
     list_presets_in(&get_presets_dir())
 }
 
-pub(crate) fn list_presets_in(dir: &Path) -> Vec<String> {
+fn list_presets_in(dir: &Path) -> Vec<String> {
     if !dir.exists() {
         return Vec::new();
     }
@@ -323,7 +323,7 @@ pub fn delete_preset(name: &str) -> std::io::Result<()> {
     delete_preset_in(&get_presets_dir(), name)
 }
 
-pub(crate) fn delete_preset_in(dir: &Path, name: &str) -> std::io::Result<()> {
+fn delete_preset_in(dir: &Path, name: &str) -> std::io::Result<()> {
     if is_last_preset(name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -351,7 +351,7 @@ pub fn rename_preset(old_name: &str, new_name: &str) -> std::io::Result<()> {
     rename_preset_in(&get_presets_dir(), old_name, new_name)
 }
 
-pub(crate) fn rename_preset_in(
+fn rename_preset_in(
     dir: &Path,
     old_name: &str,
     new_name: &str,

@@ -200,7 +200,7 @@ impl<'a> Map<'a> {
 mod tests {
     use super::*;
     use ratatui::style::Style;
-    use crate::test_utils::tests::{TempDir, test_monitors};
+    use crate::test_utils::tests::{TempDir, find_text, test_monitors, text_of};
     use crate::monitor::{Position, Resolution};
 
     fn monitor(name: &str, x: i32, y: i32) -> Monitor {
@@ -238,41 +238,6 @@ mod tests {
     fn position_of(m: &Monitor) -> (i32, i32) {
         let p = m.position.clone().unwrap();
         (p.x, p.y)
-    }
-
-    // Returns the top-left cell of the first row containing `needle`.
-    //
-    // Symbols are multi-byte UTF-8, so a plain `String::find` would yield a
-    // byte offset instead of a column; the columns are tracked alongside.
-    fn find_text(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
-        for y in buf.area.top()..buf.area.bottom() {
-            let mut row = String::new();
-            let mut columns = Vec::new();
-            for x in buf.area.left()..buf.area.right() {
-                let symbol = buf[(x, y)].symbol();
-                if symbol.is_empty() {
-                    continue;
-                }
-                row.push_str(symbol);
-                columns.push(x);
-            }
-            if let Some(byte_offset) = row.find(needle) {
-                let char_offset = row[..byte_offset].chars().count();
-                return Some((*columns.get(char_offset)?, y));
-            }
-        }
-        None
-    }
-
-    fn text_of(buf: &Buffer) -> String {
-        let mut out = String::new();
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
     }
 
     #[test]

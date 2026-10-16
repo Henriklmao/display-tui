@@ -3,7 +3,56 @@
 #[cfg(test)]
 pub mod tests {
     use crate::monitor::{Monitor, Resolution, Position};
+    use ratatui::buffer::Buffer;
     use std::path::{Path, PathBuf};
+
+    // Flattens the buffer into readable text so content can be asserted on.
+    pub fn text_of(buf: &Buffer) -> String {
+        let mut out = String::new();
+        for y in buf.area.top()..buf.area.bottom() {
+            for x in buf.area.left()..buf.area.right() {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    // Returns the top-left cell of the first row containing `needle`.
+    //
+    // Symbols are multi-byte UTF-8, so a plain `String::find` would yield a
+    // byte offset instead of a column; the columns are tracked alongside.
+    pub fn find_text(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        for y in buf.area.top()..buf.area.bottom() {
+            let mut row = String::new();
+            let mut columns = Vec::new();
+            for x in buf.area.left()..buf.area.right() {
+                let symbol = buf[(x, y)].symbol();
+                if symbol.is_empty() {
+                    continue;
+                }
+                row.push_str(symbol);
+                columns.push(x);
+            }
+            if let Some(byte_offset) = row.find(needle) {
+                let char_offset = row[..byte_offset].chars().count();
+                return Some((*columns.get(char_offset)?, y));
+            }
+        }
+        None
+    }
+
+    // Returns the position of the first cell holding exactly `symbol`.
+    pub fn find_cell(buf: &Buffer, symbol: &str) -> Option<(u16, u16)> {
+        for y in buf.area.top()..buf.area.bottom() {
+            for x in buf.area.left()..buf.area.right() {
+                if buf[(x, y)].symbol() == symbol {
+                    return Some((x, y));
+                }
+            }
+        }
+        None
+    }
 
     // A unique per-process temporary directory that removes itself on drop —
     // also when a test aborts on a failed assertion, so nothing is left

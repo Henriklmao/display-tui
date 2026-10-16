@@ -104,7 +104,7 @@ impl Widget for &App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::tests::test_monitors;
+    use crate::test_utils::tests::{test_monitors, text_of};
     use crate::ui::components::PresetMenu;
     use ratatui::widgets::Widget;
 
@@ -121,17 +121,6 @@ mod tests {
         let mut buf = Buffer::empty(area);
         app.render(area, &mut buf);
         buf
-    }
-
-    fn text_of(buf: &Buffer) -> String {
-        let mut out = String::new();
-        for y in buf.area.top()..buf.area.bottom() {
-            for x in buf.area.left()..buf.area.right() {
-                out.push_str(buf[(x, y)].symbol());
-            }
-            out.push('\n');
-        }
-        out
     }
 
     fn error_popup(is_forceable: bool) -> Popup {

@@ -7,9 +7,10 @@ pub fn cycle_forward(current: usize, length: usize) -> usize {
 }
 
 // Cycle backward through a list, wrapping around.
+// Out-of-range indices are normalised to the last entry.
 pub fn cycle_backward(current: usize, length: usize) -> usize {
     if length == 0 { return current; }
-    if current == 0 { length - 1 } else { current - 1 }
+    if current == 0 || current >= length { length - 1 } else { current - 1 }
 }
 
 #[cfg(test)]
@@ -72,6 +73,12 @@ mod tests {
     fn forward_normalises_out_of_range_indices() {
         assert_eq!(cycle_forward(99, 5), 0);
         assert_eq!(cycle_forward(5, 5), 0);
+    }
+
+    #[test]
+    fn backward_normalises_out_of_range_indices() {
+        assert_eq!(cycle_backward(99, 5), 4);
+        assert_eq!(cycle_backward(5, 5), 4);
     }
 
     #[test]

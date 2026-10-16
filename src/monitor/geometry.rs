@@ -18,12 +18,17 @@ impl Monitor {
             if !monitor.enabled {
                 continue;
             }
+            // A monitor without a position cannot be placed on the canvas.
+            let position = match &monitor.position {
+                Some(position) => position,
+                None => continue,
+            };
             let (width, height) = monitor.get_logical_dimensions();
 
-            let monitor_left = monitor.position.clone().unwrap().x as f64;
+            let monitor_left = position.x as f64;
             let monitor_right = monitor_left + width;
 
-            let monitor_bottom = monitor.position.clone().unwrap().y as f64;
+            let monitor_bottom = position.y as f64;
             let monitor_top = monitor_bottom + height;
 
             if monitor_right > right {
@@ -163,6 +168,19 @@ mod tests {
         let canvas = Monitor::get_monitors_canvas(&monitors, &area());
 
         assert_eq!(canvas.x_bounds, [-MARGIN, 1920.0 + MARGIN]);
+        assert_eq!(canvas.y_bounds, [-MARGIN, 1080.0 + MARGIN]);
+    }
+
+    #[test]
+    fn monitors_without_a_position_are_ignored() {
+        let mut placed = monitor("A", 0, 0, 1.0, true);
+        placed.position = Some(Position { x: -1920, y: 0 });
+        let mut unplaced = monitor("B", 0, 0, 1.0, true);
+        unplaced.position = None;
+
+        let canvas = Monitor::get_monitors_canvas(&vec![unplaced, placed], &area());
+
+        assert_eq!(canvas.x_bounds, [-1920.0 - MARGIN, MARGIN]);
         assert_eq!(canvas.y_bounds, [-MARGIN, 1080.0 + MARGIN]);
     }
 

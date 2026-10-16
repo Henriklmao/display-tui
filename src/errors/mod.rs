@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn source_is_exposed_only_for_io_errors() {
-        let io_error = AppError::Io(io::Error::new(io::ErrorKind::Other, "root cause"));
+        let io_error = AppError::Io(io::Error::other("root cause"));
         let source = io_error.source().expect("Io errors must expose a source");
         assert_eq!(source.to_string(), "root cause");
 
@@ -158,7 +158,7 @@ mod tests {
         fn assert_error<T: std::error::Error + Send + Sync + 'static>(_: &T) {}
         assert_error(&AppError::Config("x".to_string()));
         assert_error(&AppError::Validation(vec!["x".to_string()]));
-        assert_error(&AppError::Io(io::Error::new(io::ErrorKind::Other, "x")));
+        assert_error(&AppError::Io(io::Error::other("x")));
     }
 
     #[test]

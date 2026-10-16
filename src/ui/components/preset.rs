@@ -194,7 +194,9 @@ impl PresetMenu {
                     }
                     MenuEvent::Handled
                 }
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                // 'q'/'Q' are valid name characters and are consumed by the
+                // typing arm above, so only Esc can cancel.
+                KeyCode::Esc => {
                     self.state = MenuState::List;
                     MenuEvent::Handled
                 }
@@ -222,7 +224,9 @@ impl PresetMenu {
                     }
                     MenuEvent::Handled
                 }
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                // 'q'/'Q' are valid name characters and are consumed by the
+                // typing arm above, so only Esc can cancel.
+                KeyCode::Esc => {
                     self.state = MenuState::List;
                     MenuEvent::Handled
                 }
@@ -701,15 +705,24 @@ mod tests {
     #[test]
     fn letters_are_always_typed_in_the_name_states() {
         // 'q'/'Q' are valid name characters, so they are never treated as a
-        // cancel key here — only Esc leaves the sub state.
+        // cancel key here — only Esc leaves the sub state. A cancel arm for
+        // them would be dead code behind the typing arm.
         let mut m = creating("x");
         assert_eq!(m.handle_event(KeyCode::Char('q')), MenuEvent::Handled);
         assert_eq!(m.state, MenuState::CreateName("xq".to_string()));
+
+        let mut m = creating("x");
+        assert_eq!(m.handle_event(KeyCode::Char('Q')), MenuEvent::Handled);
+        assert_eq!(m.state, MenuState::CreateName("xQ".to_string()));
 
         let mut m = renaming("desk", "desk");
         assert_eq!(m.handle_event(KeyCode::Char('q')), MenuEvent::Handled);
         assert_eq!(m.state, MenuState::RenameName("desk".into(), "deskq".into()));
         assert_eq!(m.error_message, None);
+
+        let mut m = renaming("desk", "desk");
+        assert_eq!(m.handle_event(KeyCode::Char('Q')), MenuEvent::Handled);
+        assert_eq!(m.state, MenuState::RenameName("desk".into(), "deskQ".into()));
     }
 
     // --- rename sub state ---------------------------------------------

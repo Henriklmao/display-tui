@@ -9,7 +9,7 @@ concurrency:
   group: rust-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Read-only by default; the release step widens it per job.
+# Read-only by default; only the release job widens it.
 permissions:
   contents: read
 
@@ -20,23 +20,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: write
 
     steps:
     - uses: actions/checkout@v5
 
-    # Pinned on purpose: a new stable clippy can introduce a lint that fails
-    # the `-D warnings` gate in a commit that was green before (clippy 1.99
-    # added needless_borrows_for_generic_args). Bump this deliberately.
+    # The toolchain is pinned so a new stable clippy cannot break a commit that
+    # was green before (clippy 1.99 added needless_borrows_for_generic_args).
+    # Bump deliberately; the action itself is pinned to a commit SHA.
     - name: Install Rust Toolchain
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
       with:
-        toolchain: "1.99.0"
+        toolchain: "1.99.1"
         components: clippy, rustfmt
 
     - name: Cache cargo
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
     - name: Format check
       run: cargo fmt --check
@@ -65,19 +63,30 @@ jobs:
         mkdir -p dist
         cp target/release/display-tui "dist/display-tui-${{ steps.build.outputs.name }}-x86_64-linux-gnu"
 
-    # Everything that is not a version release gets a downloadable binary named
-    # after the commit (or tag).
     - name: Upload build artifact
-      if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: display-tui-${{ steps.build.outputs.name }}-x86_64-linux-gnu
         path: dist/display-tui-*-x86_64-linux-gnu
 
-    # Only version tags attach the binary to the GitHub Release.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download the built binary
+      uses: actions/download-artifact@v8
+      with:
+        pattern: display-tui-*
+        merge-multiple: true
+        path: dist
+
     - name: Upload binary to GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
       with:
         files: "dist/display-tui-*-x86_64-linux-gnu"
       env:

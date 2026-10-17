@@ -32,8 +32,23 @@ fn main() -> io::Result<()> {
 }
 
 fn run_with_action(action: Option<CliAction>) -> io::Result<()> {
+    use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+    use crossterm::execute;
+    use std::io::stdout;
+
     let mut terminal = ratatui::init();
+    let _ = execute!(stdout(), EnableMouseCapture);
+
+    // Make sure a panic cannot leave the terminal reporting mouse events.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(stdout(), DisableMouseCapture);
+        previous_hook(info);
+    }));
+
     let app_result = App::new(action).run(&mut terminal);
+
+    let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     app_result
 }

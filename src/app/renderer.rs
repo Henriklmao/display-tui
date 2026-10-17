@@ -6,7 +6,7 @@ use crate::ui::layouts::centered_rect;
 use crate::utils::TUIMode;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Style, Stylize},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
@@ -23,38 +23,31 @@ impl Widget for &App {
             selected: self.selected_monitor,
             monitors: &self.monitors,
             is_previewing,
+            guides: self.drag.as_ref().map(|drag| drag.guides),
         };
         monitor_list.is_previewing = is_previewing;
-        let outer_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
-            .split(area);
 
-        match self.mode {
-            TUIMode::Resolution => {
-                let selected = &self.monitors[self.selected_monitor];
-                let mut resolutions = Resolutions::new(selected, Some(self.selected_resolution));
-                let inner_top_layout = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
-                    .split(outer_layout[0]);
-                canvas.render(inner_top_layout[0], buf);
-                resolutions.render(inner_top_layout[1], buf);
-            }
-            TUIMode::Scale => {
-                let mut scale = Scale::new(self.selected_scale);
-                let inner_top_layout = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage(90), Constraint::Percentage(10)])
-                    .split(outer_layout[0]);
-                canvas.render(inner_top_layout[0], buf);
-                scale.render(inner_top_layout[1], buf);
-            }
-            _ => {
-                canvas.render(outer_layout[0], buf);
+        let layout = self
+            .layout
+            .unwrap_or_else(|| crate::ui::layouts::screen_layout(area, self.mode));
+
+        canvas.render(layout.canvas, buf);
+        if let Some(side) = layout.side_table {
+            match self.mode {
+                TUIMode::Resolution => {
+                    let selected = &self.monitors[self.selected_monitor];
+                    let mut resolutions =
+                        Resolutions::new(selected, Some(self.selected_resolution));
+                    resolutions.render(side, buf);
+                }
+                TUIMode::Scale => {
+                    let mut scale = Scale::new(self.selected_scale);
+                    scale.render(side, buf);
+                }
+                _ => {}
             }
         }
-        monitor_list.render(outer_layout[1], buf);
+        monitor_list.render(layout.list, buf);
 
         if let Some(ref preset_menu) = self.show_preset_menu {
             preset_menu.render(area, buf);

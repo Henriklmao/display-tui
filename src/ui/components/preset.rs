@@ -102,6 +102,56 @@ impl PresetMenu {
         self.error_message = Some(message);
     }
 
+    // The popup rectangle this menu occupies for a given screen area.
+    pub fn rect(area: Rect) -> Rect {
+        preset_rect(area)
+    }
+
+    // Maps a click's row to a preset index; only the list state is clickable.
+    pub fn row_at(&self, area: Rect, y: u16) -> Option<usize> {
+        if self.state != MenuState::List {
+            return None;
+        }
+        // One border line plus the leading blank line before the entries.
+        let top = preset_rect(area).y.saturating_add(2);
+        if y < top {
+            return None;
+        }
+        let index = (y - top) as usize;
+        if index < self.presets.len() {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    // Selects a preset by index (list state only) and returns its name.
+    pub fn select_index(&mut self, index: usize) -> Option<String> {
+        if self.state != MenuState::List {
+            return None;
+        }
+        let name = self.presets.get(index)?.name.clone();
+        self.selected_index = index;
+        self.error_message = None;
+        Some(name)
+    }
+
+    // Moves the selection by a wheel notch (clamped, no wrap) and returns the
+    // newly selected preset name.
+    pub fn scroll(&mut self, delta: i32) -> Option<String> {
+        if self.state != MenuState::List || self.presets.is_empty() {
+            return None;
+        }
+        let last = self.presets.len() - 1;
+        self.selected_index = if delta < 0 {
+            self.selected_index.saturating_sub(1)
+        } else {
+            (self.selected_index + 1).min(last)
+        };
+        self.error_message = None;
+        self.presets.get(self.selected_index).map(|e| e.name.clone())
+    }
+
     // Handles key events for the preset menu and returns how the event was consumed.
     pub fn handle_event(&mut self, key: KeyCode) -> MenuEvent {
         // Clear any stale error message from a previous key press.
@@ -251,8 +301,7 @@ impl PresetMenu {
 
 }
 // Responsive popup rect for preset menu
-fn preset_rect(area: Rect) -> Rect {
-    let vertical = Layout::default()
+fn preset_rect(area: Rect) -> Rect {    let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),

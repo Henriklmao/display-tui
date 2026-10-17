@@ -15,8 +15,34 @@ use ratatui::{
 
 use crate::App;
 use crate::rotation::Rotation;
+use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::TUIMode;
 use ratatui::layout::Constraint;
+
+// Highlight marker shown in front of the selected row.
+//
+// Its width is part of the table's column layout and therefore of the
+// hit-testing geometry, so render and hit-testing share this constant.
+pub(crate) const HIGHLIGHT_SYMBOL: &str = " \u{f04b} ";
+
+// Column width percentage of the leading checkbox column.
+const CHECKBOX_COLUMN_PERCENT: u16 = 5;
+
+// Counts workspace assignments so duplicates can be flagged.
+fn workspace_counts(monitors: &[Monitor]) -> std::collections::HashMap<u8, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for monitor in monitors {
+        if let Some(ws) = monitor.workspace {
+            *counts.entry(ws).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
+// Whether any workspace is assigned to more than one monitor.
+fn has_duplicate_workspace(monitors: &[Monitor]) -> bool {
+    workspace_counts(monitors).values().any(|&count| count > 1)
+}
 
 #[derive(Debug)]
 pub struct MonitorList<'a> {
@@ -36,6 +62,35 @@ impl<'a> MonitorList<'a> {
             monitors,
             is_previewing: false,
         }
+    }
+
+    // Maps a click's row to a monitor index, honouring the table's scroll
+    // window. `y` is the absolute screen row.
+    pub fn row_at(area: Rect, monitors: &[Monitor], selected: usize, y: u16) -> Option<usize> {
+        let inner = Block::bordered().inner(area);
+        let reserved = if has_duplicate_workspace(monitors) { 2 } else { 1 };
+        let table_height = inner.height.saturating_sub(reserved);
+        // The header row plus its bottom margin occupy two lines.
+        let viewport = table_height.saturating_sub(2);
+        let offset = scrolled_offset(selected, viewport as usize);
+        row_in_window(
+            inner.y.saturating_add(2),
+            viewport,
+            offset,
+            monitors.len(),
+            y,
+        )
+    }
+
+    // Exclusive right edge (screen column) of the leading checkbox column.
+    pub fn icon_column_end(area: Rect) -> u16 {
+        let inner = Block::bordered().inner(area);
+        let highlight_width = HIGHLIGHT_SYMBOL.chars().count() as u16;
+        let column_width = inner.width.saturating_mul(CHECKBOX_COLUMN_PERCENT) / 100;
+        inner
+            .x
+            .saturating_add(highlight_width)
+            .saturating_add(column_width)
     }
 
     pub fn handle_events(app: &mut App, key_event: KeyEvent) {
@@ -180,26 +235,22 @@ impl<'a> MonitorList<'a> {
         );
         let mut instructions_items = vec![];
 
-        let mut workspace_counts = std::collections::HashMap::new();
-        let mut has_duplicate_workspace = false;
-        for monitor in self.monitors {
-            if let Some(ws) = monitor.workspace {
-                let count = workspace_counts.entry(ws).or_insert(0);
-                *count += 1;
-                if *count > 1 {
-                    has_duplicate_workspace = true;
-                }
-            }
-        }
+        let workspace_counts = workspace_counts(self.monitors);
+        let has_duplicate_workspace = has_duplicate_workspace(self.monitors);
 
         let is_mini_mode = area.width < 115;
         if is_mini_mode {
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
-            instructions_items.push(" Quit ".white());
-            instructions_items.push("<q> ".blue().bold());
-            instructions_items.push(" Keybinds ".white());
-            instructions_items.push("<K> ".blue().bold());
+            if self.mode == TUIMode::View {
+                instructions_items.push(" Quit ".white());
+                instructions_items.push("<q> ".blue().bold());
+                instructions_items.push(" Keybinds ".white());
+                instructions_items.push("<K> ".blue().bold());
+            } else {
+                instructions_items.push(" Cancel ".white());
+                instructions_items.push("<Esc/q> ".blue().bold());
+            }
         } else {
             // nerdfont symbols:      (nf-oct-arrow_...)
             match self.mode {
@@ -226,11 +277,11 @@ impl<'a> MonitorList<'a> {
                     }
                 }
 
-                TUIMode::Resolution => {
-                    instructions_items.push(" Scroll  ".white());
+                TUIMode::Resolution | TUIMode::Scale => {
+                    instructions_items.push(" Navigate ".white());
                     instructions_items.push("<k/j> ".blue().bold());
-                    instructions_items.push(" Select ".white());
-                    instructions_items.push("<Space> ".blue().bold());
+                    instructions_items.push(" Apply ".white());
+                    instructions_items.push("<Enter/Space> ".blue().bold());
                 }
 
                 TUIMode::Move => {
@@ -239,27 +290,27 @@ impl<'a> MonitorList<'a> {
                     instructions_items.push(" Snapmove ".white());
                     instructions_items.push("<h/j/k/l> ".blue().bold());
                 }
-                TUIMode::Scale => {
-                    instructions_items.push(" Scroll  ".white());
-                    instructions_items.push("<k/j> ".blue().bold());
-                    instructions_items.push(" Select ".white());
-                    instructions_items.push("<Space> ".blue().bold());
-                }
             }
 
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
-            instructions_items.push(" Quit ".white());
-            instructions_items.push("<q> ".blue().bold());
-            // Show Apply in sub modes
-            if self.mode != TUIMode::View {
-                instructions_items.push(" Apply ".white());
-                instructions_items.push("<Enter> ".blue().bold());
-            }
-            // Don't show help in sub modes
-            if self.mode == TUIMode::View {
-                instructions_items.push(" Help ".white());
-                instructions_items.push("<K> ".blue().bold());
+            match self.mode {
+                TUIMode::View => {
+                    instructions_items.push(" Quit ".white());
+                    instructions_items.push("<q> ".blue().bold());
+                    instructions_items.push(" Help ".white());
+                    instructions_items.push("<K> ".blue().bold());
+                }
+                TUIMode::Move => {
+                    instructions_items.push(" Done ".white());
+                    instructions_items.push("<Esc/Enter/q> ".blue().bold());
+                }
+                // In the resolution/scale tables q cancels back to View
+                // instead of quitting, so it is advertised as Cancel.
+                TUIMode::Resolution | TUIMode::Scale => {
+                    instructions_items.push(" Cancel ".white());
+                    instructions_items.push("<Esc/q> ".blue().bold());
+                }
             }
         }
 
@@ -317,7 +368,7 @@ impl<'a> MonitorList<'a> {
             )
             .row_highlight_style(Style::new().yellow())
             .cell_highlight_style(Style::new().blue())
-            .highlight_symbol("  ");
+            .highlight_symbol(HIGHLIGHT_SYMBOL);
 
         StatefulWidget::render(table, chunks[0], buf, &mut self.state);
 
@@ -548,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn sub_modes_add_apply_and_drop_help() {
+    fn sub_modes_advertise_apply_and_cancel() {
         let monitors = test_monitors();
         let wide = Rect::new(0, 0, 130, 8);
 
@@ -557,10 +608,35 @@ mod tests {
         assert!(!view.contains("Apply"), "apply is a sub-mode key: {view}");
 
         let moving = text_of(&render_list_to(&monitors, TUIMode::Move, 0, wide));
-        assert!(moving.contains("Apply"), "apply missing: {moving}");
-        assert!(moving.contains("<Enter>"), "apply key missing: {moving}");
+        assert!(moving.contains("Done"), "done hint missing: {moving}");
+        assert!(moving.contains("Esc/Enter"), "exit keys missing: {moving}");
         assert!(!moving.contains("Help"), "help is view-only: {moving}");
         assert!(moving.contains("Snapmove"), "move hints missing: {moving}");
+    }
+
+    #[test]
+    fn resolution_and_scale_advertise_apply_and_cancel() {
+        let monitors = test_monitors();
+        let wide = Rect::new(0, 0, 130, 8);
+
+        for mode in [TUIMode::Resolution, TUIMode::Scale] {
+            let text = text_of(&render_list_to(&monitors, mode, 0, wide));
+            assert!(text.contains("Apply"), "{mode:?} must advertise Apply: {text}");
+            assert!(
+                text.contains("<Enter/Space>"),
+                "{mode:?} must show the apply keys: {text}"
+            );
+            assert!(
+                text.contains("Cancel"),
+                "{mode:?} must advertise Cancel: {text}"
+            );
+            assert!(
+                text.contains("<Esc/q>"),
+                "{mode:?} must show the cancel keys: {text}"
+            );
+            // q must not be advertised as Quit here.
+            assert!(!text.contains("<q> "), "{mode:?} must not show Quit: {text}");
+        }
     }
 
     #[test]

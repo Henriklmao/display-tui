@@ -3,11 +3,13 @@
 //! Contains the main App struct, its methods, and the Popup type.
 
 use crate::CliAction;
+use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
+use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
 use std::io;
@@ -28,10 +30,26 @@ pub struct App {
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
     pub active_preset: Option<String>,
     pub cli_action: Option<CliAction>,
+    // Rectangles of the last rendered frame, used to hit-test mouse events.
+    pub layout: Option<ScreenLayout>,
+    // An in-progress mouse drag of a monitor on the map, if any.
+    pub drag: Option<DragState>,
     // Overrides where the monitor state is persisted: mode changes, exit and
     // preset apply all honour it. None (production) uses the real config path;
     // tests point it at a temp dir so those paths can be exercised.
     pub state_path: Option<std::path::PathBuf>,
+}
+
+// An in-progress drag of a monitor on the map.
+pub struct DragState {
+    // Index of the dragged monitor.
+    pub monitor: usize,
+    // World-space point where the drag started.
+    pub grab: (f64, f64),
+    // The monitor's position when the drag started.
+    pub origin: (i32, i32),
+    // Alignment guides the current snap locked onto.
+    pub guides: SnapGuides,
 }
 
 // Popup message displayed to the user.
@@ -210,8 +228,11 @@ impl App {
         }
     }
 
-    fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
+    fn draw(&mut self, frame: &mut Frame) {
+        // Record the interactive regions so mouse events can be hit-tested
+        // against exactly what was drawn.
+        self.layout = Some(crate::ui::layouts::screen_layout(frame.area(), self.mode));
+        frame.render_widget(&*self, frame.area());
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -219,9 +240,14 @@ impl App {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_event(key_event)
             }
+            Event::Mouse(mouse_event) => self.handle_mouse_event(mouse_event),
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
+        crate::actions::mouse::handle_mouse(self, mouse_event);
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -486,7 +512,9 @@ impl App {
         }
 
         match key_event.code {
-            KeyCode::Char('q') => self.exit(),
+            // `q` only quits in View mode; inside a sub-mode it cancels back
+            // to View (handled by the mode dispatchers below).
+            KeyCode::Char('q') if self.mode == TUIMode::View => self.exit(),
             KeyCode::Char('w') => match self.validate() {
                 Ok(_) => self.write(),
                 Err(errs) => {
@@ -572,7 +600,7 @@ impl App {
     }
 
     // Restore the monitor state captured when the preset menu was opened.
-    fn restore_preset_backup(&mut self) {
+    pub(crate) fn restore_preset_backup(&mut self) {
         if let Some(backup) = self.preset_backup.take() {
             for state in backup {
                 if let Some(monitor) = self.monitors.iter_mut().find(|m| m.name == state.name) {
@@ -635,7 +663,7 @@ impl App {
 
     // Apply a preset as a live preview only; no save_state_as_last (that is
     // only done on the final apply).
-    fn preview_preset(&mut self, name: &str) {
+    pub(crate) fn preview_preset(&mut self, name: &str) {
         let _ = crate::config::apply_preset(name, &mut self.monitors);
     }
 
@@ -749,7 +777,7 @@ impl App {
         }
     }
 
-    fn write(&mut self) {
+    pub(crate) fn write(&mut self) {
         // Check that at least one monitor is enabled (not forceable)
         if !self.monitors.iter().any(|m| m.enabled) {
             self.show_popup = Some(Popup {

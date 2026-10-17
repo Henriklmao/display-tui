@@ -17,12 +17,14 @@ use ratatui::{
         Widget,
         canvas::{
             Canvas,
+            Line as CanvasLine,
             Rectangle,
         }
     },
 };
 use crate::{
     App,
+    actions::movement::{self, SnapGuides},
     monitor::{Monitor, MonitorCanvas},
     utils::TUIMode,
 };
@@ -32,6 +34,8 @@ pub struct Map<'a>{
     pub selected: usize,
     pub monitors:&'a Vec<Monitor>,
     pub is_previewing: bool,
+    // Alignment guides to overlay while a drag is snapped.
+    pub guides: Option<SnapGuides>,
 }
 
 impl<'a> Widget for Map<'a>{
@@ -74,6 +78,28 @@ impl<'a> Widget for Map<'a>{
                     }
                     index += 1;
                 }
+                if let Some(guides) = self.guides {
+                    let [left, right] = monitor_canvas.x_bounds;
+                    let [bottom, top] = monitor_canvas.y_bounds;
+                    if let Some(gx) = guides.x {
+                        ctx.draw(&CanvasLine {
+                            x1: gx,
+                            y1: bottom,
+                            x2: gx,
+                            y2: top,
+                            color: Color::Magenta,
+                        });
+                    }
+                    if let Some(gy) = guides.y {
+                        ctx.draw(&CanvasLine {
+                            x1: left,
+                            y1: gy,
+                            x2: right,
+                            y2: gy,
+                            color: Color::Magenta,
+                        });
+                    }
+                }
             })
             .render(area, buf);
     } 
@@ -84,71 +110,71 @@ impl<'a> Map<'a> {
    
     pub fn handle_events(app:&mut App, key_event: KeyEvent) {
         let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
+        let selected = app.selected_monitor;
         match key_event.code {
-            KeyCode::Char('k') => Map::snap_vertical(app, -1),
-            KeyCode::Char('K') => Map::move_vertical(app, -10),
-            KeyCode::Up => if is_shift { Map::move_vertical(app, -10) } else { Map::snap_vertical(app, -1) },
+            KeyCode::Char('k') => movement::snap_vertical(&mut app.monitors, selected, -1),
+            KeyCode::Char('K') => movement::move_vertical(&mut app.monitors[selected], -10),
+            KeyCode::Up => if is_shift { movement::move_vertical(&mut app.monitors[selected], -10) } else { movement::snap_vertical(&mut app.monitors, selected, -1) },
 
-            KeyCode::Char('j') => Map::snap_vertical(app, 1),
-            KeyCode::Char('J') => Map::move_vertical(app, 10),
-            KeyCode::Down => if is_shift { Map::move_vertical(app, 10) } else { Map::snap_vertical(app, 1) },
+            KeyCode::Char('j') => movement::snap_vertical(&mut app.monitors, selected, 1),
+            KeyCode::Char('J') => movement::move_vertical(&mut app.monitors[selected], 10),
+            KeyCode::Down => if is_shift { movement::move_vertical(&mut app.monitors[selected], 10) } else { movement::snap_vertical(&mut app.monitors, selected, 1) },
 
-            KeyCode::Char('h') => Map::snap_horizontal(app, -1),
-            KeyCode::Char('H') => Map::move_horizontal(app, -10),
-            KeyCode::Left => if is_shift { Map::move_horizontal(app, -10) } else { Map::snap_horizontal(app, -1) },
+            KeyCode::Char('h') => movement::snap_horizontal(&mut app.monitors, selected, -1),
+            KeyCode::Char('H') => movement::move_horizontal(&mut app.monitors[selected], -10),
+            KeyCode::Left => if is_shift { movement::move_horizontal(&mut app.monitors[selected], -10) } else { movement::snap_horizontal(&mut app.monitors, selected, -1) },
 
-            KeyCode::Char('l') => Map::snap_horizontal(app, 1),
-            KeyCode::Char('L') => Map::move_horizontal(app, 10),
-            KeyCode::Right => if is_shift { Map::move_horizontal(app, 10) } else { Map::snap_horizontal(app, 1) },
+            KeyCode::Char('l') => movement::snap_horizontal(&mut app.monitors, selected, 1),
+            KeyCode::Char('L') => movement::move_horizontal(&mut app.monitors[selected], 10),
+            KeyCode::Right => if is_shift { movement::move_horizontal(&mut app.monitors[selected], 10) } else { movement::snap_horizontal(&mut app.monitors, selected, 1) },
 
-            KeyCode::Esc | KeyCode::Enter => crate::utils::change_mode(app, TUIMode::View),
+            // Esc/Enter/q leave the mode; q no longer quits from Move mode.
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                crate::utils::change_mode(app, TUIMode::View)
+            }
             _ => {}
         }
     }
 
-    fn move_vertical(app:&mut App, direction: i32) {
-        app.monitors[app.selected_monitor].move_vertical(direction);
+    // Converts a screen cell inside the canvas into world (monitor) pixels.
+    //
+    // The canvas draws `x_bounds` left-to-right and `y_bounds` bottom-to-top
+    // (matching the y flip used when drawing), so this is the inverse mapping.
+    // Points outside the canvas return coordinates outside the bounds, which
+    // keeps dragging beyond the edge working.
+    pub fn world_at(area: Rect, monitors: &[Monitor], col: u16, row: u16) -> Option<(f64, f64)> {
+        let inner = Block::bordered().inner(area);
+        if inner.width == 0 || inner.height == 0 {
+            return None;
+        }
+        let canvas = Monitor::get_monitors_canvas(monitors, &area);
+        let [left, right] = canvas.x_bounds;
+        let [bottom, top] = canvas.y_bounds;
+
+        let fx = col.saturating_sub(inner.x) as f64 / inner.width as f64;
+        let fy = row.saturating_sub(inner.y) as f64 / inner.height as f64;
+
+        Some((left + fx * (right - left), top - fy * (top - bottom)))
     }
-    fn snap_vertical(app:&mut App, direction: i32) {
-        let selected = app.selected_monitor;
-        let mut targets = vec![0.0];
 
-        for (i, monitor) in app.monitors.iter().enumerate() {
-            if i == selected || !monitor.enabled { continue; }
-            let (_, y, _, h) = monitor.get_geometry();
-            targets.push(y);
-            targets.push(y + h);
-            targets.push(y + h / 2.0);
+    // Returns the index of the topmost enabled monitor containing `world`.
+    //
+    // The selected monitor is drawn last (on top), so it wins when rectangles
+    // overlap.
+    pub fn monitor_at(monitors: &[Monitor], selected: usize, world: (f64, f64)) -> Option<usize> {
+        let (wx, wy) = world;
+        let contains = |m: &Monitor| {
+            if !m.enabled {
+                return false;
+            }
+            let (x, y, w, h) = m.get_geometry();
+            w > 0.0 && h > 0.0 && wx >= x && wx < x + w && wy >= y && wy < y + h
+        };
+
+        if monitors.get(selected).is_some_and(&contains) {
+            return Some(selected);
         }
-
-        let (_, sy, _, sh) = app.monitors[selected].get_geometry();
-        let sources = vec![sy, sy + sh, sy + sh / 2.0];
-
-        if let Some(delta) = crate::utils::find_best_delta(&sources, &targets, direction) {
-            app.monitors[selected].move_vertical(delta.round() as i32);
-        }
-    }
-    fn move_horizontal(app:&mut App, direction: i32) {
-        app.monitors[app.selected_monitor].move_horizontal(direction);
-    }
-    fn snap_horizontal(app:&mut App, direction: i32) {
-        let selected = app.selected_monitor;
-        let mut targets = vec![0.0];
-
-        for (i, monitor) in app.monitors.iter().enumerate() {
-            if i == selected || !monitor.enabled { continue; }
-            let (x, _, w, _) = monitor.get_geometry();
-            targets.push(x);
-            targets.push(x + w);
-            targets.push(x + w / 2.0);
-        }
-
-        let (sx, _, sw, _) = app.monitors[selected].get_geometry();
-        let sources = vec![sx, sx + sw, sx + sw / 2.0];
-
-        if let Some(delta) = crate::utils::find_best_delta(&sources, &targets, direction) {
-            app.monitors[selected].move_horizontal(delta.round() as i32);
-        }
+        monitors.iter().position(contains)
     }
 
     pub fn render_enabled_monitor(
@@ -246,6 +272,7 @@ mod tests {
             selected: 0,
             monitors: &test_monitors(),
             is_previewing: false,
+            guides: None,
         }; 
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         
@@ -329,6 +356,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -345,6 +373,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: true,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -359,6 +388,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -377,6 +407,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -391,6 +422,7 @@ mod tests {
             selected: 1,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -568,6 +600,7 @@ mod tests {
             selected: 1,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -586,6 +619,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -608,6 +642,7 @@ mod tests {
             selected: 0,
             monitors: &monitors,
             is_previewing: false,
+            guides: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -637,6 +672,7 @@ mod tests {
                 selected: 0,
                 monitors: &monitors,
                 is_previewing: false,
+                guides: None,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);

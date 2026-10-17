@@ -11,6 +11,7 @@ use ratatui::{
 };
 
 use ratatui::layout::Constraint;
+use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::{ScaleValue, TUIMode, change_mode};
 use crate::App;
 
@@ -37,9 +38,19 @@ impl Scale{
                 Scale::select(app);
                 change_mode(app, TUIMode::View);
             }
-            KeyCode::Esc => change_mode(app, TUIMode::View),
+            // Esc cancels; q/Q cancel too instead of quitting the app.
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => change_mode(app, TUIMode::View),
             _ => {}
         }
+    }
+
+    // Maps a click's row to a scale index, honouring the scroll window.
+    pub fn row_at(area: Rect, selected: usize, y: u16) -> Option<usize> {
+        let inner = Block::bordered().inner(area);
+        // The scale table has no header row.
+        let viewport = inner.height;
+        let offset = scrolled_offset(selected, viewport as usize);
+        row_in_window(inner.y, viewport, offset, ScaleValue::table().len(), y)
     }
 
     fn next(app:&mut App) {

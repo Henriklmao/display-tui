@@ -12,6 +12,7 @@ use ratatui::{
 
 use ratatui::layout::Constraint;
 use crate::monitor::Monitor;
+use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::TUIMode;
 use crate::App;
 
@@ -40,9 +41,21 @@ impl<'a> Resolutions<'a> {
                 Resolutions::select(app);
                 crate::utils::change_mode(app, TUIMode::View);
             }
-            KeyCode::Esc => crate::utils::change_mode(app, TUIMode::View),
+            // Esc cancels; q/Q cancel too instead of quitting the app.
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                crate::utils::change_mode(app, TUIMode::View)
+            }
             _ => {}
         }
+    }
+
+    // Maps a click's row to a resolution index, honouring the scroll window.
+    pub fn row_at(area: Rect, selected: usize, total: usize, y: u16) -> Option<usize> {
+        let inner = Block::bordered().inner(area);
+        // Header row plus its bottom margin.
+        let viewport = inner.height.saturating_sub(2);
+        let offset = scrolled_offset(selected, viewport as usize);
+        row_in_window(inner.y.saturating_add(2), viewport, offset, total, y)
     }
 
     fn next(app:&mut App) {

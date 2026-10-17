@@ -295,7 +295,7 @@ impl<'a> MonitorList<'a> {
             // the move is resolved.
             instructions_items.push(" Apply ".white());
             instructions_items.push("<Enter/Space> ".blue().bold());
-            instructions_items.push(" Cancel/Revert ".white());
+            instructions_items.push(" Cancel/Revert all ".white());
             instructions_items.push("<Esc/q> ".blue().bold());
         } else if is_mini_mode {
             instructions_items.push(" Save ".white());

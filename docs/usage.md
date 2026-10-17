@@ -28,10 +28,11 @@ In Resolution and Scale modes, `Enter`/`Space` apply the highlighted value and `
 The interface is fully keyboard driven, but the mouse can drive the same actions:
 
 - **Select**: click a display row, a resolution/scale row, or a monitor on the map.
-- **Enable/disable**: click the checkbox at the start of a display row.
-- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides while snapped.
+- **Enable/disable**: clicking a display row selects it; click its checkbox again (once it is selected) to enable/disable it.
+- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides. An **Apply** button then appears in the centre of the moved monitor — click it (or press `Enter`/`Space`) to persist the move.
+- **Double-click**: double-click a resolution, scale or preset row to apply it immediately.
 - **Scroll**: use the wheel over a list to step through it (displays, resolutions, scales or presets).
-- **Presets**: click a preset to preview it, and click outside the menu to close it.
+- **Presets**: click a preset to preview it, double-click to apply it, and click outside the menu to close it.
 
 When saving, the app will automatically validate your layout. If any displays are separated too far, have overlapping regions, or if there are duplicate workspace assignments, a warning pop-up will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
 

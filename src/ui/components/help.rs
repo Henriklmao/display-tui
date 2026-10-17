@@ -76,8 +76,8 @@ fn left_sections() -> Vec<Line<'static>> {
         Line::from("Show Keybindings <K>"),
         Line::from(""),
         Line::from(" --- Mouse --- ".bold().yellow()),
-        Line::from("Click to select | Icon toggles"),
-        Line::from("Drag to move | Wheel scrolls"),
+        Line::from("Click to select; click again toggles"),
+        Line::from("Drag to move; Apply saves"),
     ]
 }
 

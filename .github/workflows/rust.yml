@@ -68,6 +68,7 @@ jobs:
       with:
         name: display-tui-${{ steps.build.outputs.name }}-x86_64-linux-gnu
         path: dist/display-tui-*-x86_64-linux-gnu
+        if-no-files-found: error
 
   release:
     needs: build

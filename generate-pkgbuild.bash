@@ -32,6 +32,7 @@ arch=('x86_64')
 url="${URL}"
 license=('GPL-3.0-or-later')
 depends=('glibc' 'gcc-libs')
+provides=('display-tui')
 makedepends=('cargo')
 options=('!lto')
 source=("${SRCVER}.tar.gz::${URL}/archive/refs/tags/v${SRCVER}.tar.gz")

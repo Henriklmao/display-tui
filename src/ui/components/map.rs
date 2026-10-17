@@ -5,7 +5,7 @@
 use crossterm::event::{KeyCode,KeyEvent,KeyModifiers};
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Stylize,Color,Style},
     symbols::{
         Marker,
@@ -14,6 +14,8 @@ use ratatui::{
     text::Line,
     widgets::{
         Block,
+        Clear,
+        Paragraph,
         Widget,
         canvas::{
             Canvas,
@@ -39,6 +41,8 @@ pub struct Map<'a>{
     // Frozen canvas bounds to use instead of recomputing from the (moving)
     // monitor list, so a drag stays linear in world space.
     pub canvas: Option<MonitorCanvas>,
+    // Monitor with an unapplied move; shows the clickable Apply button.
+    pub moved: Option<usize>,
 }
 
 impl<'a> Widget for Map<'a>{
@@ -107,6 +111,18 @@ impl<'a> Widget for Map<'a>{
                 }
             })
             .render(area, buf);
+
+        // A monitor with an unapplied move shows a clickable Apply button in
+        // its centre.
+        if let Some(index) = self.moved
+            && let Some(monitor) = self.monitors.get(index)
+            && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
+        {
+            Clear.render(rect, buf);
+            Paragraph::new(Line::from(" Apply ").green().bold())
+                .alignment(Alignment::Center)
+                .render(rect, buf);
+        }
     } 
 
     
@@ -175,12 +191,43 @@ impl<'a> Map<'a> {
         Some((left + fx * (right - left), bottom + fy * (top - bottom)))
     }
 
+    // Screen rectangle of the Apply button drawn in the centre of a monitor.
+    //
+    // Shared by rendering and hit-testing so the clickable area always matches
+    // the drawn label.
+    pub fn apply_button_rect(
+        area: Rect,
+        canvas: &MonitorCanvas,
+        monitor: &Monitor,
+    ) -> Option<Rect> {
+        let inner = Block::bordered().inner(area);
+        if inner.width == 0 || inner.height == 0 {
+            return None;
+        }
+        let (x, y, w, h) = monitor.get_geometry();
+        if w <= 0.0 || h <= 0.0 {
+            return None;
+        }
+        let [left, right] = canvas.x_bounds;
+        let [bottom, top] = canvas.y_bounds;
+
+        let width = 9u16.min(inner.width);
+        let center_x = inner.x as f64 + ((x + w / 2.0) - left) / (right - left) * inner.width as f64;
+        let center_y = inner.y as f64 + ((y + h / 2.0) - bottom) / (top - bottom) * inner.height as f64;
+
+        let max_x = (inner.right() as f64 - width as f64).max(inner.x as f64);
+        let bx = (center_x - width as f64 / 2.0).round().clamp(inner.x as f64, max_x) as u16;
+        let by = center_y
+            .round()
+            .clamp(inner.y as f64, inner.bottom().saturating_sub(1) as f64) as u16;
+        Some(Rect::new(bx, by, width, 1))
+    }
+
     // Returns the index of the topmost enabled monitor containing `world`.
     //
     // The selected monitor is drawn last (on top), so it wins when rectangles
     // overlap.
-    pub fn monitor_at(monitors: &[Monitor], selected: usize, world: (f64, f64)) -> Option<usize> {
-        let (wx, wy) = world;
+    pub fn monitor_at(monitors: &[Monitor], selected: usize, world: (f64, f64)) -> Option<usize> {        let (wx, wy) = world;
         let contains = |m: &Monitor| {
             if !m.enabled {
                 return false;
@@ -292,6 +339,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         }; 
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         
@@ -377,6 +425,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -395,6 +444,7 @@ mod tests {
             is_previewing: true,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -411,6 +461,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -431,6 +482,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -447,6 +499,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -642,6 +695,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -662,6 +716,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -686,6 +741,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
+            moved: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -717,6 +773,7 @@ mod tests {
                 is_previewing: false,
                 guides: None,
                 canvas: None,
+                moved: None,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -812,5 +869,78 @@ mod tests {
         let monitors = vec![unplaced];
 
         assert_eq!(Map::monitor_at(&monitors, 0, (10.0, 10.0)), None);
+    }
+
+    // --- apply button ---------------------------------------------------
+
+    #[test]
+    fn the_apply_button_rect_stays_inside_the_monitor_and_area() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let canvas = Monitor::get_monitors_canvas(&monitors, &area);
+
+        let rect = Map::apply_button_rect(area, &canvas, &monitors[0]).expect("button rect");
+        let inner = Block::bordered().inner(area);
+
+        assert!(rect.width >= 1 && rect.height == 1);
+        assert!(rect.x >= inner.x && rect.right() <= inner.right());
+        assert!(rect.y >= inner.y && rect.bottom() <= inner.bottom());
+    }
+
+    #[test]
+    fn the_apply_button_rect_is_none_without_geometry() {
+        let mut unplaced = monitor("A", 0, 0);
+        unplaced.position = None;
+        let monitors = vec![unplaced];
+        let area = Rect::new(0, 0, 100, 30);
+        let canvas = Monitor::get_monitors_canvas(&monitors, &area);
+
+        assert!(Map::apply_button_rect(area, &canvas, &monitors[0]).is_none());
+    }
+
+    #[test]
+    fn the_apply_button_label_is_drawn_only_for_the_moved_monitor() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+
+        let plain = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            moved: None,
+        };
+        plain.render(buf.area, &mut buf);
+        assert!(!text_of(&buf).contains("Apply"), "no button without a move");
+
+        let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
+        let moved = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            moved: Some(0),
+        };
+        moved.render(buf.area, &mut buf);
+        assert!(text_of(&buf).contains("Apply"), "the button is drawn");
+    }
+
+    #[test]
+    fn rendering_the_apply_button_survives_tiny_areas() {
+        for (width, height) in [(1u16, 1u16), (3, 2), (10, 5), (40, 12)] {
+            let monitors = vec![monitor("A", 0, 0)];
+            let map = Map {
+                selected: 0,
+                monitors: &monitors,
+                is_previewing: false,
+                guides: None,
+                canvas: None,
+                moved: Some(0),
+            };
+            let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
+            map.render(buf.area, &mut buf);
+        }
     }
 }

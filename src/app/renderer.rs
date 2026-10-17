@@ -25,8 +25,10 @@ impl Widget for &App {
             is_previewing,
             guides: self.drag.as_ref().map(|drag| drag.guides),
             canvas: self.drag.as_ref().map(|drag| drag.canvas),
+            moved: self.moved_monitor,
         };
         monitor_list.is_previewing = is_previewing;
+        monitor_list.moved_pending = self.moved_monitor.is_some();
 
         let layout = self
             .layout

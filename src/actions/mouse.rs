@@ -12,12 +12,22 @@ use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use std::time::{Duration, Instant};
 
 // World-space distance within which a dragged monitor snaps to alignment.
 pub const SNAP_THRESHOLD: f64 = 24.0;
 
+// Maximum gap between two clicks for them to count as a double-click.
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
 // Routes a mouse event to the component that owns the current view.
 pub fn handle_mouse(app: &mut App, event: MouseEvent) {
+    handle_mouse_at(app, event, Instant::now());
+}
+
+// Body of [`handle_mouse`] with an injectable clock so the double-click
+// timing can be tested deterministically.
+fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     let layout = match app.layout {
         Some(layout) => layout,
         None => return,
@@ -28,6 +38,8 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) {
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.drag = None;
     }
+
+    let double_click = is_left_click(event.kind) && register_click(app, point(event), now);
 
     if app.show_help {
         if is_left_click(event.kind) {
@@ -44,13 +56,13 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) {
     }
 
     if app.show_preset_menu.is_some() {
-        handle_preset(app, layout.area, event);
+        handle_preset(app, layout.area, event, double_click);
         return;
     }
 
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_down(app, layout, point(event))
+            handle_left_down(app, layout, point(event), double_click)
         }
         MouseEventKind::Drag(MouseButton::Left) => handle_left_drag(app, layout, point(event)),
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
@@ -58,6 +70,23 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) {
         MouseEventKind::ScrollDown => handle_scroll(app, layout, point(event), 1),
         _ => {}
     }
+}
+
+// Records a left click and reports whether it completes a double-click.
+//
+// A detected pair is consumed so a third quick click starts a fresh pair.
+fn register_click(app: &mut App, point: (u16, u16), now: Instant) -> bool {
+    let double = app.last_click.is_some_and(|(col, row, then)| {
+        col.abs_diff(point.0) <= 1
+            && row.abs_diff(point.1) <= 1
+            && now.saturating_duration_since(then) <= DOUBLE_CLICK_WINDOW
+    });
+    app.last_click = if double {
+        None
+    } else {
+        Some((point.0, point.1, now))
+    };
+    double
 }
 
 // A left button press (the only click we act on).
@@ -83,14 +112,31 @@ fn accept_popup(app: &mut App) {
     app.show_popup = None;
 }
 
-fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
+fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), double_click: bool) {
     if app.monitors.is_empty() {
         return;
     }
 
     // The map selects a monitor and starts a drag in every mode.
     if inside(layout.canvas, point) {
-        let bounds = Monitor::get_monitors_canvas(&app.monitors, &layout.canvas);
+        // Match the canvas the current frame drew: a frozen one while a drag
+        // is active, otherwise the live bounds.
+        let bounds = app
+            .drag
+            .as_ref()
+            .map(|drag| drag.canvas)
+            .unwrap_or_else(|| Monitor::get_monitors_canvas(&app.monitors, &layout.canvas));
+
+        // The Apply button of a moved monitor takes precedence over dragging.
+        if let Some(index) = app.moved_monitor
+            && let Some(monitor) = app.monitors.get(index)
+            && let Some(rect) = Map::apply_button_rect(layout.canvas, &bounds, monitor)
+            && inside(rect, point)
+        {
+            app.apply_move();
+            return;
+        }
+
         if let Some(world) = Map::world_at_in(layout.canvas, &bounds, point.0, point.1)
             && let Some(index) = Map::monitor_at(&app.monitors, app.selected_monitor, world)
         {
@@ -106,11 +152,19 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
                 if let Some(row) = Resolutions::row_at(side, app.selected_resolution, total, point.1)
                 {
                     app.selected_resolution = row;
+                    // A double-click applies the highlighted mode immediately.
+                    if double_click {
+                        app.monitors[app.selected_monitor].set_current_resolution(row);
+                    }
                 }
             }
             TUIMode::Scale => {
                 if let Some(row) = Scale::row_at(side, app.selected_scale, point.1) {
                     app.selected_scale = row;
+                    if double_click {
+                        app.monitors[app.selected_monitor].scale =
+                            Some(ScaleValue::table()[row].value);
+                    }
                 }
             }
             _ => {}
@@ -122,10 +176,11 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
         && let Some(row) =
             MonitorList::row_at(layout.list, &app.monitors, app.selected_monitor, point.1)
     {
+        let already_selected = app.selected_monitor == row;
         app.selected_monitor = row;
-        // The leading checkbox column toggles the monitor instead of only
-        // selecting it.
-        if point.0 < MonitorList::icon_column_end(layout.list) {
+        // The checkbox toggles only once the row is already selected, so the
+        // first click selects and the next one enables/disables.
+        if already_selected && point.0 < MonitorList::icon_column_end(layout.list) {
             toggle_monitor(app, row);
         }
     }
@@ -167,6 +222,8 @@ fn handle_left_drag(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
         position.x = origin.0 + dx;
         position.y = origin.1 + dy;
     }
+    // The move is not applied yet: an Apply button appears for it.
+    app.moved_monitor = Some(monitor);
 
     let guides = snap_to_alignment(&mut app.monitors, monitor, SNAP_THRESHOLD);
     if let Some(drag) = app.drag.as_mut() {
@@ -217,7 +274,7 @@ fn toggle_monitor(app: &mut App, index: usize) {
     }
 }
 
-fn handle_preset(app: &mut App, area: Rect, event: MouseEvent) {
+fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, double_click: bool) {
     match event.kind {
         MouseEventKind::ScrollUp => preview_scrolled(app, -1),
         MouseEventKind::ScrollDown => preview_scrolled(app, 1),
@@ -233,14 +290,17 @@ fn handle_preset(app: &mut App, area: Rect, event: MouseEvent) {
                 .show_preset_menu
                 .as_ref()
                 .and_then(|menu| menu.row_at(area, point.1));
-            if let Some(index) = index {
-                let name = app
-                    .show_preset_menu
-                    .as_mut()
-                    .and_then(|menu| menu.select_index(index));
-                if let Some(name) = name {
-                    app.preview_preset(&name);
-                }
+            let Some(index) = index else { return };
+            let name = app
+                .show_preset_menu
+                .as_mut()
+                .and_then(|menu| menu.select_index(index));
+            let Some(name) = name else { return };
+            if double_click {
+                // Applying closes the menu and commits the preset.
+                app.apply_preset_click(&name);
+            } else {
+                app.preview_preset(&name);
             }
         }
         _ => {}
@@ -262,12 +322,13 @@ mod tests {
     use super::*;
     use crate::app::state::Popup;
     use crate::monitor::{Monitor, Position, Resolution};
-    use crate::test_utils::tests::{find_cell, find_text, test_monitors};
+    use crate::test_utils::tests::{TempDir, find_cell, find_text, test_monitors, text_of};
     use crate::ui::components::PresetMenu;
     use crate::ui::layouts::screen_layout;
-    use crossterm::event::KeyModifiers;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::buffer::Buffer;
     use ratatui::widgets::Widget;
+    use std::time::{Duration, Instant};
 
     // The arrow marker drawn in front of the selected monitor row.
     const MARKER: &str = "\u{f04b}";
@@ -334,6 +395,22 @@ mod tests {
 
     fn wheel_up(a: &mut App, col: u16, row: u16) {
         handle_mouse(a, mouse(MouseEventKind::ScrollUp, col, row));
+    }
+
+    // A left-click at an explicit time, for double-click tests.
+    fn down_at(a: &mut App, col: u16, row: u16, now: Instant) {
+        handle_mouse_at(
+            a,
+            mouse(MouseEventKind::Down(MouseButton::Left), col, row),
+            now,
+        );
+    }
+
+    fn current_index(m: &Monitor) -> usize {
+        m.modes
+            .iter()
+            .position(|mode| mode.current)
+            .expect("a mode must be selected")
     }
 
     fn render(app: &App) -> Buffer {
@@ -805,19 +882,44 @@ mod tests {
     }
 
     #[test]
-    fn clicking_the_checkbox_column_toggles_enable() {
+    fn the_checkbox_selects_on_the_first_click_and_toggles_on_the_next() {
         let mut a = app(TUIMode::View, test_monitors());
+
+        // Monitor 2 (second row) is not selected yet, so clicking its checkbox
+        // only selects it.
+        let buf = render(&a);
+        let (col, row) = find_cell(&buf, DISABLED_ICON).expect("disabled icon");
+        down(&mut a, col, row);
+        assert_eq!(a.selected_monitor, 1, "the first click selects the row");
+        assert!(!a.monitors[1].enabled, "the first click must not toggle");
+
+        // The row is now selected: the next click toggles it.
+        down(&mut a, col, row);
+        assert!(a.monitors[1].enabled, "the second click enables it");
+        assert_eq!(a.selected_monitor, 1);
+    }
+
+    #[test]
+    fn the_checkbox_of_an_already_selected_row_toggles_immediately() {
+        let mut a = app(TUIMode::View, test_monitors()); // monitor 0 selected + enabled
 
         let buf = render(&a);
         let (col, row) = find_cell(&buf, ENABLED_ICON).expect("enabled icon");
         down(&mut a, col, row);
-        assert!(!a.monitors[0].enabled, "clicking the icon disables monitor 0");
-        assert_eq!(a.selected_monitor, 0);
 
+        assert!(!a.monitors[0].enabled, "clicking the selected row toggles it");
+    }
+
+    #[test]
+    fn clicking_the_name_column_never_toggles() {
+        let mut a = app(TUIMode::View, test_monitors());
         let buf = render(&a);
-        let (col, row) = find_cell(&buf, DISABLED_ICON).expect("disabled icon");
+        let (col, row) = find_text(&buf, "Description 1").expect("name column");
+
         down(&mut a, col, row);
-        assert!(a.monitors[0].enabled, "clicking again re-enables it");
+
+        assert_eq!(a.selected_monitor, 0);
+        assert!(a.monitors[0].enabled, "the name column only selects");
     }
 
     #[test]
@@ -871,6 +973,189 @@ mod tests {
 
         assert_eq!(a.selected_monitor, 1);
         assert_eq!(a.selected_resolution, 0, "the resolution selection is untouched");
+    }
+
+    // --- applying a mouse move ------------------------------------------
+
+    #[test]
+    fn dragging_marks_the_monitor_as_pending_apply() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        assert_eq!(a.moved_monitor, None);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+
+        assert_eq!(a.moved_monitor, Some(1));
+    }
+
+    #[test]
+    fn the_apply_button_is_only_drawn_for_a_pending_move() {
+        let mut a = app(TUIMode::View, test_monitors());
+        assert!(!text_of(&render(&a)).contains("Apply"), "no button initially");
+
+        a.moved_monitor = Some(0);
+        assert!(
+            text_of(&render(&a)).contains("Apply"),
+            "the button appears once a move is pending"
+        );
+    }
+
+    #[test]
+    fn clicking_the_apply_button_persists_the_move() {
+        let dir = TempDir::new("mouse-apply-button");
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1), "the move is pending");
+
+        // The Apply button sits in the monitor's centre; click it.
+        let canvas = a.layout.unwrap().canvas;
+        let bounds = Monitor::get_monitors_canvas(&a.monitors, &canvas);
+        let rect =
+            Map::apply_button_rect(canvas, &bounds, &a.monitors[1]).expect("apply button rect");
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.moved_monitor, None, "apply clears the pending move");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "apply persists the layout"
+        );
+    }
+
+    #[test]
+    fn enter_and_space_apply_a_pending_move_in_view_mode() {
+        for key in [KeyCode::Enter, KeyCode::Char(' ')] {
+            let dir = TempDir::new("mouse-apply-key");
+            let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+            let mut a = app(TUIMode::View, monitors);
+            a.state_path = Some(dir.path().join("monitor_state.json"));
+
+            let (col, row) = cell_for_monitor(&a, 1);
+            down(&mut a, col, row);
+            drag(&mut a, col + 6, row);
+            up(&mut a, col, row);
+            assert_eq!(a.moved_monitor, Some(1));
+
+            MonitorList::handle_events(&mut a, KeyEvent::new(key, KeyModifiers::NONE));
+
+            assert_eq!(a.moved_monitor, None, "{key:?} applies the move");
+            assert!(
+                dir.path().join("monitor_state.json").exists(),
+                "{key:?} persists the layout"
+            );
+        }
+    }
+
+    // --- double click applies -------------------------------------------
+
+    #[test]
+    fn the_double_click_detector_needs_a_close_repeat() {
+        let mut a = app(TUIMode::View, test_monitors());
+        let t0 = Instant::now();
+
+        assert!(!register_click(&mut a, (10, 10), t0), "first click");
+        assert!(
+            register_click(&mut a, (10, 10), t0 + Duration::from_millis(100)),
+            "quick repeat"
+        );
+        // The pair is consumed, so a third quick click starts fresh.
+        assert!(
+            !register_click(&mut a, (10, 10), t0 + Duration::from_millis(150)),
+            "third click is not a double"
+        );
+        // Too slow to pair.
+        assert!(
+            !register_click(&mut a, (10, 10), t0 + Duration::from_millis(1000)),
+            "slow click"
+        );
+        // A different cell within the window does not pair.
+        assert!(
+            !register_click(&mut a, (40, 10), t0 + Duration::from_millis(1050)),
+            "far cell"
+        );
+        // A one-cell drift still pairs (hand tremor).
+        assert!(!register_click(&mut a, (0, 0), t0 + Duration::from_millis(2000)));
+        assert!(register_click(&mut a, (1, 1), t0 + Duration::from_millis(2050)));
+    }
+
+    #[test]
+    fn double_clicking_a_resolution_row_applies_it() {
+        let mut a = app(TUIMode::Resolution, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "1280x720").expect("second mode row");
+        let t0 = Instant::now();
+
+        down_at(&mut a, col, row, t0);
+        assert_eq!(a.selected_resolution, 1);
+        assert!(a.monitors[0].modes[0].current, "a single click does not apply");
+
+        down_at(&mut a, col, row, t0 + Duration::from_millis(120));
+        assert_eq!(current_index(&a.monitors[0]), 1, "the double-click applies");
+        assert_eq!(a.mode, TUIMode::Resolution, "and stays in the mode");
+    }
+
+    #[test]
+    fn double_clicking_a_scale_row_applies_it() {
+        let mut a = app(TUIMode::Scale, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "125%").expect("scale row");
+        let expected = ScaleValue::table()
+            .iter()
+            .position(|entry| entry.name == "125%")
+            .unwrap();
+        let t0 = Instant::now();
+
+        down_at(&mut a, col, row, t0);
+        assert_eq!(a.selected_scale, expected);
+        assert_eq!(a.monitors[0].scale, Some(1.0), "a single click keeps it");
+
+        down_at(&mut a, col, row, t0 + Duration::from_millis(120));
+        assert_eq!(a.monitors[0].scale, Some(ScaleValue::table()[expected].value));
+    }
+
+    #[test]
+    fn double_clicking_a_preset_row_applies_it() {
+        let dir = TempDir::new("mouse-preset-apply");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.preset_backup = Some(vec![]);
+        a.show_preset_menu = Some(PresetMenu::new(
+            vec!["missing-a".to_string(), "missing-b".to_string()],
+            &[],
+            None,
+        ));
+        let area = area();
+        let top = PresetMenu::rect(area).y + 2;
+        let t0 = Instant::now();
+
+        down_at(&mut a, 40, top + 1, t0);
+        assert!(a.show_preset_menu.is_some(), "a single click keeps the menu open");
+
+        down_at(&mut a, 40, top + 1, t0 + Duration::from_millis(120));
+        assert!(a.show_preset_menu.is_none(), "the double-click applies and closes");
+        assert_eq!(a.active_preset.as_deref(), Some("missing-b"));
+        assert!(dir.path().join("monitor_state.json").exists());
+    }
+
+    #[test]
+    fn a_slow_second_click_does_not_apply() {
+        let mut a = app(TUIMode::Resolution, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "1280x720").expect("second mode row");
+        let t0 = Instant::now();
+
+        down_at(&mut a, col, row, t0);
+        down_at(&mut a, col, row, t0 + Duration::from_millis(900));
+
+        assert_eq!(a.selected_resolution, 1);
+        assert!(a.monitors[0].modes[0].current, "too slow, so no apply");
     }
 
     // --- robustness ------------------------------------------------------

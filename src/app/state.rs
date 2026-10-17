@@ -34,6 +34,10 @@ pub struct App {
     pub layout: Option<ScreenLayout>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
+    // Monitor whose position changed and still needs an explicit apply.
+    pub moved_monitor: Option<usize>,
+    // Last left-click cell and time, for double-click detection.
+    pub last_click: Option<(u16, u16, std::time::Instant)>,
     // Overrides where the monitor state is persisted: mode changes, exit and
     // preset apply all honour it. None (production) uses the real config path;
     // tests point it at a temp dir so those paths can be exercised.
@@ -629,8 +633,7 @@ impl App {
 
     // Clear the active preset marker as soon as the current monitor state
     // diverges from what the active preset defines (or the preset file is gone).
-    fn clear_active_preset_if_changed(&mut self) {
-        if let Some(ref active) = self.active_preset.clone() {
+    fn clear_active_preset_if_changed(&mut self) {        if let Some(ref active) = self.active_preset.clone() {
             if let Some(state) = crate::config::load_preset(active) {
                 for monitor_state in &state {
                     if let Some(monitor) =
@@ -669,6 +672,28 @@ impl App {
     // only done on the final apply).
     pub(crate) fn preview_preset(&mut self, name: &str) {
         let _ = crate::config::apply_preset(name, &mut self.monitors);
+    }
+
+    // Commit the pending monitor move: persist the layout and drop the marker.
+    pub(crate) fn apply_move(&mut self) {
+        if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
+            eprintln!("✗ Failed to save monitor state: {}", e);
+        }
+        self.moved_monitor = None;
+        self.clear_active_preset_if_changed();
+    }
+
+    // Commit a preset to the working layout from the mouse. Unlike the menu's
+    // Enter this keeps the change in the working state (persisted) without
+    // rewriting the Hyprland config; `w` (or Enter in the menu) writes it.
+    pub(crate) fn apply_preset_click(&mut self, name: &str) {
+        let _ = crate::config::apply_preset(name, &mut self.monitors);
+        self.active_preset = Some(name.to_string());
+        self.preset_backup = None;
+        self.show_preset_menu = None;
+        if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
+            eprintln!("✗ Failed to save monitor state: {}", e);
+        }
     }
 
     fn exit(&mut self) {

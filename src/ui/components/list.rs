@@ -6,7 +6,7 @@ use crate::monitor::{Monitor, Position};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     symbols::border,
     text::Line,
@@ -17,7 +17,6 @@ use crate::App;
 use crate::rotation::Rotation;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::TUIMode;
-use ratatui::layout::Constraint;
 
 // Highlight marker shown in front of the selected row.
 //
@@ -25,8 +24,21 @@ use ratatui::layout::Constraint;
 // hit-testing geometry, so render and hit-testing share this constant.
 pub(crate) const HIGHLIGHT_SYMBOL: &str = " \u{f04b} ";
 
-// Column width percentage of the leading checkbox column.
-const CHECKBOX_COLUMN_PERCENT: u16 = 5;
+// Column widths of the display table, shared by rendering and hit-testing so
+// the clickable checkbox column can never drift from what is drawn.
+const COLUMN_WIDTHS: [Constraint; 8] = [
+    Constraint::Percentage(5),
+    Constraint::Percentage(15),
+    Constraint::Percentage(25),
+    Constraint::Percentage(15),
+    Constraint::Percentage(10),
+    Constraint::Percentage(10),
+    Constraint::Percentage(10),
+    Constraint::Percentage(10),
+];
+
+// Gap between table columns.
+const COLUMN_SPACING: u16 = 1;
 
 // Counts workspace assignments so duplicates can be flagged.
 fn workspace_counts(monitors: &[Monitor]) -> std::collections::HashMap<u8, usize> {
@@ -51,6 +63,8 @@ pub struct MonitorList<'a> {
     pub state: TableState,
     pub monitors: &'a [Monitor],
     pub is_previewing: bool,
+    // Whether a mouse move is waiting to be applied.
+    pub moved_pending: bool,
 }
 
 impl<'a> MonitorList<'a> {
@@ -61,6 +75,7 @@ impl<'a> MonitorList<'a> {
             state: TableState::default().with_selected(selected_row),
             monitors,
             is_previewing: false,
+            moved_pending: false,
         }
     }
 
@@ -83,14 +98,22 @@ impl<'a> MonitorList<'a> {
     }
 
     // Exclusive right edge (screen column) of the leading checkbox column.
+    //
+    // Computed with the same ratatui layout the table renders with, so the
+    // clickable toggle region always matches the drawn checkbox cell.
     pub fn icon_column_end(area: Rect) -> u16 {
         let inner = Block::bordered().inner(area);
         let highlight_width = HIGHLIGHT_SYMBOL.chars().count() as u16;
-        let column_width = inner.width.saturating_mul(CHECKBOX_COLUMN_PERCENT) / 100;
-        inner
-            .x
-            .saturating_add(highlight_width)
-            .saturating_add(column_width)
+        let columns_area = Layout::horizontal([
+            Constraint::Length(highlight_width),
+            Constraint::Fill(0),
+        ])
+        .split(Rect::new(0, 0, inner.width, 1))[1];
+        let first = Layout::horizontal(COLUMN_WIDTHS)
+            .flex(Flex::Start)
+            .spacing(COLUMN_SPACING)
+            .split(columns_area)[0];
+        inner.x.saturating_add(first.right())
     }
 
     pub fn handle_events(app: &mut App, key_event: KeyEvent) {
@@ -99,6 +122,8 @@ impl<'a> MonitorList<'a> {
             return;
         }
         match key_event.code {
+            // Apply a pending mouse move (same as the on-map Apply button).
+            KeyCode::Enter | KeyCode::Char(' ') if app.moved_monitor.is_some() => app.apply_move(),
             KeyCode::Char('k') | KeyCode::Up => MonitorList::previous_monitor(app),
             KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
             KeyCode::Char('e') => MonitorList::enable_monitor(app),
@@ -153,10 +178,15 @@ impl<'a> MonitorList<'a> {
     }
 
     fn disable_monitor(app: &mut App) {
-        let monitor = &mut app.monitors[app.selected_monitor];
+        let selected = app.selected_monitor;
+        let monitor = &mut app.monitors[selected];
         monitor.enabled = false;
         monitor.saved_position = monitor.position.clone();
         monitor.saved_scale = monitor.scale;
+        // A disabled monitor has no Apply button, so drop any pending move.
+        if app.moved_monitor == Some(selected) {
+            app.moved_monitor = None;
+        }
     }
 
     fn enable_monitor(app: &mut App) {
@@ -307,6 +337,12 @@ impl<'a> MonitorList<'a> {
 
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
+            // A pending mouse move can be applied from here (View only: in the
+            // sub-modes Enter/Space apply the highlighted value instead).
+            if self.moved_pending && self.mode == TUIMode::View {
+                instructions_items.push(" Apply ".white());
+                instructions_items.push("<Enter/Space> ".blue().bold());
+            }
             match self.mode {
                 TUIMode::View => {
                     instructions_items.push(" Quit ".white());
@@ -350,19 +386,10 @@ impl<'a> MonitorList<'a> {
             ])
             .split(inner_area);
 
-        let widths = [
-            Constraint::Percentage(5),
-            Constraint::Percentage(15),
-            Constraint::Percentage(25),
-            Constraint::Percentage(15),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
-            Constraint::Percentage(10),
-        ];
+        let widths = COLUMN_WIDTHS;
 
         let table = Table::new(self.monitors_to_rows(&workspace_counts), widths)
-            .column_spacing(1)
+            .column_spacing(COLUMN_SPACING)
             .header(
                 Row::new(vec![
                     Cell::default().content(Line::from("  ").centered()),
@@ -398,7 +425,7 @@ impl<'a> MonitorList<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::tests::{test_monitors, text_of};
+    use crate::test_utils::tests::{find_cell, find_text, test_monitors, text_of};
     use ratatui::style::Style;
 
     #[test]
@@ -409,6 +436,7 @@ mod tests {
             mode: TUIMode::View,
             monitors: &test_monitors(),
             is_previewing: false,
+            moved_pending: false,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
 
@@ -492,11 +520,14 @@ mod tests {
 
     fn render_list_to(monitors: &[Monitor], mode: TUIMode, selected: usize, area: Rect) -> Buffer {
         let mut list = MonitorList {
-            state: TableState::default(),
+            // Match MonitorList::new: a selection makes the table reserve the
+            // highlight column, exactly like production.
+            state: TableState::default().with_selected(Some(selected)),
             selected_row: Some(selected),
             mode,
             monitors,
             is_previewing: false,
+            moved_pending: false,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -578,6 +609,7 @@ mod tests {
             mode: TUIMode::View,
             monitors: &monitors,
             is_previewing: true,
+            moved_pending: false,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 130, 8));
         list.render(buf.area, &mut buf);
@@ -653,6 +685,48 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_move_advertises_apply_in_view_mode() {
+        let monitors = test_monitors();
+        let wide = Rect::new(0, 0, 130, 8);
+
+        let plain = text_of(&render_list_to(&monitors, TUIMode::View, 0, wide));
+        assert!(!plain.contains("Apply"), "no apply hint without a move: {plain}");
+
+        let mut list = MonitorList {
+            state: TableState::default(),
+            selected_row: Some(0),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: true,
+        };
+        let mut buf = Buffer::empty(wide);
+        list.render(wide, &mut buf);
+        let text = text_of(&buf);
+        assert!(text.contains("Apply"), "apply hint missing: {text}");
+        assert!(text.contains("<Enter/Space>"), "apply keys missing: {text}");
+
+        // In a sub-mode the pending hint is suppressed (Enter/Space apply the
+        // highlighted value there), so "Apply" must appear exactly once.
+        let mut sub = MonitorList {
+            state: TableState::default().with_selected(Some(0)),
+            selected_row: Some(0),
+            mode: TUIMode::Resolution,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: true,
+        };
+        let mut buf = Buffer::empty(wide);
+        sub.render(wide, &mut buf);
+        let text = text_of(&buf);
+        assert_eq!(
+            text.matches("Apply").count(),
+            1,
+            "no duplicate Apply hint in a sub-mode: {text}"
+        );
+    }
+
+    #[test]
     fn every_mode_renders_without_panicking_on_small_areas() {
         for (width, height) in [(30u16, 6), (60, 8), (100, 10), (130, 20)] {
             let monitors = test_monitors();
@@ -716,12 +790,31 @@ mod tests {
     }
 
     #[test]
-    fn the_checkbox_column_ends_before_the_name_column() {
-        let area = Rect::new(0, 0, 120, 12);
-        let end = MonitorList::icon_column_end(area);
-        // Block border (1) + highlight symbol (3) + 5% of 118 (5).
-        assert_eq!(end, 9);
-        assert!(4 < end, "the icon cell is inside the column");
+    fn the_checkbox_column_matches_the_drawn_icon_across_widths() {
+        // The toggle region must contain the drawn checkbox cell and stop
+        // before the name column, at every width (not just the one geometry
+        // the old formula happened to agree on).
+        let monitors = vec![Monitor {
+            name: "X".to_string(),
+            enabled: true,
+            ..Default::default()
+        }];
+        for width in [40u16, 60, 80, 100, 120, 140, 200] {
+            let area = Rect::new(0, 0, width, 12);
+            let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+            let (icon_x, _) = find_cell(&buf, "\u{f00c}").expect("enabled icon");
+            let end = MonitorList::icon_column_end(area);
+
+            assert!(
+                icon_x < end,
+                "width {width}: icon at {icon_x} must be inside the toggle region (< {end})"
+            );
+            let (name_x, _) = find_text(&buf, "X").expect("name column");
+            assert!(
+                name_x >= end,
+                "width {width}: name at {name_x} must be outside the toggle region (< {end})"
+            );
+        }
     }
 
     #[test]

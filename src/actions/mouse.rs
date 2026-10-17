@@ -190,9 +190,9 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
         // first click selects and the next one enables/disables.
         if already_selected && point.0 < MonitorList::icon_column_end(layout.list) {
             toggle_monitor(app, row);
-            // Disabling the pending monitor drops its Apply button.
-            if !app.monitors[row].enabled && app.moved_monitor == Some(row) {
-                app.moved_monitor = None;
+            // Disabling the pending monitor drops its Apply button and its move.
+            if !app.monitors[row].enabled {
+                app.discard_move(row);
             }
         }
     }
@@ -200,7 +200,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
 
 fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64), canvas: MonitorCanvas) {
     app.selected_monitor = index;
-    let was_pending = app.moved_monitor == Some(index);
+    let was_pending = app.move_origins.contains_key(&index);
     if let Some(position) = app.monitors[index].position.clone() {
         app.drag = Some(crate::app::state::DragState {
             monitor: index,
@@ -236,8 +236,9 @@ fn handle_left_drag(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
         position.x = origin.0 + dx;
         position.y = origin.1 + dy;
     }
-    // The move is not applied yet: an Apply button appears for it.
-    app.moved_monitor = Some(monitor);
+    // The move is not applied yet: remember where it started (first time only,
+    // so a second drag keeps the original revert target) and show Apply.
+    app.note_move(monitor, (origin.0, origin.1));
 
     let guides = snap_to_alignment(&mut app.monitors, monitor, SNAP_THRESHOLD);
     if let Some(drag) = app.drag.as_mut() {
@@ -1065,6 +1066,54 @@ mod tests {
         drag(&mut a, col + 6, row);
 
         assert_eq!(a.moved_monitor, Some(1));
+        assert_eq!(
+            a.move_origins.get(&1),
+            Some(&(3000, 1000)),
+            "the pre-drag position is recorded for Cancel/Revert"
+        );
+    }
+
+    #[test]
+    fn re_dragging_a_monitor_keeps_the_original_revert_target() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        for step in [6, 12] {
+            let (col, row) = cell_for_monitor(&a, 1);
+            down(&mut a, col, row);
+            drag(&mut a, col + step, row);
+            up(&mut a, col, row);
+        }
+
+        assert_eq!(
+            a.move_origins.get(&1),
+            Some(&(3000, 1000)),
+            "a second drag must not lose the original revert target"
+        );
+    }
+
+    // The user's scenario end to end: drag, release (the Apply button stays),
+    // then press Escape through the real key path.
+    #[test]
+    fn escape_after_a_drag_reverts_the_released_monitor() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1), "the move is pending");
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(
+            a.monitors[1].position,
+            Some(Position { x: 3000, y: 1000 }),
+            "Escape puts the released monitor back"
+        );
+        assert_eq!(a.moved_monitor, None, "and clears the pending move");
+        assert!(a.move_origins.is_empty());
     }
 
     #[test]
@@ -1103,6 +1152,7 @@ mod tests {
         down(&mut a, rect.x, rect.y);
 
         assert_eq!(a.moved_monitor, None, "apply clears the pending move");
+        assert!(a.move_origins.is_empty(), "and drops the move record");
         assert!(
             dir.path().join("monitor_state.json").exists(),
             "apply persists the layout"
@@ -1389,6 +1439,10 @@ mod tests {
         assert_eq!(
             a.moved_monitor, None,
             "a disabled monitor has no pending apply"
+        );
+        assert!(
+            a.move_origins.is_empty(),
+            "disabling drops the recorded move as well"
         );
     }
 

@@ -186,9 +186,7 @@ impl<'a> MonitorList<'a> {
         monitor.saved_position = monitor.position.clone();
         monitor.saved_scale = monitor.scale;
         // A disabled monitor has no Apply button, so drop any pending move.
-        if app.moved_monitor == Some(selected) {
-            app.moved_monitor = None;
-        }
+        app.discard_move(selected);
     }
 
     fn enable_monitor(app: &mut App) {
@@ -288,7 +286,15 @@ impl<'a> MonitorList<'a> {
         let has_duplicate_workspace = has_duplicate_workspace(self.monitors);
 
         let is_mini_mode = area.width < 115;
-        if is_mini_mode {
+        if self.moved_pending && self.mode == TUIMode::View {
+            // A pending mouse move is a confirm state: only Apply or
+            // Cancel/Revert are offered, so the usual actions stay hidden until
+            // the move is resolved.
+            instructions_items.push(" Apply ".white());
+            instructions_items.push("<Enter/Space> ".blue().bold());
+            instructions_items.push(" Cancel/Revert ".white());
+            instructions_items.push("<Esc/q> ".blue().bold());
+        } else if is_mini_mode {
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
             if self.mode == TUIMode::View {
@@ -346,12 +352,6 @@ impl<'a> MonitorList<'a> {
 
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());
-            // A pending mouse move can be applied from here (View only: in the
-            // sub-modes Enter/Space apply the highlighted value instead).
-            if self.moved_pending && self.mode == TUIMode::View {
-                instructions_items.push(" Apply ".white());
-                instructions_items.push("<Enter/Space> ".blue().bold());
-            }
             match self.mode {
                 TUIMode::View => {
                     instructions_items.push(" Quit ".white());
@@ -742,6 +742,36 @@ mod tests {
             1,
             "no duplicate Apply hint in a sub-mode: {text}"
         );
+    }
+
+    #[test]
+    fn a_pending_move_offers_only_apply_and_cancel() {
+        let monitors = test_monitors();
+        // Both the wide and the compact instruction line collapse to the confirm
+        // hints, so the check runs across the mini-mode threshold too.
+        for area in [Rect::new(0, 0, 130, 8), Rect::new(0, 0, 100, 8)] {
+            let mut list = MonitorList {
+                state: TableState::default().with_selected(Some(0)),
+                selected_row: Some(0),
+                mode: TUIMode::View,
+                monitors: &monitors,
+                is_previewing: false,
+                moved_pending: true,
+            };
+            let mut buf = Buffer::empty(area);
+            list.render(area, &mut buf);
+            let text = text_of(&buf);
+
+            assert!(text.contains("Apply"), "apply hint missing: {text}");
+            assert!(
+                text.contains("Cancel/Revert"),
+                "revert hint missing: {text}"
+            );
+            assert!(text.contains("<Esc/q>"), "revert keys missing: {text}");
+            for hidden in ["<m>", "<r>", "<s>", "<o>", "<0-9>", "<w>", "<q>", "<K>"] {
+                assert!(!text.contains(hidden), "{hidden} must be hidden: {text}");
+            }
+        }
     }
 
     #[test]

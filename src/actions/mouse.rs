@@ -6,6 +6,7 @@
 
 use crate::App;
 use crate::actions::movement::snap_to_alignment;
+use crate::monitor::{Monitor, MonitorCanvas};
 use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
@@ -21,6 +22,12 @@ pub fn handle_mouse(app: &mut App, event: MouseEvent) {
         Some(layout) => layout,
         None => return,
     };
+
+    // A release always ends the drag, even if a modal has taken over since the
+    // press so the drag cannot stay armed behind an overlay.
+    if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
+        app.drag = None;
+    }
 
     if app.show_help {
         if is_left_click(event.kind) {
@@ -83,10 +90,11 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
 
     // The map selects a monitor and starts a drag in every mode.
     if inside(layout.canvas, point) {
-        if let Some(world) = Map::world_at(layout.canvas, &app.monitors, point.0, point.1)
+        let bounds = Monitor::get_monitors_canvas(&app.monitors, &layout.canvas);
+        if let Some(world) = Map::world_at_in(layout.canvas, &bounds, point.0, point.1)
             && let Some(index) = Map::monitor_at(&app.monitors, app.selected_monitor, world)
         {
-            select_and_start_drag(app, index, world);
+            select_and_start_drag(app, index, world, bounds);
         }
         return;
     }
@@ -123,7 +131,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
     }
 }
 
-fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64)) {
+fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64), canvas: MonitorCanvas) {
     app.selected_monitor = index;
     if let Some(position) = app.monitors[index].position.clone() {
         app.drag = Some(crate::app::state::DragState {
@@ -131,6 +139,7 @@ fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64)) {
             grab: world,
             origin: (position.x, position.y),
             guides: Default::default(),
+            canvas,
         });
     }
 }
@@ -142,10 +151,12 @@ fn handle_left_drag(app: &mut App, layout: ScreenLayout, point: (u16, u16)) {
     let monitor = drag.monitor;
     let grab = drag.grab;
     let origin = drag.origin;
+    let canvas = drag.canvas;
 
-    // Outside the canvas `world_at` still extrapolates, so the drag keeps
-    // following the cursor; a degenerate canvas falls back to the grab point.
-    let world = Map::world_at(layout.canvas, &app.monitors, point.0, point.1).unwrap_or(grab);
+    // The canvas bounds are frozen for the whole drag, so a column of cursor
+    // movement is always the same world distance and the monitor tracks the
+    // cursor instead of feeding its own motion back into the mapping.
+    let world = Map::world_at_in(layout.canvas, &canvas, point.0, point.1).unwrap_or(grab);
     let dx = (world.0 - grab.0).round() as i32;
     let dy = (world.1 - grab.1).round() as i32;
     if dx == 0 && dy == 0 {
@@ -496,6 +507,42 @@ mod tests {
     }
 
     #[test]
+    fn dragging_follows_the_cursor_vertically() {
+        // Dragging the cursor down must move the monitor down, not up.
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 3000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+
+        drag(&mut a, col, row + 2);
+        let down_pos = pos(&a.monitors[1]);
+        assert!(down_pos.1 > 3000, "dragging down moves it down: {down_pos:?}");
+        assert_eq!(down_pos.0, 3000, "the column did not change");
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        drag(&mut a, col, row - 4);
+        let up_pos = pos(&a.monitors[1]);
+        assert!(up_pos.1 < down_pos.1, "dragging up moves it up: {up_pos:?}");
+    }
+
+    #[test]
+    fn a_click_maps_to_the_monitor_drawn_under_the_cursor() {
+        // Upper (y = -1080) is drawn above Lower (y = 0); a click on each
+        // label must select the monitor actually rendered there.
+        let monitors = vec![monitor("Upper", 0, -1080, true), monitor("Lower", 0, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let buf = render(&a);
+        let (lx, ly) = find_text(&buf, "Lower").expect("lower label");
+        let (ux, uy) = find_text(&buf, "Upper").expect("upper label");
+
+        down(&mut a, lx, ly);
+        assert_eq!(a.selected_monitor, 1, "the lower label selects Lower");
+
+        down(&mut a, ux, uy);
+        assert_eq!(a.selected_monitor, 0, "the upper label selects Upper");
+    }
+
+    #[test]
     fn dragging_snaps_to_the_nearest_alignment() {
         // A single monitor near the origin: a one-column drag lands within the
         // snap threshold of the origin, so it is pulled back onto it.
@@ -567,6 +614,42 @@ mod tests {
         drag(&mut a, col + 20, row);
 
         assert_eq!(pos(&a.monitors[0]), (100, 100), "no drag is in progress");
+    }
+
+    #[test]
+    fn a_release_ends_the_drag_even_when_a_modal_is_open() {
+        let mut a = app(TUIMode::View, vec![monitor("A", 0, 0, true)]);
+
+        let (col, row) = cell_for_monitor(&a, 0);
+        down(&mut a, col, row);
+        assert!(a.drag.is_some());
+
+        a.show_help = true;
+        up(&mut a, col, row);
+
+        assert!(a.drag.is_none(), "the overlay must not leave the drag armed");
+    }
+
+    #[test]
+    fn dragging_steps_linearly_without_position_feedback() {
+        // Each one-column drag must advance by the same world distance. If the
+        // canvas bounds were recomputed from the moving monitor, the steps
+        // would accelerate.
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+
+        drag(&mut a, col + 1, row);
+        let first = pos(&a.monitors[1]).0 - 1920;
+        drag(&mut a, col + 2, row);
+        let second = pos(&a.monitors[1]).0 - 1920;
+
+        assert!(first > 0, "the monitor moved: {first}");
+        assert!(
+            (second - 2 * first).abs() <= 2,
+            "steps must be linear: {first} then {second}"
+        );
     }
 
     #[test]

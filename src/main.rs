@@ -36,10 +36,17 @@ fn run_with_action(action: Option<CliAction>) -> io::Result<()> {
     use crossterm::execute;
     use std::io::stdout;
 
-    let mut terminal = ratatui::init();
-    let _ = execute!(stdout(), EnableMouseCapture);
+    // Enable capture (and report a failure) before entering the alternate
+    // screen, so the warning is visible and the wheel cannot silently fall
+    // back to the terminal's arrow-key translation.
+    if execute!(stdout(), EnableMouseCapture).is_err() {
+        eprintln!("Warning: could not enable mouse capture; mouse input is unavailable.");
+    }
 
-    // Make sure a panic cannot leave the terminal reporting mouse events.
+    let mut terminal = ratatui::init();
+
+    // The hook disables mouse capture and then chains to the hook ratatui
+    // installed in init(), which restores raw mode and the alternate screen.
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(stdout(), DisableMouseCapture);

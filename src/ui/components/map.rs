@@ -36,13 +36,18 @@ pub struct Map<'a>{
     pub is_previewing: bool,
     // Alignment guides to overlay while a drag is snapped.
     pub guides: Option<SnapGuides>,
+    // Frozen canvas bounds to use instead of recomputing from the (moving)
+    // monitor list, so a drag stays linear in world space.
+    pub canvas: Option<MonitorCanvas>,
 }
 
 impl<'a> Widget for Map<'a>{
 
     fn render(self, area: Rect, buf: &mut Buffer) {
 
-        let monitor_canvas = Monitor::get_monitors_canvas(self.monitors,&area);
+        let monitor_canvas = self
+            .canvas
+            .unwrap_or_else(|| Monitor::get_monitors_canvas(self.monitors, &area));
 
         let title_text = if self.is_previewing {
             " Map (Preview) "
@@ -143,18 +148,31 @@ impl<'a> Map<'a> {
     // Points outside the canvas return coordinates outside the bounds, which
     // keeps dragging beyond the edge working.
     pub fn world_at(area: Rect, monitors: &[Monitor], col: u16, row: u16) -> Option<(f64, f64)> {
+        let canvas = Monitor::get_monitors_canvas(monitors, &area);
+        Map::world_at_in(area, &canvas, col, row)
+    }
+
+    // Like [`Map::world_at`] but against explicit bounds; used during a drag
+    // so the mapping does not shift as the dragged monitor moves.
+    pub fn world_at_in(
+        area: Rect,
+        canvas: &MonitorCanvas,
+        col: u16,
+        row: u16,
+    ) -> Option<(f64, f64)> {
         let inner = Block::bordered().inner(area);
         if inner.width == 0 || inner.height == 0 {
             return None;
         }
-        let canvas = Monitor::get_monitors_canvas(monitors, &area);
         let [left, right] = canvas.x_bounds;
         let [bottom, top] = canvas.y_bounds;
 
         let fx = col.saturating_sub(inner.x) as f64 / inner.width as f64;
         let fy = row.saturating_sub(inner.y) as f64 / inner.height as f64;
 
-        Some((left + fx * (right - left), top - fy * (top - bottom)))
+        // Screen rows grow downwards and so does the world y axis, so the top
+        // row maps to the smallest bound (no flip); the flip lives in drawing.
+        Some((left + fx * (right - left), bottom + fy * (top - bottom)))
     }
 
     // Returns the index of the topmost enabled monitor containing `world`.
@@ -273,6 +291,7 @@ mod tests {
             monitors: &test_monitors(),
             is_previewing: false,
             guides: None,
+            canvas: None,
         }; 
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         
@@ -357,6 +376,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -374,6 +394,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: true,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -389,6 +410,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -408,6 +430,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -423,6 +446,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -617,6 +641,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -636,6 +661,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -659,6 +685,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             guides: None,
+            canvas: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -689,6 +716,7 @@ mod tests {
                 monitors: &monitors,
                 is_previewing: false,
                 guides: None,
+                canvas: None,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -706,13 +734,14 @@ mod tests {
 
         let (x, y) = Map::world_at(area, &monitors, inner.x, inner.y).unwrap();
 
-        // Top-left inner cell is the (left, top) corner of the world.
+        // Top-left inner cell is the (left, smallest-y) corner of the world:
+        // the small world y is the top of the screen.
         assert_eq!(x, canvas.x_bounds[0]);
-        assert_eq!(y, canvas.y_bounds[1]);
+        assert_eq!(y, canvas.y_bounds[0]);
     }
 
     #[test]
-    fn world_coordinates_grow_right_and_shrink_downwards() {
+    fn world_coordinates_grow_right_and_downwards() {
         let monitors = vec![monitor("A", 0, 0)];
         let area = Rect::new(0, 0, 100, 30);
         let inner = Block::bordered().inner(area);
@@ -722,7 +751,7 @@ mod tests {
         let (_, y1) = Map::world_at(area, &monitors, inner.x, inner.bottom() - 1).unwrap();
 
         assert!(x1 > x0, "moving right increases world x");
-        assert!(y1 < y0, "moving down decreases world y (canvas y is flipped)");
+        assert!(y1 > y0, "moving down increases world y (as Hyprland does)");
     }
 
     #[test]

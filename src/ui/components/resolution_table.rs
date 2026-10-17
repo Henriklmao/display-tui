@@ -34,16 +34,18 @@ impl<'a> Resolutions<'a> {
  
     pub fn handle_events(app:&mut App, key_event: KeyEvent) {
         match key_event.code {
+            // Cancel works even without a monitor to act on.
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                crate::utils::change_mode(app, TUIMode::View)
+            }
+            // Everything else needs a monitor.
+            _ if app.monitors.is_empty() => {}
             KeyCode::Char('k') | KeyCode::Up => Resolutions::previous(app),
             KeyCode::Char('j') | KeyCode::Down => Resolutions::next(app),
             KeyCode::Char(' ') => Resolutions::select(app),
             KeyCode::Enter => {
                 Resolutions::select(app);
                 crate::utils::change_mode(app, TUIMode::View);
-            }
-            // Esc cancels; q/Q cancel too instead of quitting the app.
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
-                crate::utils::change_mode(app, TUIMode::View)
             }
             _ => {}
         }
@@ -395,5 +397,22 @@ mod tests {
         let area = Rect::new(0, 0, 30, 6); // inner height 4 => two rows
         assert_eq!(Resolutions::row_at(area, 9, 10, 3), Some(8));
         assert_eq!(Resolutions::row_at(area, 9, 10, 4), Some(9));
+    }
+
+    #[test]
+    fn key_events_with_no_monitors_are_safe() {
+        let mut a = App::new(None);
+        a.mode = TUIMode::Resolution;
+
+        for code in [KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Char(' '), KeyCode::Enter] {
+            Resolutions::handle_events(&mut a, KeyEvent::new(code, KeyModifiers::NONE));
+        }
+
+        assert_eq!(a.selected_resolution, 0);
+        assert_eq!(a.mode, TUIMode::Resolution, "nothing acts without a monitor");
+
+        // Cancel is still reachable with an empty monitor list.
+        Resolutions::handle_events(&mut a, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(a.mode, TUIMode::View);
     }
 }

@@ -94,6 +94,10 @@ impl<'a> MonitorList<'a> {
     }
 
     pub fn handle_events(app: &mut App, key_event: KeyEvent) {
+        // With no monitors there is nothing to act on.
+        if app.monitors.is_empty() {
+            return;
+        }
         match key_event.code {
             KeyCode::Char('k') | KeyCode::Up => MonitorList::previous_monitor(app),
             KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
@@ -127,6 +131,9 @@ impl<'a> MonitorList<'a> {
     }
 
     fn next_monitor(app: &mut App) {
+        if app.monitors.is_empty() {
+            return;
+        }
         app.selected_monitor = if app.selected_monitor >= app.monitors.len() - 1 {
             0
         } else {
@@ -135,6 +142,9 @@ impl<'a> MonitorList<'a> {
     }
 
     fn previous_monitor(app: &mut App) {
+        if app.monitors.is_empty() {
+            return;
+        }
         app.selected_monitor = if app.selected_monitor == 0 {
             app.monitors.len() - 1
         } else {
@@ -255,7 +265,6 @@ impl<'a> MonitorList<'a> {
             // nerdfont symbols:      (nf-oct-arrow_...)
             match self.mode {
                 TUIMode::View => {
-                    let selected_monitor = &self.monitors[self.selected_row.unwrap_or(0)];
                     instructions_items.push(" Scroll  ".white());
                     instructions_items.push("<k/j> ".blue().bold());
                     instructions_items.push(" Move ".white());
@@ -268,12 +277,16 @@ impl<'a> MonitorList<'a> {
                     instructions_items.push("<o> ".blue().bold());
                     instructions_items.push(" Workspace ".white());
                     instructions_items.push("<0-9> ".blue().bold());
-                    if selected_monitor.enabled {
-                        instructions_items.push(" Disable ".white());
-                        instructions_items.push("<d> ".blue().bold());
-                    } else {
-                        instructions_items.push(" Enable ".white());
-                        instructions_items.push("<e> ".blue().bold());
+                    match self.monitors.get(self.selected_row.unwrap_or(0)) {
+                        Some(monitor) if monitor.enabled => {
+                            instructions_items.push(" Disable ".white());
+                            instructions_items.push("<d> ".blue().bold());
+                        }
+                        Some(_) => {
+                            instructions_items.push(" Enable ".white());
+                            instructions_items.push("<e> ".blue().bold());
+                        }
+                        None => {}
                     }
                 }
 
@@ -719,5 +732,27 @@ mod tests {
             assert_eq!(MonitorList::row_at(area, &monitors, 0, 0), None);
             let _ = MonitorList::icon_column_end(area);
         }
+    }
+
+    #[test]
+    fn key_events_with_no_monitors_are_safe() {
+        let mut a = App::new(None);
+        assert!(a.monitors.is_empty());
+
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Up,
+            KeyCode::Down,
+            KeyCode::Char('e'),
+            KeyCode::Char('d'),
+            KeyCode::Char('o'),
+            KeyCode::Char('1'),
+        ] {
+            MonitorList::handle_events(&mut a, KeyEvent::new(code, crossterm::event::KeyModifiers::NONE));
+        }
+
+        assert_eq!(a.selected_monitor, 0);
+        assert_eq!(a.mode, TUIMode::View, "sub-modes need a monitor");
     }
 }

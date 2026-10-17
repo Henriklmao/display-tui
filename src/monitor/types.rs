@@ -48,7 +48,7 @@ pub struct Resolution {
 // The bounds are the only bookkeeping needed: the map mirrors monitor
 // positions around the centre of `y_bounds`, so monitor coordinates that
 // grow downwards render from top to bottom.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct MonitorCanvas {
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],

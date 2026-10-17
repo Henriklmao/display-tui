@@ -50,6 +50,10 @@ pub struct DragState {
     pub origin: (i32, i32),
     // Alignment guides the current snap locked onto.
     pub guides: SnapGuides,
+    // Canvas bounds frozen when the drag started. Using these for the whole
+    // drag keeps the cursor-to-world mapping linear instead of feeding the
+    // moving monitor back into its own coordinate space.
+    pub canvas: crate::monitor::MonitorCanvas,
 }
 
 // Popup message displayed to the user.

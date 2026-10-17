@@ -24,6 +24,7 @@ impl Widget for &App {
             monitors: &self.monitors,
             is_previewing,
             guides: self.drag.as_ref().map(|drag| drag.guides),
+            canvas: self.drag.as_ref().map(|drag| drag.canvas),
         };
         monitor_list.is_previewing = is_previewing;
 
@@ -35,10 +36,11 @@ impl Widget for &App {
         if let Some(side) = layout.side_table {
             match self.mode {
                 TUIMode::Resolution => {
-                    let selected = &self.monitors[self.selected_monitor];
-                    let mut resolutions =
-                        Resolutions::new(selected, Some(self.selected_resolution));
-                    resolutions.render(side, buf);
+                    if let Some(selected) = self.monitors.get(self.selected_monitor) {
+                        let mut resolutions =
+                            Resolutions::new(selected, Some(self.selected_resolution));
+                        resolutions.render(side, buf);
+                    }
                 }
                 TUIMode::Scale => {
                     let mut scale = Scale::new(self.selected_scale);
@@ -235,6 +237,16 @@ mod tests {
                 a.show_help = true;
                 render_app(&a, area);
             }
+        }
+    }
+
+    #[test]
+    fn every_mode_renders_with_zero_monitors() {
+        for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution, TUIMode::Scale] {
+            let mut a = App::new(None);
+            a.mode = mode;
+            // Must not panic even though the tables index a selected monitor.
+            let _ = render_app(&a, Rect::new(0, 0, 120, 40));
         }
     }
 }

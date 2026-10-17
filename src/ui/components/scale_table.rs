@@ -31,6 +31,10 @@ impl Scale{
 
     pub fn handle_events(app:&mut App, key_event: KeyEvent) {
         match key_event.code {
+            // Cancel works even without a monitor to act on.
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => change_mode(app, TUIMode::View),
+            // Everything else needs a monitor.
+            _ if app.monitors.is_empty() => {}
             KeyCode::Char('k') | KeyCode::Up => Scale::previous(app),
             KeyCode::Char('j') | KeyCode::Down => Scale::next(app),
             KeyCode::Char(' ') => Scale::select(app),
@@ -38,8 +42,6 @@ impl Scale{
                 Scale::select(app);
                 change_mode(app, TUIMode::View);
             }
-            // Esc cancels; q/Q cancel too instead of quitting the app.
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => change_mode(app, TUIMode::View),
             _ => {}
         }
     }
@@ -387,5 +389,22 @@ mod tests {
         assert_eq!(Scale::row_at(area, 0, 2), Some(1));
         assert_eq!(Scale::row_at(area, 0, 0), None, "border");
         assert_eq!(Scale::row_at(area, 0, 28), None, "past the block");
+    }
+
+    #[test]
+    fn key_events_with_no_monitors_are_safe() {
+        let mut a = App::new(None);
+        a.mode = TUIMode::Scale;
+
+        for code in [KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Char(' '), KeyCode::Enter] {
+            Scale::handle_events(&mut a, KeyEvent::new(code, KeyModifiers::NONE));
+        }
+
+        assert_eq!(a.selected_scale, 0);
+        assert_eq!(a.mode, TUIMode::Scale, "nothing acts without a monitor");
+
+        // Cancel is still reachable with an empty monitor list.
+        Scale::handle_events(&mut a, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(a.mode, TUIMode::View);
     }
 }

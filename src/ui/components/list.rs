@@ -83,7 +83,11 @@ impl<'a> MonitorList<'a> {
     // window. `y` is the absolute screen row.
     pub fn row_at(area: Rect, monitors: &[Monitor], selected: usize, y: u16) -> Option<usize> {
         let inner = Block::bordered().inner(area);
-        let reserved = if has_duplicate_workspace(monitors) { 2 } else { 1 };
+        let reserved = if has_duplicate_workspace(monitors) {
+            2
+        } else {
+            1
+        };
         let table_height = inner.height.saturating_sub(reserved);
         // The header row plus its bottom margin occupy two lines.
         let viewport = table_height.saturating_sub(2);
@@ -104,11 +108,9 @@ impl<'a> MonitorList<'a> {
     pub fn icon_column_end(area: Rect) -> u16 {
         let inner = Block::bordered().inner(area);
         let highlight_width = HIGHLIGHT_SYMBOL.chars().count() as u16;
-        let columns_area = Layout::horizontal([
-            Constraint::Length(highlight_width),
-            Constraint::Fill(0),
-        ])
-        .split(Rect::new(0, 0, inner.width, 1))[1];
+        let columns_area =
+            Layout::horizontal([Constraint::Length(highlight_width), Constraint::Fill(0)])
+                .split(Rect::new(0, 0, inner.width, 1))[1];
         let first = Layout::horizontal(COLUMN_WIDTHS)
             .flex(Flex::Start)
             .spacing(COLUMN_SPACING)
@@ -268,10 +270,17 @@ impl<'a> MonitorList<'a> {
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(
-            format!("{}{}",
-                if self.monitors.len() > 1 { " Displays " } else { " Display " },
+            format!(
+                "{}{}",
+                if self.monitors.len() > 1 {
+                    " Displays "
+                } else {
+                    " Display "
+                },
                 if self.is_previewing { "(Preview)" } else { "" }
-            ).white().bold(),
+            )
+            .white()
+            .bold(),
         );
         let mut instructions_items = vec![];
 
@@ -666,7 +675,10 @@ mod tests {
 
         for mode in [TUIMode::Resolution, TUIMode::Scale] {
             let text = text_of(&render_list_to(&monitors, mode, 0, wide));
-            assert!(text.contains("Apply"), "{mode:?} must advertise Apply: {text}");
+            assert!(
+                text.contains("Apply"),
+                "{mode:?} must advertise Apply: {text}"
+            );
             assert!(
                 text.contains("<Enter/Space>"),
                 "{mode:?} must show the apply keys: {text}"
@@ -680,7 +692,10 @@ mod tests {
                 "{mode:?} must show the cancel keys: {text}"
             );
             // q must not be advertised as Quit here.
-            assert!(!text.contains("<q> "), "{mode:?} must not show Quit: {text}");
+            assert!(
+                !text.contains("<q> "),
+                "{mode:?} must not show Quit: {text}"
+            );
         }
     }
 
@@ -690,7 +705,10 @@ mod tests {
         let wide = Rect::new(0, 0, 130, 8);
 
         let plain = text_of(&render_list_to(&monitors, TUIMode::View, 0, wide));
-        assert!(!plain.contains("Apply"), "no apply hint without a move: {plain}");
+        assert!(
+            !plain.contains("Apply"),
+            "no apply hint without a move: {plain}"
+        );
 
         let mut list = MonitorList {
             state: TableState::default(),
@@ -736,12 +754,7 @@ mod tests {
                 TUIMode::Resolution,
                 TUIMode::Scale,
             ] {
-                render_list_to(
-                    &monitors,
-                    mode,
-                    1,
-                    Rect::new(0, 0, width, height),
-                );
+                render_list_to(&monitors, mode, 1, Rect::new(0, 0, width, height));
             }
         }
     }
@@ -842,7 +855,10 @@ mod tests {
             KeyCode::Char('o'),
             KeyCode::Char('1'),
         ] {
-            MonitorList::handle_events(&mut a, KeyEvent::new(code, crossterm::event::KeyModifiers::NONE));
+            MonitorList::handle_events(
+                &mut a,
+                KeyEvent::new(code, crossterm::event::KeyModifiers::NONE),
+            );
         }
 
         assert_eq!(a.selected_monitor, 0);

@@ -1,6 +1,6 @@
 //! Scale selection table component.
 
-use crossterm::event::{KeyCode,KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -10,29 +10,29 @@ use ratatui::{
     widgets::{Block, Cell, Row, StatefulWidget, Table, TableState},
 };
 
-use ratatui::layout::Constraint;
+use crate::App;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::{ScaleValue, TUIMode, change_mode};
-use crate::App;
+use ratatui::layout::Constraint;
 
 #[derive(Debug)]
-pub struct Scale{
+pub struct Scale {
     pub state: TableState,
 }
 
-impl Scale{
-    pub fn new(selected:usize) -> Self {
+impl Scale {
+    pub fn new(selected: usize) -> Self {
         Scale {
-            state: TableState::default()
-                .with_selected(selected),
+            state: TableState::default().with_selected(selected),
         }
     }
 
-
-    pub fn handle_events(app:&mut App, key_event: KeyEvent) {
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
         match key_event.code {
             // Cancel works even without a monitor to act on.
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => change_mode(app, TUIMode::View),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                change_mode(app, TUIMode::View)
+            }
             // Everything else needs a monitor.
             _ if app.monitors.is_empty() => {}
             KeyCode::Char('k') | KeyCode::Up => Scale::previous(app),
@@ -55,7 +55,7 @@ impl Scale{
         row_in_window(inner.y, viewport, offset, ScaleValue::table().len(), y)
     }
 
-    fn next(app:&mut App) {
+    fn next(app: &mut App) {
         app.selected_scale = if app.selected_scale >= ScaleValue::table().len() - 1 {
             0
         } else {
@@ -63,7 +63,7 @@ impl Scale{
         }
     }
 
-    fn previous(app:&mut App) {
+    fn previous(app: &mut App) {
         app.selected_scale = if app.selected_scale == 0 {
             ScaleValue::table().len() - 1
         } else {
@@ -71,27 +71,20 @@ impl Scale{
         }
     }
 
-    fn select(app:&mut App) {
+    fn select(app: &mut App) {
         let scale_value = Some(ScaleValue::table()[app.selected_scale].value);
         app.monitors[app.selected_monitor].scale = scale_value;
     }
 
-
-
     fn scale_to_rows(&self) -> Vec<Row<'static>> {
-        
         ScaleValue::table()
             .iter()
-            .map(|scale| {
-                Row::new(vec![
-                    Cell::from(scale.name),
-                ])
-            })
+            .map(|scale| Row::new(vec![Cell::from(scale.name)]))
             .collect()
     }
 }
 
-impl Scale{
+impl Scale {
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
         let title = Line::from(" Scale ".bold());
         let block = Block::bordered()
@@ -99,24 +92,16 @@ impl Scale{
             .border_set(border::THICK)
             .border_style(Style::default().fg(Color::Yellow));
 
+        let widths = [Constraint::Percentage(100)];
 
-        let widths = [
-            Constraint::Percentage(100),
-        ];   
-
-        let table = Table::new(self.scale_to_rows(),widths) 
+        let table = Table::new(self.scale_to_rows(), widths)
             .column_spacing(1)
             .row_highlight_style(Style::new().yellow())
             .cell_highlight_style(Style::new().blue())
-            .highlight_symbol("  ")            
+            .highlight_symbol("  ")
             .block(block);
 
-        StatefulWidget::render(
-            table,
-            area,
-            buf,
-            &mut self.state,
-        );
+        StatefulWidget::render(table, area, buf, &mut self.state);
     }
 }
 
@@ -127,12 +112,11 @@ mod tests {
 
     #[test]
     fn render_scale() {
-
-        let mut scales = Scale{
+        let mut scales = Scale {
             state: TableState::default(),
-        }; 
+        };
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 11));
-        
+
         scales.render(buf.area, &mut buf);
 
         let mut expected = Buffer::with_lines(vec![
@@ -156,26 +140,26 @@ mod tests {
         // first line : title
         expected.set_style(Rect::new(0, 0, 6, 1), border_style);
         expected.set_style(Rect::new(6, 0, 7, 1), title_style);
-        expected.set_style(Rect::new(13, 0, 7, 1), border_style);       
+        expected.set_style(Rect::new(13, 0, 7, 1), border_style);
 
-        // second line : row 
+        // second line : row
         for i in 0..ScaleValue::table().len() {
             expected.set_style(Rect::new(0, (i + 1) as u16, 1, 1), border_style);
             expected.set_style(Rect::new(1, (i + 1) as u16, 18, 1), row_style);
             expected.set_style(Rect::new(19, (i + 1) as u16, 1, 1), border_style);
         }
 
-        // last line : instructions 
-        expected.set_style(Rect::new(0,10, 20, 1), border_style);
+        // last line : instructions
+        expected.set_style(Rect::new(0, 10, 20, 1), border_style);
 
         assert_eq!(buf, expected);
     }
 
     // --- key handling ---------------------------------------------------
 
-    use crossterm::event::KeyModifiers;
     use crate::monitor::{Monitor, Position};
     use crate::test_utils::tests::TempDir;
+    use crossterm::event::KeyModifiers;
 
     fn monitor() -> Monitor {
         Monitor {
@@ -295,7 +279,10 @@ mod tests {
         press(&mut a, KeyCode::Char(' '));
 
         assert_eq!(a.monitors[1].scale, Some(1.0));
-        assert_eq!(a.monitors[0].scale, None, "untouched monitor keeps its scale");
+        assert_eq!(
+            a.monitors[0].scale, None,
+            "untouched monitor keeps its scale"
+        );
     }
 
     #[test]
@@ -371,7 +358,12 @@ mod tests {
         let mut a = app();
         a.selected_scale = 3;
 
-        for code in [KeyCode::Char('x'), KeyCode::Char('w'), KeyCode::Tab, KeyCode::F(1)] {
+        for code in [
+            KeyCode::Char('x'),
+            KeyCode::Char('w'),
+            KeyCode::Tab,
+            KeyCode::F(1),
+        ] {
             press(&mut a, code);
             assert_eq!(a.selected_scale, 3, "{:?} must not navigate", code);
             assert_eq!(a.monitors[0].scale, None, "{:?} must not apply", code);
@@ -396,7 +388,12 @@ mod tests {
         let mut a = App::new(None);
         a.mode = TUIMode::Scale;
 
-        for code in [KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Char(' '), KeyCode::Enter] {
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Char(' '),
+            KeyCode::Enter,
+        ] {
             Scale::handle_events(&mut a, KeyEvent::new(code, KeyModifiers::NONE));
         }
 

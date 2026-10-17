@@ -2,39 +2,29 @@
 //!
 //! Displays a visual representation of monitor layout.
 
-use crossterm::event::{KeyCode,KeyEvent,KeyModifiers};
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Stylize,Color,Style},
-    symbols::{
-        Marker,
-        border,
-    },
-    text::Line,
-    widgets::{
-        Block,
-        Clear,
-        Paragraph,
-        Widget,
-        canvas::{
-            Canvas,
-            Line as CanvasLine,
-            Rectangle,
-        }
-    },
-};
 use crate::{
     App,
     actions::movement::{self, SnapGuides},
     monitor::{Monitor, MonitorCanvas},
     utils::TUIMode,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{
+    buffer::Buffer,
+    layout::{Alignment, Rect},
+    style::{Color, Style, Stylize},
+    symbols::{Marker, border},
+    text::Line,
+    widgets::{
+        Block, Clear, Paragraph, Widget,
+        canvas::{Canvas, Line as CanvasLine, Rectangle},
+    },
+};
 
 #[derive(Debug)]
-pub struct Map<'a>{
+pub struct Map<'a> {
     pub selected: usize,
-    pub monitors:&'a [Monitor],
+    pub monitors: &'a [Monitor],
     pub is_previewing: bool,
     // Alignment guides to overlay while a drag is snapped.
     pub guides: Option<SnapGuides>,
@@ -45,10 +35,8 @@ pub struct Map<'a>{
     pub moved: Option<usize>,
 }
 
-impl<'a> Widget for Map<'a>{
-
+impl<'a> Widget for Map<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-
         let monitor_canvas = self
             .canvas
             .unwrap_or_else(|| Monitor::get_monitors_canvas(self.monitors, &area));
@@ -65,8 +53,6 @@ impl<'a> Widget for Map<'a>{
             .border_set(border::THICK)
             .border_style(Style::default().fg(Color::Yellow));
 
-
-
         Canvas::default()
             .marker(Marker::HalfBlock)
             .block(block)
@@ -76,14 +62,14 @@ impl<'a> Widget for Map<'a>{
                 let mut index = 0;
                 for monitor in self.monitors {
                     if self.selected != index && monitor.enabled {
-                        self.render_enabled_monitor(ctx,&monitor_canvas, monitor, Color::Blue);
+                        self.render_enabled_monitor(ctx, &monitor_canvas, monitor, Color::Blue);
                     }
                     index += 1;
                 }
                 index = 0;
                 for monitor in self.monitors {
                     if self.selected == index && monitor.enabled {
-                            self.render_enabled_monitor(ctx,&monitor_canvas,monitor, Color::Yellow);
+                        self.render_enabled_monitor(ctx, &monitor_canvas, monitor, Color::Yellow);
                     }
                     index += 1;
                 }
@@ -128,31 +114,52 @@ impl<'a> Widget for Map<'a>{
                 .alignment(Alignment::Center)
                 .render(rect, buf);
         }
-    } 
-
-    
+    }
 }
 impl<'a> Map<'a> {
-   
-    pub fn handle_events(app:&mut App, key_event: KeyEvent) {
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
         let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
         let selected = app.selected_monitor;
         match key_event.code {
             KeyCode::Char('k') => movement::snap_vertical(&mut app.monitors, selected, -1),
             KeyCode::Char('K') => movement::move_vertical(&mut app.monitors[selected], -10),
-            KeyCode::Up => if is_shift { movement::move_vertical(&mut app.monitors[selected], -10) } else { movement::snap_vertical(&mut app.monitors, selected, -1) },
+            KeyCode::Up => {
+                if is_shift {
+                    movement::move_vertical(&mut app.monitors[selected], -10)
+                } else {
+                    movement::snap_vertical(&mut app.monitors, selected, -1)
+                }
+            }
 
             KeyCode::Char('j') => movement::snap_vertical(&mut app.monitors, selected, 1),
             KeyCode::Char('J') => movement::move_vertical(&mut app.monitors[selected], 10),
-            KeyCode::Down => if is_shift { movement::move_vertical(&mut app.monitors[selected], 10) } else { movement::snap_vertical(&mut app.monitors, selected, 1) },
+            KeyCode::Down => {
+                if is_shift {
+                    movement::move_vertical(&mut app.monitors[selected], 10)
+                } else {
+                    movement::snap_vertical(&mut app.monitors, selected, 1)
+                }
+            }
 
             KeyCode::Char('h') => movement::snap_horizontal(&mut app.monitors, selected, -1),
             KeyCode::Char('H') => movement::move_horizontal(&mut app.monitors[selected], -10),
-            KeyCode::Left => if is_shift { movement::move_horizontal(&mut app.monitors[selected], -10) } else { movement::snap_horizontal(&mut app.monitors, selected, -1) },
+            KeyCode::Left => {
+                if is_shift {
+                    movement::move_horizontal(&mut app.monitors[selected], -10)
+                } else {
+                    movement::snap_horizontal(&mut app.monitors, selected, -1)
+                }
+            }
 
             KeyCode::Char('l') => movement::snap_horizontal(&mut app.monitors, selected, 1),
             KeyCode::Char('L') => movement::move_horizontal(&mut app.monitors[selected], 10),
-            KeyCode::Right => if is_shift { movement::move_horizontal(&mut app.monitors[selected], 10) } else { movement::snap_horizontal(&mut app.monitors, selected, 1) },
+            KeyCode::Right => {
+                if is_shift {
+                    movement::move_horizontal(&mut app.monitors[selected], 10)
+                } else {
+                    movement::snap_horizontal(&mut app.monitors, selected, 1)
+                }
+            }
 
             // Esc/Enter/q leave the mode; q no longer quits from Move mode.
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -220,11 +227,15 @@ impl<'a> Map<'a> {
         let [bottom, top] = canvas.y_bounds;
 
         let width = 9u16.min(inner.width);
-        let center_x = inner.x as f64 + ((x + w / 2.0) - left) / (right - left) * inner.width as f64;
-        let center_y = inner.y as f64 + ((y + h / 2.0) - bottom) / (top - bottom) * inner.height as f64;
+        let center_x =
+            inner.x as f64 + ((x + w / 2.0) - left) / (right - left) * inner.width as f64;
+        let center_y =
+            inner.y as f64 + ((y + h / 2.0) - bottom) / (top - bottom) * inner.height as f64;
 
         let max_x = (inner.right() as f64 - width as f64).max(inner.x as f64);
-        let bx = (center_x - width as f64 / 2.0).round().clamp(inner.x as f64, max_x) as u16;
+        let bx = (center_x - width as f64 / 2.0)
+            .round()
+            .clamp(inner.x as f64, max_x) as u16;
         let by = center_y
             .round()
             .clamp(inner.y as f64, inner.bottom().saturating_sub(1) as f64) as u16;
@@ -235,7 +246,8 @@ impl<'a> Map<'a> {
     //
     // The selected monitor is drawn last (on top), so it wins when rectangles
     // overlap.
-    pub fn monitor_at(monitors: &[Monitor], selected: usize, world: (f64, f64)) -> Option<usize> {        let (wx, wy) = world;
+    pub fn monitor_at(monitors: &[Monitor], selected: usize, world: (f64, f64)) -> Option<usize> {
+        let (wx, wy) = world;
         let contains = |m: &Monitor| {
             if !m.enabled {
                 return false;
@@ -270,19 +282,16 @@ impl<'a> Map<'a> {
         // mirror from the bounds keeps the drawing centred with its margin
         // no matter where the monitors sit — a monitor at y = 0 gets the
         // same 50px border on both sides.
-        let y = monitor_canvas.y_bounds[0] + monitor_canvas.y_bounds[1] - position.y as f64
-            - height;
+        let y =
+            monitor_canvas.y_bounds[0] + monitor_canvas.y_bounds[1] - position.y as f64 - height;
 
-        let x_margin = width * 0.07; 
+        let x_margin = width * 0.07;
         let y_margin = height * 0.07;
 
         ctx.print(
-            x + x_margin, 
-            y + height - y_margin, 
-            Line::styled(
-                monitor.name.to_string(),
-                color
-            )
+            x + x_margin,
+            y + height - y_margin,
+            Line::styled(monitor.name.to_string(), color),
         );
 
         ctx.draw(&Rectangle {
@@ -298,9 +307,9 @@ impl<'a> Map<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Style;
-    use crate::test_utils::tests::{TempDir, find_text, test_monitors, text_of};
     use crate::monitor::{Position, Resolution};
+    use crate::test_utils::tests::{TempDir, find_text, test_monitors, text_of};
+    use ratatui::style::Style;
 
     fn monitor(name: &str, x: i32, y: i32) -> Monitor {
         Monitor {
@@ -348,9 +357,9 @@ mod tests {
             guides: None,
             canvas: None,
             moved: None,
-        }; 
+        };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
-        
+
         map.render(buf.area, &mut buf);
 
         let mut expected = Buffer::with_lines(vec![
@@ -386,7 +395,7 @@ mod tests {
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛",
         ]);
         let vertical_line_style = Style::new().fg(Color::Yellow).bg(Color::Yellow);
-        
+
         let horizontal_line_style = Style::new().fg(Color::Yellow);
         let border_style = Style::new().fg(Color::Yellow);
         let title_style = Style::new().white().bold();
@@ -394,7 +403,7 @@ mod tests {
 
         expected.set_style(Rect::new(0, 0, 47, 1), border_style);
         expected.set_style(Rect::new(47, 0, 5, 1), title_style);
-        expected.set_style(Rect::new(52, 0, 48, 1), border_style);       
+        expected.set_style(Rect::new(52, 0, 48, 1), border_style);
 
         expected.set_style(Rect::new(0, 1, 1, 28), border_style);
         expected.set_style(Rect::new(1, 1, 98, 28), empty_style);
@@ -411,7 +420,7 @@ mod tests {
         // Sides y=3..26
         expected.set_style(Rect::new(3, 3, 1, 24), vertical_line_style);
         expected.set_style(Rect::new(96, 3, 1, 24), vertical_line_style);
-        
+
         // Bottom line y=27
         expected.set_style(Rect::new(3, 27, 1, 1), vertical_line_style);
         expected.set_style(Rect::new(4, 27, 92, 1), horizontal_line_style);
@@ -439,8 +448,14 @@ mod tests {
         map.render(buf.area, &mut buf);
 
         let text = text_of(&buf);
-        assert!(text.contains("Monitor 1"), "enabled monitor missing: {text}");
-        assert!(!text.contains("Monitor 2"), "disabled monitor drawn: {text}");
+        assert!(
+            text.contains("Monitor 1"),
+            "enabled monitor missing: {text}"
+        );
+        assert!(
+            !text.contains("Monitor 2"),
+            "disabled monitor drawn: {text}"
+        );
     }
 
     #[test]
@@ -496,10 +511,7 @@ mod tests {
         first_selected.render(area, &mut buf);
         let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
         let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
-        let first_styles = (
-            buf[(ax, ay)].style().fg,
-            buf[(bx, by)].style().fg,
-        );
+        let first_styles = (buf[(ax, ay)].style().fg, buf[(bx, by)].style().fg);
 
         let second_selected = Map {
             selected: 1,
@@ -513,10 +525,7 @@ mod tests {
         second_selected.render(area, &mut buf);
         let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
         let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
-        let second_styles = (
-            buf[(ax, ay)].style().fg,
-            buf[(bx, by)].style().fg,
-        );
+        let second_styles = (buf[(ax, ay)].style().fg, buf[(bx, by)].style().fg);
 
         assert_ne!(
             first_styles.0, second_styles.0,
@@ -527,13 +536,11 @@ mod tests {
             "the deselected label must change colour"
         );
         assert_eq!(
-            first_styles.0, Some(Color::Yellow),
+            first_styles.0,
+            Some(Color::Yellow),
             "selected monitor is yellow"
         );
-        assert_eq!(
-            first_styles.1, Some(Color::Blue),
-            "other monitors are blue"
-        );
+        assert_eq!(first_styles.1, Some(Color::Blue), "other monitors are blue");
     }
 
     #[test]
@@ -557,10 +564,7 @@ mod tests {
     fn lowercase_keys_snap_to_the_neighbour() {
         // Second monitor sits right/below the first one, so snapping moves it
         // onto the shared edge.
-        let mut a = app(
-            vec![monitor("A", 0, 0), monitor("B", 3000, 2000)],
-            1,
-        );
+        let mut a = app(vec![monitor("A", 0, 0), monitor("B", 3000, 2000)], 1);
 
         press(&mut a, KeyCode::Char('h'));
         assert_eq!(position_of(&a.monitors[1]), (1920, 2000));
@@ -571,10 +575,7 @@ mod tests {
 
     #[test]
     fn arrow_keys_snap_unless_shift_is_held() {
-        let mut a = app(
-            vec![monitor("A", 0, 0), monitor("B", 3000, 2000)],
-            1,
-        );
+        let mut a = app(vec![monitor("A", 0, 0), monitor("B", 3000, 2000)], 1);
 
         press_with(&mut a, KeyCode::Left, KeyModifiers::NONE);
         assert_eq!(
@@ -755,9 +756,7 @@ mod tests {
         map.render(buf.area, &mut buf);
 
         let box_rows: Vec<u16> = (buf.area.top()..buf.area.bottom())
-            .filter(|&y| {
-                (buf.area.left()..buf.area.right()).any(|x| buf[(x, y)].symbol() == "█")
-            })
+            .filter(|&y| (buf.area.left()..buf.area.right()).any(|x| buf[(x, y)].symbol() == "█"))
             .collect();
         let first = *box_rows.first().expect("top edge of the box");
         let last = *box_rows.last().expect("bottom edge of the box");
@@ -1023,6 +1022,9 @@ mod tests {
                 (area.top()..area.bottom()).any(|y| buf[(x, y)].style().fg == Some(Color::Magenta))
             })
             .expect("the guide is drawn");
-        assert!(col < area.width / 2, "vertical guide on the wrong side: col {col}");
+        assert!(
+            col < area.width / 2,
+            "vertical guide on the wrong side: col {col}"
+        );
     }
 }

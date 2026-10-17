@@ -3,8 +3,8 @@
 //! A terminal user interface for managing monitor configurations
 //! in the Hyprland compositor.
 
-use display_tui::app::App;
 use display_tui::CliAction;
+use display_tui::app::App;
 use std::io;
 
 fn main() -> io::Result<()> {
@@ -22,12 +22,8 @@ fn main() -> io::Result<()> {
         CliAction::LoadPreset(ref name) => {
             run_with_action(Some(CliAction::LoadPreset(name.clone())))
         }
-        CliAction::OpenPresetMenu => {
-            run_with_action(Some(CliAction::OpenPresetMenu))
-        }
-        CliAction::Normal => {
-            run_with_action(None)
-        }
+        CliAction::OpenPresetMenu => run_with_action(Some(CliAction::OpenPresetMenu)),
+        CliAction::Normal => run_with_action(None),
     }
 }
 
@@ -77,7 +73,8 @@ fn list_presets_cli() {
     println!("{:-<50}", "");
 
     for name in &presets {
-        let enabled_count = display_tui::config::count_enabled_monitors_in_preset(name).unwrap_or(0);
+        let enabled_count =
+            display_tui::config::count_enabled_monitors_in_preset(name).unwrap_or(0);
         let is_last = display_tui::config::is_last_preset(name);
 
         // Check for hardware mismatch
@@ -99,7 +96,8 @@ fn list_presets_cli() {
         let display = if is_last {
             format!("{} [read-only]", name)
         } else {
-            format!("{} ({} monitor{})",
+            format!(
+                "{} ({} monitor{})",
                 name,
                 enabled_count,
                 if enabled_count == 1 { "" } else { "s" }

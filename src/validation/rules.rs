@@ -143,8 +143,7 @@ pub fn validate_preset_name(name: &str) -> Result<(), Vec<ValidationError>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_contiguous, validate_no_overlap, validate_preset_name,
-        validate_workspaces_unique,
+        validate_contiguous, validate_no_overlap, validate_preset_name, validate_workspaces_unique,
     };
     use crate::monitor::{Monitor, Position, Resolution};
     use crate::validation::errors::ValidationError;
@@ -286,7 +285,10 @@ mod tests {
 
     #[test]
     fn overlap_is_detected_in_both_orders() {
-        let monitors = vec![box_at("A", 0, 0, 1920, 1080), box_at("B", 100, 0, 1920, 1080)];
+        let monitors = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 100, 0, 1920, 1080),
+        ];
 
         let errors = validate_no_overlap(&monitors).unwrap_err();
         assert_eq!(
@@ -298,7 +300,10 @@ mod tests {
         );
 
         // Same pair, reversed: still exactly one error.
-        let reversed = vec![box_at("B", 100, 0, 1920, 1080), box_at("A", 0, 0, 1920, 1080)];
+        let reversed = vec![
+            box_at("B", 100, 0, 1920, 1080),
+            box_at("A", 0, 0, 1920, 1080),
+        ];
         let errors = validate_no_overlap(&reversed).unwrap_err();
         assert_eq!(
             errors,
@@ -313,11 +318,17 @@ mod tests {
     fn overlap_at_a_single_corner_point_counts() {
         // Strict inequality means touching at exactly one point is not overlap,
         // but one pixel of penetration is.
-        let touching = vec![box_at("A", 0, 0, 1920, 1080), box_at("B", 1920, 1080, 1920, 1080)];
+        let touching = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 1920, 1080, 1920, 1080),
+        ];
         assert_eq!(validate_no_overlap(&touching), Ok(()));
 
         // One pixel of penetration on both axes.
-        let nudged = vec![box_at("A", 0, 0, 1920, 1080), box_at("B", 1919, 1079, 1920, 1080)];
+        let nudged = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 1919, 1079, 1920, 1080),
+        ];
         assert!(validate_no_overlap(&nudged).is_err());
     }
 
@@ -346,7 +357,10 @@ mod tests {
     #[test]
     fn contiguous_layout_with_two_or_fewer_monitors_is_always_valid() {
         assert_eq!(validate_contiguous(&[]), Ok(()));
-        assert_eq!(validate_contiguous(&[box_at("A", 0, 0, 1920, 1080)]), Ok(()));
+        assert_eq!(
+            validate_contiguous(&[box_at("A", 0, 0, 1920, 1080)]),
+            Ok(())
+        );
         assert_eq!(
             validate_contiguous(&[disabled(box_at("A", 0, 0, 1920, 1080))]),
             Ok(())
@@ -355,7 +369,10 @@ mod tests {
 
     #[test]
     fn touching_monitors_are_contiguous() {
-        let monitors = vec![box_at("A", 0, 0, 1920, 1080), box_at("B", 1920, 0, 1920, 1080)];
+        let monitors = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 1920, 0, 1920, 1080),
+        ];
 
         assert_eq!(validate_contiguous(&monitors), Ok(()));
     }
@@ -363,7 +380,10 @@ mod tests {
     #[test]
     fn sub_two_pixel_gaps_still_count_as_touching() {
         // The rule allows a 2.0px epsilon so that rounding never splits a layout.
-        let monitors = vec![box_at("A", 0, 0, 1920, 1080), box_at("B", 1922, 0, 1920, 1080)];
+        let monitors = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 1922, 0, 1920, 1080),
+        ];
 
         assert_eq!(validate_contiguous(&monitors), Ok(()));
     }

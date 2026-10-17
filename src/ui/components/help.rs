@@ -110,7 +110,11 @@ fn help_block() -> Block<'static> {
 
 // Renders a centered version line spanning the full popup width.
 fn version_line() -> Line<'static> {
-    Line::from(format!("Display-TUI v{}", env!("CARGO_PKG_VERSION")).bold().blue())
+    Line::from(
+        format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))
+            .bold()
+            .blue(),
+    )
 }
 
 // Two-column layout for terminals wide enough to fit both columns.
@@ -162,8 +166,8 @@ fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn render_help(width: u16, height: u16) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -179,9 +183,7 @@ mod tests {
 
     fn find(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
         for y in 0..buf.area.height {
-            let row: String = (0..buf.area.width)
-                .map(|x| buf[(x, y)].symbol())
-                .collect();
+            let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
             if let Some(x) = row.find(needle) {
                 return Some((x as u16, y));
             }
@@ -353,19 +355,9 @@ mod tests {
                     && y < popup.y + popup.height;
                 let symbol = buf[(x, y)].symbol();
                 if inside {
-                    assert_ne!(
-                        symbol, "x",
-                        "popup did not overwrite ({}, {})",
-                        x,
-                        y
-                    );
+                    assert_ne!(symbol, "x", "popup did not overwrite ({}, {})", x, y);
                 } else {
-                    assert_eq!(
-                        symbol, "x",
-                        "background was clobbered at ({}, {})",
-                        x,
-                        y
-                    );
+                    assert_eq!(symbol, "x", "background was clobbered at ({}, {})", x, y);
                 }
             }
         }

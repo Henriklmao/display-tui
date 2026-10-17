@@ -142,7 +142,10 @@ mod tests {
 
     #[test]
     fn resolution_mode_adds_the_resolution_table() {
-        let text = text_of(&render_app(&app(TUIMode::Resolution), Rect::new(0, 0, 120, 40)));
+        let text = text_of(&render_app(
+            &app(TUIMode::Resolution),
+            Rect::new(0, 0, 120, 40),
+        ));
 
         assert!(text.contains("Map"), "map must stay visible: {text}");
         assert!(text.contains("Resolutions"), "table missing: {text}");
@@ -177,7 +180,10 @@ mod tests {
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
         assert!(text.contains("Presets"), "menu missing: {text}");
-        assert!(text.contains("No presets found"), "placeholder missing: {text}");
+        assert!(
+            text.contains("No presets found"),
+            "placeholder missing: {text}"
+        );
     }
 
     #[test]
@@ -201,8 +207,14 @@ mod tests {
 
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
-        assert!(text.contains("<Esc/Enter> to close."), "close hint missing: {text}");
-        assert!(!text.contains("force write"), "force must not be offered: {text}");
+        assert!(
+            text.contains("<Esc/Enter> to close."),
+            "close hint missing: {text}"
+        );
+        assert!(
+            !text.contains("force write"),
+            "force must not be offered: {text}"
+        );
     }
 
     #[test]
@@ -213,7 +225,10 @@ mod tests {
         let mut error = app(TUIMode::View);
         error.show_popup = Some(error_popup(false));
         let buf = render_app(&error, area);
-        assert_eq!(buf[(popup_area.x, popup_area.y)].style().fg, Some(Color::Red));
+        assert_eq!(
+            buf[(popup_area.x, popup_area.y)].style().fg,
+            Some(Color::Red)
+        );
 
         let mut info = app(TUIMode::View);
         info.show_popup = Some(Popup {
@@ -234,7 +249,12 @@ mod tests {
     fn every_mode_survives_tiny_terminals() {
         for (width, height) in [(1u16, 1u16), (5, 3), (10, 5), (20, 8), (40, 12)] {
             let area = Rect::new(0, 0, width, height);
-            for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution, TUIMode::Scale] {
+            for mode in [
+                TUIMode::View,
+                TUIMode::Move,
+                TUIMode::Resolution,
+                TUIMode::Scale,
+            ] {
                 let mut a = app(mode);
                 a.show_help = true;
                 render_app(&a, area);
@@ -244,7 +264,12 @@ mod tests {
 
     #[test]
     fn every_mode_renders_with_zero_monitors() {
-        for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution, TUIMode::Scale] {
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
             let mut a = App::new(None);
             a.mode = mode;
             // Must not panic even though the tables index a selected monitor.

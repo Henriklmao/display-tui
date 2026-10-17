@@ -90,7 +90,13 @@ pub fn scrolled_offset(selected: usize, viewport_rows: usize) -> usize {
 // `top` is the first row of the window, `viewport_rows` its height and
 // `offset` its scroll offset. Returns None for clicks above the window, in
 // empty space past the last row, or outside the visible scroll window.
-pub fn row_in_window(top: u16, viewport_rows: u16, offset: usize, total: usize, y: u16) -> Option<usize> {
+pub fn row_in_window(
+    top: u16,
+    viewport_rows: u16,
+    offset: usize,
+    total: usize,
+    y: u16,
+) -> Option<usize> {
     if viewport_rows == 0 || total == 0 {
         return None;
     }

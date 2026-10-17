@@ -21,7 +21,9 @@ pub fn move_horizontal(monitor: &mut Monitor, delta: i32) {
 pub fn snap_vertical(monitors: &mut [Monitor], selected: usize, direction: i32) {
     let mut targets = vec![0.0];
     for (i, m) in monitors.iter().enumerate() {
-        if i == selected || !m.enabled { continue; }
+        if i == selected || !m.enabled {
+            continue;
+        }
         let (_, y, _, h) = m.get_geometry();
         targets.push(y);
         targets.push(y + h);
@@ -40,7 +42,9 @@ pub fn snap_vertical(monitors: &mut [Monitor], selected: usize, direction: i32) 
 pub fn snap_horizontal(monitors: &mut [Monitor], selected: usize, direction: i32) {
     let mut targets = vec![0.0];
     for (i, m) in monitors.iter().enumerate() {
-        if i == selected || !m.enabled { continue; }
+        if i == selected || !m.enabled {
+            continue;
+        }
         let (x, _, w, _) = m.get_geometry();
         targets.push(x);
         targets.push(x + w);
@@ -259,14 +263,11 @@ mod tests {
     fn a_disabled_selected_monitor_still_snaps() {
         // Only the *targets* exclude disabled monitors; the selected one is
         // still allowed to move.
-        let mut monitors = vec![
-            monitor("A", 0, 0),
-            {
-                let mut m = monitor("B", 3000, 0);
-                m.enabled = false;
-                m
-            },
-        ];
+        let mut monitors = vec![monitor("A", 0, 0), {
+            let mut m = monitor("B", 3000, 0);
+            m.enabled = false;
+            m
+        }];
 
         snap_horizontal(&mut monitors, 1, -1);
 
@@ -312,7 +313,13 @@ mod tests {
         let guides = snap_to_alignment(&mut monitors, 1, 20.0);
 
         assert_eq!((x_of(&monitors[1]), y_of(&monitors[1])), (1920, 0));
-        assert_eq!(guides, SnapGuides { x: Some(1920.0), y: Some(0.0) });
+        assert_eq!(
+            guides,
+            SnapGuides {
+                x: Some(1920.0),
+                y: Some(0.0)
+            }
+        );
     }
 
     #[test]
@@ -352,7 +359,13 @@ mod tests {
         let mut near = vec![monitor("A", 7, 3)];
         let guides = snap_to_alignment(&mut near, 0, 20.0);
         assert_eq!((x_of(&near[0]), y_of(&near[0])), (0, 0));
-        assert_eq!(guides, SnapGuides { x: Some(0.0), y: Some(0.0) });
+        assert_eq!(
+            guides,
+            SnapGuides {
+                x: Some(0.0),
+                y: Some(0.0)
+            }
+        );
     }
 
     #[test]
@@ -370,7 +383,11 @@ mod tests {
 
         let guides = snap_to_alignment(&mut monitors, 1, 20.0);
 
-        assert_eq!(guides, SnapGuides::default(), "disabled target must not snap");
+        assert_eq!(
+            guides,
+            SnapGuides::default(),
+            "disabled target must not snap"
+        );
         assert_eq!((x_of(&monitors[1]), y_of(&monitors[1])), (1008, 1008));
     }
 
@@ -388,6 +405,9 @@ mod tests {
     #[test]
     fn alignment_out_of_range_selection_is_safe() {
         let mut monitors = vec![monitor("A", 0, 0)];
-        assert_eq!(snap_to_alignment(&mut monitors, 9, 20.0), SnapGuides::default());
+        assert_eq!(
+            snap_to_alignment(&mut monitors, 9, 20.0),
+            SnapGuides::default()
+        );
     }
 }

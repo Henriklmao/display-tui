@@ -65,9 +65,7 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     }
 
     match event.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_down(app, layout, point(event), now)
-        }
+        MouseEventKind::Down(MouseButton::Left) => handle_left_down(app, layout, point(event), now),
         MouseEventKind::Drag(MouseButton::Left) => handle_left_drag(app, layout, point(event)),
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
         MouseEventKind::ScrollUp => handle_scroll(app, layout, point(event), -1),
@@ -155,7 +153,8 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
         match app.mode {
             TUIMode::Resolution => {
                 let total = app.monitors[app.selected_monitor].modes.len();
-                if let Some(row) = Resolutions::row_at(side, app.selected_resolution, total, point.1)
+                if let Some(row) =
+                    Resolutions::row_at(side, app.selected_resolution, total, point.1)
                 {
                     app.selected_resolution = row;
                     // A double-click applies the highlighted mode immediately.
@@ -484,8 +483,12 @@ mod tests {
         // Point the write targets at temp paths so a regression cannot touch
         // the real Hyprland config.
         a.state_path = Some(dir.path().join("monitor_state.json"));
-        a.config.monitors_config_path =
-            Some(dir.path().join("monitors.conf").to_string_lossy().into_owned());
+        a.config.monitors_config_path = Some(
+            dir.path()
+                .join("monitors.conf")
+                .to_string_lossy()
+                .into_owned(),
+        );
         a.show_popup = Some(Popup {
             title: " Preset Mismatch ".to_string(),
             lines: vec!["missing".to_string()],
@@ -532,7 +535,10 @@ mod tests {
         ));
 
         down(&mut a, 0, 0);
-        assert!(a.show_preset_menu.is_none(), "outside click closes the menu");
+        assert!(
+            a.show_preset_menu.is_none(),
+            "outside click closes the menu"
+        );
     }
 
     #[test]
@@ -620,7 +626,11 @@ mod tests {
                 pos(&a.monitors[1]).0 > 3000,
                 "{mode:?}: dragging right must move B right"
             );
-            assert_eq!(pos(&a.monitors[1]).1, 1000, "{mode:?}: the row did not change");
+            assert_eq!(
+                pos(&a.monitors[1]).1,
+                1000,
+                "{mode:?}: the row did not change"
+            );
             assert_eq!(pos(&a.monitors[0]), (0, 0), "{mode:?}: A must not move");
         }
     }
@@ -635,7 +645,10 @@ mod tests {
 
         drag(&mut a, col, row + 2);
         let down_pos = pos(&a.monitors[1]);
-        assert!(down_pos.1 > 3000, "dragging down moves it down: {down_pos:?}");
+        assert!(
+            down_pos.1 > 3000,
+            "dragging down moves it down: {down_pos:?}"
+        );
         assert_eq!(down_pos.0, 3000, "the column did not change");
 
         let (col, row) = cell_for_monitor(&a, 1);
@@ -648,7 +661,10 @@ mod tests {
     fn a_click_maps_to_the_monitor_drawn_under_the_cursor() {
         // Upper (y = -1080) is drawn above Lower (y = 0); a click on each
         // label must select the monitor actually rendered there.
-        let monitors = vec![monitor("Upper", 0, -1080, true), monitor("Lower", 0, 0, true)];
+        let monitors = vec![
+            monitor("Upper", 0, -1080, true),
+            monitor("Lower", 0, 0, true),
+        ];
         let mut a = app(TUIMode::View, monitors);
         let buf = render(&a);
         let (lx, ly) = find_text(&buf, "Lower").expect("lower label");
@@ -671,7 +687,11 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 1, row);
 
-        assert_eq!(pos(&a.monitors[0]), (0, 0), "the drag snapped onto the origin");
+        assert_eq!(
+            pos(&a.monitors[0]),
+            (0, 0),
+            "the drag snapped onto the origin"
+        );
         let guides = a.drag.as_ref().unwrap().guides;
         assert_eq!(guides.x, Some(0.0), "a vertical guide is shown");
         assert_eq!(guides.y, Some(0.0), "a horizontal guide is shown");
@@ -746,7 +766,10 @@ mod tests {
         a.show_help = true;
         up(&mut a, col, row);
 
-        assert!(a.drag.is_none(), "the overlay must not leave the drag armed");
+        assert!(
+            a.drag.is_none(),
+            "the overlay must not leave the drag armed"
+        );
     }
 
     #[test]
@@ -949,7 +972,10 @@ mod tests {
         let (col, row) = find_cell(&buf, ENABLED_ICON).expect("enabled icon");
         down(&mut a, col, row);
 
-        assert!(!a.monitors[0].enabled, "clicking the selected row toggles it");
+        assert!(
+            !a.monitors[0].enabled,
+            "clicking the selected row toggles it"
+        );
     }
 
     #[test]
@@ -985,7 +1011,11 @@ mod tests {
         down(&mut a, col, row);
 
         assert_eq!(a.selected_resolution, 1, "the row is highlighted");
-        assert_eq!(a.mode, TUIMode::Resolution, "the click does not leave the mode");
+        assert_eq!(
+            a.mode,
+            TUIMode::Resolution,
+            "the click does not leave the mode"
+        );
         assert!(a.monitors[0].modes[0].current, "nothing was applied yet");
     }
 
@@ -1014,7 +1044,10 @@ mod tests {
         down(&mut a, col, row);
 
         assert_eq!(a.selected_monitor, 1);
-        assert_eq!(a.selected_resolution, 0, "the resolution selection is untouched");
+        assert_eq!(
+            a.selected_resolution, 0,
+            "the resolution selection is untouched"
+        );
     }
 
     // --- applying a mouse move ------------------------------------------
@@ -1035,7 +1068,10 @@ mod tests {
     #[test]
     fn the_apply_button_is_only_drawn_for_a_pending_move() {
         let mut a = app(TUIMode::View, test_monitors());
-        assert!(!text_of(&render(&a)).contains("Apply"), "no button initially");
+        assert!(
+            !text_of(&render(&a)).contains("Apply"),
+            "no button initially"
+        );
 
         a.moved_monitor = Some(0);
         assert!(
@@ -1156,8 +1192,16 @@ mod tests {
             "far cell"
         );
         // A one-cell drift still pairs (hand tremor).
-        assert!(!register_click(&mut a, (0, 0), t0 + Duration::from_millis(2000)));
-        assert!(register_click(&mut a, (1, 1), t0 + Duration::from_millis(2050)));
+        assert!(!register_click(
+            &mut a,
+            (0, 0),
+            t0 + Duration::from_millis(2000)
+        ));
+        assert!(register_click(
+            &mut a,
+            (1, 1),
+            t0 + Duration::from_millis(2050)
+        ));
     }
 
     #[test]
@@ -1169,7 +1213,10 @@ mod tests {
 
         down_at(&mut a, col, row, t0);
         assert_eq!(a.selected_resolution, 1);
-        assert!(a.monitors[0].modes[0].current, "a single click does not apply");
+        assert!(
+            a.monitors[0].modes[0].current,
+            "a single click does not apply"
+        );
 
         down_at(&mut a, col, row, t0 + Duration::from_millis(120));
         assert_eq!(current_index(&a.monitors[0]), 1, "the double-click applies");
@@ -1192,7 +1239,10 @@ mod tests {
         assert_eq!(a.monitors[0].scale, Some(1.0), "a single click keeps it");
 
         down_at(&mut a, col, row, t0 + Duration::from_millis(120));
-        assert_eq!(a.monitors[0].scale, Some(ScaleValue::table()[expected].value));
+        assert_eq!(
+            a.monitors[0].scale,
+            Some(ScaleValue::table()[expected].value)
+        );
     }
 
     #[test]
@@ -1226,10 +1276,16 @@ mod tests {
         let t0 = Instant::now();
 
         down_at(&mut a, 40, top, t0);
-        assert!(a.show_preset_menu.is_some(), "a single click keeps the menu open");
+        assert!(
+            a.show_preset_menu.is_some(),
+            "a single click keeps the menu open"
+        );
 
         down_at(&mut a, 40, top, t0 + Duration::from_millis(120));
-        assert!(a.show_preset_menu.is_none(), "the double-click applies and closes");
+        assert!(
+            a.show_preset_menu.is_none(),
+            "the double-click applies and closes"
+        );
         assert_eq!(a.active_preset.as_deref(), Some("desk"));
         assert_eq!(
             a.monitors[0].position,
@@ -1252,7 +1308,10 @@ mod tests {
         down_at(&mut a, 40, top, t0);
         down_at(&mut a, 40, top, t0 + Duration::from_millis(120));
 
-        assert!(a.show_preset_menu.is_some(), "a failed apply keeps the menu open");
+        assert!(
+            a.show_preset_menu.is_some(),
+            "a failed apply keeps the menu open"
+        );
         assert!(a.active_preset.is_none(), "and marks nothing active");
     }
 
@@ -1280,8 +1339,12 @@ mod tests {
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
         let mut a = app(TUIMode::View, monitors);
         a.state_path = Some(dir.path().join("monitor_state.json"));
-        a.config.monitors_config_path =
-            Some(dir.path().join("monitors.conf").to_string_lossy().into_owned());
+        a.config.monitors_config_path = Some(
+            dir.path()
+                .join("monitors.conf")
+                .to_string_lossy()
+                .into_owned(),
+        );
 
         let (col, row) = cell_for_monitor(&a, 1);
         down(&mut a, col, row);
@@ -1315,7 +1378,10 @@ mod tests {
         assert_eq!(a.moved_monitor, Some(1));
 
         a.selected_monitor = 1;
-        MonitorList::handle_events(&mut a, KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        MonitorList::handle_events(
+            &mut a,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        );
 
         assert!(!a.monitors[1].enabled);
         assert_eq!(
@@ -1370,7 +1436,10 @@ mod tests {
         let mut a = app(TUIMode::View, monitors);
         let (col, row) = cell_for_monitor(&a, 1);
 
-        handle_mouse(&mut a, mouse(MouseEventKind::Down(MouseButton::Right), col, row));
+        handle_mouse(
+            &mut a,
+            mouse(MouseEventKind::Down(MouseButton::Right), col, row),
+        );
         handle_mouse(&mut a, mouse(MouseEventKind::Moved, col, row));
         handle_mouse(&mut a, mouse(MouseEventKind::ScrollLeft, col, row));
         handle_mouse(&mut a, mouse(MouseEventKind::ScrollRight, col, row));

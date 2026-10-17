@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Default)]
 pub enum Rotation {
-    #[default] Normal,
+    #[default]
+    Normal,
     Deg90,
     Deg180,
     Deg270,
@@ -73,7 +74,10 @@ mod tests {
 
     #[test]
     fn from_transform_recognizes_known_values() {
-        assert_eq!(Rotation::from_transform(&Some("90".to_string())), Rotation::Deg90);
+        assert_eq!(
+            Rotation::from_transform(&Some("90".to_string())),
+            Rotation::Deg90
+        );
         assert_eq!(
             Rotation::from_transform(&Some("180".to_string())),
             Rotation::Deg180
@@ -91,8 +95,14 @@ mod tests {
     #[test]
     fn from_transform_defaults_to_normal() {
         assert_eq!(Rotation::from_transform(&None), Rotation::Normal);
-        assert_eq!(Rotation::from_transform(&Some("".to_string())), Rotation::Normal);
-        assert_eq!(Rotation::from_transform(&Some("45".to_string())), Rotation::Normal);
+        assert_eq!(
+            Rotation::from_transform(&Some("".to_string())),
+            Rotation::Normal
+        );
+        assert_eq!(
+            Rotation::from_transform(&Some("45".to_string())),
+            Rotation::Normal
+        );
         assert_eq!(
             Rotation::from_transform(&Some("0".to_string())),
             Rotation::Normal

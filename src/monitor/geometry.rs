@@ -1,7 +1,7 @@
 //! Canvas geometry calculations for monitor layout rendering.
 
-use ratatui::layout::Rect;
 use super::types::{Monitor, MonitorCanvas};
+use ratatui::layout::Rect;
 
 impl Monitor {
     // Computes the bounding canvas for all enabled monitors.
@@ -54,10 +54,7 @@ impl Monitor {
         let x_bounds = [left, right];
         let y_bounds = [bottom, top];
 
-        MonitorCanvas {
-            x_bounds,
-            y_bounds,
-        }
+        MonitorCanvas { x_bounds, y_bounds }
     }
 }
 

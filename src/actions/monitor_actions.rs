@@ -6,7 +6,10 @@ use crate::monitor::{Monitor, Position};
 pub fn enable_monitor(monitor: &mut Monitor) {
     monitor.enabled = true;
     if let Some(saved_pos) = &monitor.saved_position {
-        monitor.position = Some(Position { x: saved_pos.x, y: saved_pos.y });
+        monitor.position = Some(Position {
+            x: saved_pos.x,
+            y: saved_pos.y,
+        });
     }
     monitor.scale = monitor.saved_scale.or(monitor.scale).or(Some(1.0));
 }

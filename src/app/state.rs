@@ -40,7 +40,7 @@ pub struct App {
     pub last_click: Option<(u16, u16, std::time::Instant)>,
     // Overrides where presets are read/written: production uses the real
     // config directory; tests point it at a temp dir.
-    pub presets_dir: Option<std::path::PathBuf>,    // Overrides where the monitor state is persisted: mode changes, exit and
+    pub presets_dir: Option<std::path::PathBuf>, // Overrides where the monitor state is persisted: mode changes, exit and
     // preset apply all honour it. None (production) uses the real config path;
     // tests point it at a temp dir so those paths can be exercised.
     pub state_path: Option<std::path::PathBuf>,
@@ -202,7 +202,9 @@ impl App {
                             self.write();
                             // If write succeeded (no popup shown), exit.
                             if self.show_popup.is_none() {
-                                if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
+                                if let Err(e) =
+                                    save_monitor_state_in(&self.state_path(), &self.monitors)
+                                {
                                     eprintln!("✗ Failed to save monitor state: {}", e);
                                 }
                                 self.exit = true;
@@ -642,7 +644,8 @@ impl App {
 
     // Clear the active preset marker as soon as the current monitor state
     // diverges from what the active preset defines (or the preset file is gone).
-    fn clear_active_preset_if_changed(&mut self) {        if let Some(ref active) = self.active_preset.clone() {
+    fn clear_active_preset_if_changed(&mut self) {
+        if let Some(ref active) = self.active_preset.clone() {
             if let Some(state) = crate::config::load_preset(active) {
                 for monitor_state in &state {
                     if let Some(monitor) =

@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 pub mod tests {
-    use crate::monitor::{Monitor, Resolution, Position};
+    use crate::monitor::{Monitor, Position, Resolution};
     use ratatui::buffer::Buffer;
     use std::path::{Path, PathBuf};
 
@@ -87,8 +87,7 @@ pub mod tests {
         // from an earlier run. The counter keeps parallel tests that pass
         // the same tag from clobbering each other's directory.
         pub fn new(tag: &str) -> Self {
-            static NEXT_ID: std::sync::atomic::AtomicUsize =
-                std::sync::atomic::AtomicUsize::new(0);
+            static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
                 "display-tui-test-{}-{}-{}",

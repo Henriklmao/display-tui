@@ -2,15 +2,27 @@
 
 // Cycle forward through a list, wrapping around.
 pub fn cycle_forward(current: usize, length: usize) -> usize {
-    if length == 0 { return current; }
-    if current >= length - 1 { 0 } else { current + 1 }
+    if length == 0 {
+        return current;
+    }
+    if current >= length - 1 {
+        0
+    } else {
+        current + 1
+    }
 }
 
 // Cycle backward through a list, wrapping around.
 // Out-of-range indices are normalised to the last entry.
 pub fn cycle_backward(current: usize, length: usize) -> usize {
-    if length == 0 { return current; }
-    if current == 0 || current >= length { length - 1 } else { current - 1 }
+    if length == 0 {
+        return current;
+    }
+    if current == 0 || current >= length {
+        length - 1
+    } else {
+        current - 1
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Resolution selection table component.
 
-use crossterm::event::{KeyCode,KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -10,29 +10,27 @@ use ratatui::{
     widgets::{Block, Cell, Row, StatefulWidget, Table, TableState},
 };
 
-use ratatui::layout::Constraint;
+use crate::App;
 use crate::monitor::Monitor;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::TUIMode;
-use crate::App;
+use ratatui::layout::Constraint;
 
 #[derive(Debug)]
 pub struct Resolutions<'a> {
     pub state: TableState,
-    pub monitor:&'a Monitor,
+    pub monitor: &'a Monitor,
 }
 
 impl<'a> Resolutions<'a> {
-
-    pub fn new(monitor: &'a Monitor,selected:Option<usize>) -> Self {
+    pub fn new(monitor: &'a Monitor, selected: Option<usize>) -> Self {
         Resolutions {
-            state: TableState::default()
-                .with_selected(selected),
+            state: TableState::default().with_selected(selected),
             monitor,
         }
     }
- 
-    pub fn handle_events(app:&mut App, key_event: KeyEvent) {
+
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
         match key_event.code {
             // Cancel works even without a monitor to act on.
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
@@ -60,15 +58,16 @@ impl<'a> Resolutions<'a> {
         row_in_window(inner.y.saturating_add(2), viewport, offset, total, y)
     }
 
-    fn next(app:&mut App) {
-        app.selected_resolution = if app.selected_resolution >= app.monitors[app.selected_monitor].modes.len() - 1 {
-            0
-        } else {
-            app.selected_resolution + 1
-        }
+    fn next(app: &mut App) {
+        app.selected_resolution =
+            if app.selected_resolution >= app.monitors[app.selected_monitor].modes.len() - 1 {
+                0
+            } else {
+                app.selected_resolution + 1
+            }
     }
 
-    fn previous(app:&mut App) {
+    fn previous(app: &mut App) {
         app.selected_resolution = if app.selected_resolution == 0 {
             app.monitors[app.selected_monitor].modes.len() - 1
         } else {
@@ -76,29 +75,38 @@ impl<'a> Resolutions<'a> {
         }
     }
 
-    fn select(app:&mut App) {
+    fn select(app: &mut App) {
         app.monitors[app.selected_monitor].set_current_resolution(app.selected_resolution);
     }
 
     fn resolutions_to_rows(&self) -> Vec<Row<'static>> {
-        self.monitor.modes
+        self.monitor
+            .modes
             .iter()
             .map(|mode| {
                 Row::new(vec![
-                     Cell::from(if mode.current { "".to_string() } else { "".to_string() })
-                     .style(
-                         Style::default().fg(
-                             if mode.current {Color::Green} else {Color::Red}
-                         )
-                     ),
+                    Cell::from(if mode.current {
+                        "".to_string()
+                    } else {
+                        "".to_string()
+                    })
+                    .style(Style::default().fg(if mode.current {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    })),
                     Cell::from(format!("{}x{}", mode.width, mode.height)),
                     Cell::from(mode.refresh.to_string()),
-                     Cell::from(if mode.preferred { "".to_string() } else { "".to_string() })
-                     .style(
-                         Style::default().fg(
-                             if mode.preferred {Color::Green} else {Color::Red}
-                         )
-                     ),
+                    Cell::from(if mode.preferred {
+                        "".to_string()
+                    } else {
+                        "".to_string()
+                    })
+                    .style(Style::default().fg(if mode.preferred {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    })),
                 ])
             })
             .collect()
@@ -111,16 +119,14 @@ impl<'a> Resolutions<'a> {
             .border_set(border::THICK)
             .border_style(Style::default().fg(Color::Yellow));
 
-
         let widths = [
-            
             Constraint::Percentage(25),
             Constraint::Percentage(25),
             Constraint::Percentage(25),
             Constraint::Percentage(25),
-        ];   
+        ];
 
-        let table = Table::new(self.resolutions_to_rows(),widths) 
+        let table = Table::new(self.resolutions_to_rows(), widths)
             .column_spacing(1)
             //.style(Style::new().blue())
             .header(
@@ -130,43 +136,35 @@ impl<'a> Resolutions<'a> {
                     Cell::from("refresh"),
                     Cell::from("preferred"),
                 ])
-                    .style(Style::new().bold())
-                    .bottom_margin(1)
-                    .bold()
-                    .green()
-                    .reversed()
+                .style(Style::new().bold())
+                .bottom_margin(1)
+                .bold()
+                .green()
+                .reversed(),
             )
- 
             .row_highlight_style(Style::new().yellow())
             .cell_highlight_style(Style::new().blue())
-            .highlight_symbol(" ")           
+            .highlight_symbol(" ")
             .block(block);
 
-        StatefulWidget::render(
-            table,
-            area,
-            buf,
-            &mut self.state,
-        );
+        StatefulWidget::render(table, area, buf, &mut self.state);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Style;
     use crate::test_utils::tests::test_monitors;
+    use ratatui::style::Style;
 
     #[test]
     fn render_resolutions() {
-
         let mut resolutions = Resolutions {
             state: TableState::default(),
-            monitor:&test_monitors()[0],
-            
-        }; 
+            monitor: &test_monitors()[0],
+        };
         let mut buf = Buffer::empty(Rect::new(0, 0, 65, 7));
-        
+
         resolutions.render(buf.area, &mut buf);
 
         let mut expected = Buffer::with_lines(vec![
@@ -189,47 +187,47 @@ mod tests {
         // first line : title
         expected.set_style(Rect::new(0, 0, 26, 1), border_style);
         expected.set_style(Rect::new(26, 0, 13, 1), title_style);
-        expected.set_style(Rect::new(39, 0, 26, 1), border_style);       
+        expected.set_style(Rect::new(39, 0, 26, 1), border_style);
 
         // second line : header
         expected.set_style(Rect::new(0, 1, 1, 1), border_style);
         expected.set_style(Rect::new(1, 1, 63, 1), header_style);
         expected.set_style(Rect::new(64, 1, 1, 1), border_style);
-        
+
         // third line : empty
         expected.set_style(Rect::new(0, 2, 1, 1), border_style);
         expected.set_style(Rect::new(1, 2, 63, 1), empty_style);
         expected.set_style(Rect::new(64, 2, 1, 1), border_style);
-         
-        // fourth line : first row 
+
+        // fourth line : first row
         expected.set_style(Rect::new(0, 3, 1, 1), border_style);
         expected.set_style(Rect::new(1, 3, 15, 1), ok_style);
         expected.set_style(Rect::new(16, 3, 33, 1), row_style);
         expected.set_style(Rect::new(49, 3, 15, 1), ok_style);
-        expected.set_style(Rect::new(64, 3, 1, 1), border_style);      
+        expected.set_style(Rect::new(64, 3, 1, 1), border_style);
 
-        // fifth line : second row 
+        // fifth line : second row
         expected.set_style(Rect::new(0, 4, 1, 1), border_style);
         expected.set_style(Rect::new(1, 4, 15, 1), nok_style);
         expected.set_style(Rect::new(16, 4, 33, 1), row_style);
         expected.set_style(Rect::new(49, 4, 15, 1), nok_style);
-        expected.set_style(Rect::new(64, 4, 1, 1), border_style);  
-        
+        expected.set_style(Rect::new(64, 4, 1, 1), border_style);
+
         // fifth line : empty
         expected.set_style(Rect::new(0, 5, 1, 1), border_style);
         expected.set_style(Rect::new(1, 5, 63, 1), empty_style);
         expected.set_style(Rect::new(64, 5, 1, 1), border_style);
 
-        // last line : instructions 
-        expected.set_style(Rect::new(0,6, 65, 1), border_style);
+        // last line : instructions
+        expected.set_style(Rect::new(0, 6, 65, 1), border_style);
 
         assert_eq!(buf, expected);
     }
 
     // --- key handling ---------------------------------------------------
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use crate::monitor::{Position, Resolution};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn monitor(modes: usize) -> Monitor {
         let modes = (0..modes)
@@ -316,7 +314,10 @@ mod tests {
         assert!(!modes[1].current);
         assert!(modes[2].current, "highlighted mode selected");
         // Mode data itself must not be altered.
-        assert_eq!((modes[2].width, modes[2].height, modes[2].refresh), (1280, 720, 90.0));
+        assert_eq!(
+            (modes[2].width, modes[2].height, modes[2].refresh),
+            (1280, 720, 90.0)
+        );
     }
 
     #[test]
@@ -360,7 +361,12 @@ mod tests {
         let mut a = app(3);
         a.selected_resolution = 1;
 
-        for code in [KeyCode::Char('x'), KeyCode::Char('w'), KeyCode::Tab, KeyCode::F(1)] {
+        for code in [
+            KeyCode::Char('x'),
+            KeyCode::Char('w'),
+            KeyCode::Tab,
+            KeyCode::F(1),
+        ] {
             press(&mut a, code);
             assert_eq!(a.selected_resolution, 1, "{:?} must not navigate", code);
             assert_eq!(a.mode, TUIMode::Resolution, "{:?} must not leave", code);
@@ -404,12 +410,21 @@ mod tests {
         let mut a = App::new(None);
         a.mode = TUIMode::Resolution;
 
-        for code in [KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Char(' '), KeyCode::Enter] {
+        for code in [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Char(' '),
+            KeyCode::Enter,
+        ] {
             Resolutions::handle_events(&mut a, KeyEvent::new(code, KeyModifiers::NONE));
         }
 
         assert_eq!(a.selected_resolution, 0);
-        assert_eq!(a.mode, TUIMode::Resolution, "nothing acts without a monitor");
+        assert_eq!(
+            a.mode,
+            TUIMode::Resolution,
+            "nothing acts without a monitor"
+        );
 
         // Cancel is still reachable with an empty monitor list.
         Resolutions::handle_events(&mut a, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

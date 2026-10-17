@@ -2,8 +2,8 @@
 //!
 //! Handles fetching monitor data from hyprctl and parsing its JSON output.
 
-use std::process::Command;
 use super::types::{HyprMonitor, Monitor, Position, Resolution};
+use std::process::Command;
 
 impl Monitor {
     // Fetches the current monitor configuration from hyprctl.
@@ -12,8 +12,7 @@ impl Monitor {
             .args(["monitors", "all", "-j"])
             .output()
             .expect("Failed to execute hyprctl command");
-        let stdout =
-            String::from_utf8(output.stdout).expect("Failed to convert output to string");
+        let stdout = String::from_utf8(output.stdout).expect("Failed to convert output to string");
         Self::parse_hyprctl_output(&stdout)
     }
 
@@ -72,13 +71,9 @@ impl Monitor {
             }
             .to_string();
 
-            let workspace = hm.active_workspace.and_then(|w| {
-                if w.id > 0 {
-                    Some(w.id as u8)
-                } else {
-                    None
-                }
-            });
+            let workspace = hm
+                .active_workspace
+                .and_then(|w| if w.id > 0 { Some(w.id as u8) } else { None });
 
             let make_opt = if hm.make.is_empty() {
                 None
@@ -374,8 +369,13 @@ mod tests {
         entry["width"] = json!(0);
         entry["height"] = json!(0);
         entry["refreshRate"] = json!(0.0);
-        entry["availableModes"] =
-            json!(["garbage", "1920", "1920x1080", "1920x1080@", "1920x1080@60.00Hz"]);
+        entry["availableModes"] = json!([
+            "garbage",
+            "1920",
+            "1920x1080",
+            "1920x1080@",
+            "1920x1080@60.00Hz"
+        ]);
 
         let m = parse_one(entry);
 

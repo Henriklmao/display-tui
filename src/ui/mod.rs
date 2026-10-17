@@ -1,8 +1,7 @@
 //! UI module for display-tui.
 
-pub mod styles;
-pub mod layouts;
 pub mod components;
+pub mod layouts;
+pub mod styles;
 
-pub use components::{HelpModal, MonitorList, Map, Popup, Resolutions, Scale, PresetMenu};
-
+pub use components::{HelpModal, Map, MonitorList, Popup, PresetMenu, Resolutions, Scale};

@@ -92,7 +92,7 @@ pub fn print_help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_args_from, CliAction};
+    use super::{CliAction, parse_args_from};
 
     fn parse(args: &[&str]) -> CliAction {
         parse_args_from(args.iter().map(|s| s.to_string()))
@@ -121,10 +121,7 @@ mod tests {
             parse(&["-pgaming-desk"]),
             CliAction::LoadPreset("gaming-desk".to_string())
         );
-        assert_eq!(
-            parse(&["-px"]),
-            CliAction::LoadPreset("x".to_string())
-        );
+        assert_eq!(parse(&["-px"]), CliAction::LoadPreset("x".to_string()));
     }
 
     #[test]

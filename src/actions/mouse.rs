@@ -326,8 +326,12 @@ mod tests {
     }
 
     fn render(app: &App) -> Buffer {
-        let mut buf = Buffer::empty(area());
-        Widget::render(app, area(), &mut buf);
+        render_in(app, area())
+    }
+
+    fn render_in(app: &App, screen: Rect) -> Buffer {
+        let mut buf = Buffer::empty(screen);
+        Widget::render(app, screen, &mut buf);
         buf
     }
 
@@ -667,6 +671,54 @@ mod tests {
         down(&mut a, col, row);
 
         assert_eq!(a.selected_monitor, 1);
+    }
+
+    #[test]
+    fn clicks_still_land_correctly_with_the_duplicate_workspace_warning() {
+        // The duplicate-workspace warning steals a list row, shifting the
+        // table geometry; clicks must account for it.
+        let mut monitors = test_monitors();
+        for monitor in &mut monitors {
+            monitor.workspace = Some(1);
+        }
+        let mut a = app(TUIMode::View, monitors);
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "Description 2").expect("second display row");
+
+        down(&mut a, col, row);
+
+        assert_eq!(a.selected_monitor, 1);
+    }
+
+    #[test]
+    fn clicking_a_scrolled_resolution_row_selects_the_right_index() {
+        // Plenty of modes in a table shorter than the list force a scroll
+        // offset; the click must be mapped through it.
+        let modes: Vec<Resolution> = (0..30)
+            .map(|i| Resolution {
+                width: 2000 - i * 10,
+                height: 1000,
+                refresh: 60.0,
+                preferred: i == 0,
+                current: i == 0,
+            })
+            .collect();
+        let mut m = monitor("A", 0, 0, true);
+        m.modes = modes;
+        let screen = Rect::new(0, 0, 200, 20);
+        let mut a = app_in(screen, TUIMode::Resolution, vec![m]);
+        a.selected_resolution = 20; // scrolls the window down
+
+        let buf = render_in(&a, screen);
+        // Mode 11 (1890x1000) is the first visible row of the scrolled window.
+        let (col, row) = find_text(&buf, "1890x1000").expect("scrolled mode row");
+
+        down(&mut a, col, row);
+
+        assert_eq!(
+            a.selected_resolution, 11,
+            "the click maps through the scroll offset"
+        );
     }
 
     #[test]

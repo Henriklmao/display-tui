@@ -44,7 +44,8 @@ pub struct App {
     pub last_click: Option<(u16, u16, std::time::Instant)>,
     // Overrides where presets are read/written: production uses the real
     // config directory; tests point it at a temp dir.
-    pub presets_dir: Option<std::path::PathBuf>, // Overrides where the monitor state is persisted: mode changes, exit and
+    pub presets_dir: Option<std::path::PathBuf>,
+    // Overrides where the monitor state is persisted: mode changes, exit and
     // preset apply all honour it. None (production) uses the real config path;
     // tests point it at a temp dir so those paths can be exercised.
     pub state_path: Option<std::path::PathBuf>,
@@ -538,29 +539,25 @@ impl App {
             return;
         }
 
-        // An in-progress drag owns the interaction: Escape aborts it, Enter or
-        // Space applies it, and any other key is ignored until the button is
-        // released so the drag cannot be disturbed mid-gesture.
-        if self.drag.is_some() {
+        // An in-progress drag: Escape always aborts it, so a gesture can be
+        // cancelled in any mode.
+        if self.drag.is_some() && key_event.code == KeyCode::Esc {
+            self.cancel_drag();
+            return;
+        }
+
+        // A displaced monitor (dragging or released) is a confirm state in View:
+        // only Apply and Cancel/Revert act, so nothing else can change or persist
+        // the layout under an unconfirmed move. Enter/Space apply even while the
+        // button is still held; in the sub-modes the move keeps its record but
+        // those keys apply the highlighted value instead.
+        if self.mode == TUIMode::View && self.moved_monitor.is_some() {
             match key_event.code {
-                KeyCode::Esc => self.cancel_drag(),
                 KeyCode::Enter | KeyCode::Char(' ') => {
                     self.apply_move();
                     self.drag = None;
                 }
-                _ => {}
-            }
-            return;
-        }
-
-        // A pending mouse move is a confirm state in View: only Apply and
-        // Cancel/Revert act, so a stray key cannot change or persist the layout
-        // under an unconfirmed move. In the sub-modes the move keeps its record
-        // but Enter/Space apply the highlighted value instead.
-        if self.mode == TUIMode::View && self.moved_monitor.is_some() {
-            match key_event.code {
-                KeyCode::Enter | KeyCode::Char(' ') => self.apply_move(),
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => self.cancel_move(),
+                KeyCode::Esc | KeyCode::Char('q') => self.cancel_move(),
                 _ => {}
             }
             return;
@@ -744,9 +741,14 @@ impl App {
     // move can no longer be applied (e.g. the monitor was disabled).
     pub(crate) fn discard_move(&mut self, index: usize) {
         self.move_origins.remove(&index);
-        if self.moved_monitor == Some(index) {
-            self.moved_monitor = self.move_origins.keys().copied().max();
-        }
+        self.refresh_pending();
+    }
+
+    // Keeps `moved_monitor` in sync with the recorded moves after one is
+    // dropped: it just has to report whether anything is still pending, so any
+    // remaining monitor does. Highest index is a stable pick, not an order.
+    fn refresh_pending(&mut self) {
+        self.moved_monitor = self.move_origins.keys().copied().max();
     }
 
     // Cancel/Revert: put every unapplied move back where it started and drop the
@@ -776,12 +778,11 @@ impl App {
                 position.x = drag.origin.0;
                 position.y = drag.origin.1;
             }
-            if drag.was_pending {
-                // A move from before the drag is still pending.
-                self.moved_monitor = Some(drag.monitor);
-            } else {
-                self.discard_move(drag.monitor);
+            if !drag.was_pending {
+                // The move never left the drag: drop the recorded origin too.
+                self.move_origins.remove(&drag.monitor);
             }
+            self.refresh_pending();
         }
     }
 
@@ -1116,12 +1117,14 @@ mod tests {
             KeyCode::Char('d'),
             KeyCode::Char('m'),
             KeyCode::Char('r'),
-            KeyCode::Char('w'),
+            KeyCode::Char('o'),
+            KeyCode::Char('K'),
         ] {
             app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
         }
 
         assert_eq!(app.mode, TUIMode::View, "no sub-mode is entered");
+        assert!(!app.show_help, "the help modal is not opened");
         assert!(app.monitors[0].enabled, "the monitor is not disabled");
         assert_eq!(
             app.moved_monitor,
@@ -1183,5 +1186,110 @@ mod tests {
             "the move is untouched in a sub-mode"
         );
         assert_eq!(app.moved_monitor, Some(0));
+    }
+
+    #[test]
+    fn enter_applies_a_drag_that_is_still_in_progress() {
+        let dir = TempDir::new("app-apply-drag");
+        let mut app = app_mid_drag((250, 140), (100, 100), false);
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert!(app.drag.is_none(), "Space ends the drag");
+        assert_eq!(app.moved_monitor, None, "and applies the move");
+        assert!(app.move_origins.is_empty());
+        assert!(dir.path().join("monitor_state.json").exists());
+    }
+
+    #[test]
+    fn other_keys_are_ignored_during_a_drag() {
+        let mut app = app_mid_drag((250, 140), (100, 100), false);
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+
+        assert!(app.monitors[0].enabled, "d is ignored mid-drag");
+        assert_eq!(app.mode, TUIMode::View, "m is ignored mid-drag");
+        assert!(app.drag.is_some(), "the drag is still active");
+    }
+
+    #[test]
+    fn keys_keep_working_before_a_drag_has_moved_the_monitor() {
+        // A press without any displacement is not a confirm state yet, so the
+        // normal keys (and the footer that advertises them) still apply.
+        let mut app = moved_monitor_app((250, 140), (100, 100));
+        app.move_origins.clear();
+        app.moved_monitor = None;
+        let canvas =
+            Monitor::get_monitors_canvas(&app.monitors, &ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.drag = Some(DragState {
+            monitor: 0,
+            grab: (0.0, 0.0),
+            origin: (250, 140),
+            guides: Default::default(),
+            canvas,
+            was_pending: false,
+        });
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.mode,
+            TUIMode::Move,
+            "an unmoved drag does not gate keys"
+        );
+        assert!(app.drag.is_some(), "and the drag stays active");
+    }
+
+    #[test]
+    fn escape_aborts_an_unmoved_drag_too() {
+        let mut app = moved_monitor_app((250, 140), (100, 100));
+        app.move_origins.clear();
+        app.moved_monitor = None;
+        let canvas =
+            Monitor::get_monitors_canvas(&app.monitors, &ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.drag = Some(DragState {
+            monitor: 0,
+            grab: (0.0, 0.0),
+            origin: (250, 140),
+            guides: Default::default(),
+            canvas,
+            was_pending: false,
+        });
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.drag.is_none(), "Escape aborts the drag");
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 250, y: 140 }),
+            "the position is unchanged"
+        );
+        assert_eq!(app.mode, TUIMode::View);
+    }
+
+    #[test]
+    fn discarding_the_primary_move_keeps_the_other_one_pending() {
+        let mut a = monitor();
+        a.position = Some(Position { x: 1, y: 2 });
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 3, y: 4 });
+        let mut app = app_with(vec![a, b]);
+        app.note_move(0, (10, 20));
+        app.note_move(1, (30, 40));
+        assert_eq!(app.moved_monitor, Some(1));
+
+        app.discard_move(1);
+
+        assert_eq!(
+            app.moved_monitor,
+            Some(0),
+            "the remaining pending monitor takes over"
+        );
+        assert_eq!(app.move_origins.get(&0), Some(&(10, 20)));
     }
 }

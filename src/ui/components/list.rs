@@ -124,8 +124,9 @@ impl<'a> MonitorList<'a> {
             return;
         }
         match key_event.code {
-            // Apply a pending mouse move (same as the on-map Apply button).
-            KeyCode::Enter | KeyCode::Char(' ') if app.moved_monitor.is_some() => app.apply_move(),
+            // A pending mouse move is resolved by the confirm gate in
+            // `App::handle_key_event` (Enter/Space apply, Esc/q revert) before
+            // the View dispatcher runs, so it is not handled here.
             KeyCode::Char('k') | KeyCode::Up => MonitorList::previous_monitor(app),
             KeyCode::Char('j') | KeyCode::Down => MonitorList::next_monitor(app),
             KeyCode::Char('e') => MonitorList::enable_monitor(app),
@@ -185,7 +186,9 @@ impl<'a> MonitorList<'a> {
         monitor.enabled = false;
         monitor.saved_position = monitor.position.clone();
         monitor.saved_scale = monitor.scale;
-        // A disabled monitor has no Apply button, so drop any pending move.
+        // A disabled monitor has no Apply button, so drop any pending move. The
+        // confirm gate normally resolves the move before `d` is reached; this
+        // keeps the invariant if the monitor is disabled some other way.
         app.discard_move(selected);
     }
 
@@ -772,6 +775,32 @@ mod tests {
                 assert!(!text.contains(hidden), "{hidden} must be hidden: {text}");
             }
         }
+    }
+
+    #[test]
+    fn a_pending_move_does_not_change_the_sub_mode_footer() {
+        // In a sub-mode Enter/Space apply the highlighted row, so the reduced
+        // View hint must not leak in there.
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 130, 8);
+        let mut list = MonitorList {
+            state: TableState::default().with_selected(Some(0)),
+            selected_row: Some(0),
+            mode: TUIMode::Resolution,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: true,
+        };
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+        let text = text_of(&buf);
+
+        assert!(text.contains("<k/j>"), "navigation hint missing: {text}");
+        assert!(text.contains("<Enter/Space>"), "row apply missing: {text}");
+        assert!(
+            !text.contains("Cancel/Revert"),
+            "the View confirm hint must stay in View: {text}"
+        );
     }
 
     #[test]

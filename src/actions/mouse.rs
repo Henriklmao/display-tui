@@ -130,13 +130,15 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
             .map(|drag| drag.canvas)
             .unwrap_or_else(|| Monitor::get_monitors_canvas(&app.monitors, &layout.canvas));
 
-        // The Apply button of a moved monitor takes precedence over dragging.
-        if let Some(index) = app.moved_monitor
-            && let Some(monitor) = app.monitors.get(index)
-            && monitor.enabled
-            && let Some(rect) = Map::apply_button_rect(layout.canvas, &bounds, monitor)
-            && inside(rect, point)
-        {
+        // The Apply button of a pending monitor takes precedence over dragging.
+        let hit_apply = app.move_origins.keys().copied().any(|index| {
+            let Some(monitor) = app.monitors.get(index).filter(|monitor| monitor.enabled) else {
+                return false;
+            };
+            Map::apply_button_rect(layout.canvas, &bounds, monitor)
+                .is_some_and(|rect| inside(rect, point))
+        });
+        if hit_apply {
             app.apply_move();
             return;
         }
@@ -1161,6 +1163,8 @@ mod tests {
 
     #[test]
     fn enter_and_space_apply_a_pending_move_in_view_mode() {
+        // Driven through App::handle_key_event: the confirm gate, not the list,
+        // resolves a pending move.
         for key in [KeyCode::Enter, KeyCode::Char(' ')] {
             let dir = TempDir::new("mouse-apply-key");
             let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
@@ -1173,7 +1177,7 @@ mod tests {
             up(&mut a, col, row);
             assert_eq!(a.moved_monitor, Some(1));
 
-            MonitorList::handle_events(&mut a, KeyEvent::new(key, KeyModifiers::NONE));
+            a.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
 
             assert_eq!(a.moved_monitor, None, "{key:?} applies the move");
             assert!(
@@ -1188,7 +1192,7 @@ mod tests {
         let dir = TempDir::new("mouse-button-nodrag");
         let mut a = app(TUIMode::View, vec![monitor("A", 0, 0, true)]);
         a.state_path = Some(dir.path().join("monitor_state.json"));
-        a.moved_monitor = Some(0);
+        a.note_move(0, (0, 0));
 
         let canvas = a.layout.unwrap().canvas;
         let bounds = Monitor::get_monitors_canvas(&a.monitors, &canvas);
@@ -1418,8 +1422,11 @@ mod tests {
         );
     }
 
+    // `MonitorList::disable_monitor` keeps the App invariant on its own, so it
+    // is exercised through the component even though the View confirm gate
+    // normally handles keys first (see the keyboard-ignored test below).
     #[test]
-    fn disabling_a_pending_monitor_by_keyboard_clears_the_move() {
+    fn disabling_a_pending_monitor_clears_its_move() {
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
         let mut a = app(TUIMode::View, monitors);
 
@@ -1444,6 +1451,53 @@ mod tests {
             a.move_origins.is_empty(),
             "disabling drops the recorded move as well"
         );
+    }
+
+    #[test]
+    fn keyboard_keys_other_than_apply_or_revert_are_ignored_while_pending() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1));
+
+        a.selected_monitor = 1;
+        for key in [KeyCode::Char('d'), KeyCode::Char('m'), KeyCode::Char('o')] {
+            a.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
+        }
+
+        assert!(
+            a.monitors[1].enabled,
+            "d must not disable a pending monitor"
+        );
+        assert_eq!(a.mode, TUIMode::View, "m must not open a sub-mode");
+        assert_eq!(a.moved_monitor, Some(1), "the move is still unresolved");
+    }
+
+    #[test]
+    fn disabling_a_pending_monitor_by_mouse_clears_the_move() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1));
+
+        // The pending row is selected already, so clicking its checkbox in the
+        // list disables it. The first enabled icon is monitor A's row, and the
+        // pending monitor B is the table row directly below it.
+        let buf = render(&a);
+        let (icon_col, first_row) = find_cell(&buf, ENABLED_ICON).expect("enabled icon");
+        down(&mut a, icon_col, first_row + 1);
+
+        assert!(!a.monitors[1].enabled, "the click disabled the monitor");
+        assert_eq!(a.moved_monitor, None);
+        assert!(a.move_origins.is_empty());
     }
 
     #[test]

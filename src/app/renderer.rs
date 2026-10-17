@@ -19,13 +19,18 @@ impl Widget for &App {
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
 
+        // Every monitor with an unapplied move gets an Apply button; sort for a
+        // deterministic draw order (the map does not care about the set order).
+        let mut pending: Vec<usize> = self.move_origins.keys().copied().collect();
+        pending.sort_unstable();
+
         let canvas = Map {
             selected: self.selected_monitor,
             monitors: &self.monitors,
             is_previewing,
             guides: self.drag.as_ref().map(|drag| drag.guides),
             canvas: self.drag.as_ref().map(|drag| drag.canvas),
-            moved: self.moved_monitor,
+            pending: &pending,
         };
         monitor_list.is_previewing = is_previewing;
         monitor_list.moved_pending = self.moved_monitor.is_some();

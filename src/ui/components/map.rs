@@ -35,8 +35,8 @@ pub struct Map<'a> {
     // Frozen canvas bounds to use instead of recomputing from the (moving)
     // monitor list, so a drag stays linear in world space.
     pub canvas: Option<MonitorCanvas>,
-    // Monitor with an unapplied move; shows the clickable Apply button.
-    pub moved: Option<usize>,
+    // Monitors with an unapplied move; each shows a clickable Apply button.
+    pub pending: &'a [usize],
 }
 
 impl<'a> Widget for Map<'a> {
@@ -106,18 +106,19 @@ impl<'a> Widget for Map<'a> {
             })
             .render(area, buf);
 
-        // A monitor with an unapplied move shows a clickable Apply button in
-        // its centre.
-        if let Some(index) = self.moved
-            && let Some(monitor) = self.monitors.get(index)
-            && monitor.enabled
-            && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
-        {
-            Clear.render(rect, buf);
-            Paragraph::new(Line::from("Apply").green().bold())
-                .alignment(Alignment::Center)
-                .block(Block::bordered().border_style(Style::default().fg(Color::Green)))
-                .render(rect, buf);
+        // Every monitor with an unapplied move shows a clickable Apply button in
+        // its centre; applying or cancelling resolves all of them at once.
+        for &index in self.pending {
+            if let Some(monitor) = self.monitors.get(index)
+                && monitor.enabled
+                && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
+            {
+                Clear.render(rect, buf);
+                Paragraph::new(Line::from("Apply").green().bold())
+                    .alignment(Alignment::Center)
+                    .block(Block::bordered().border_style(Style::default().fg(Color::Green)))
+                    .render(rect, buf);
+            }
         }
     }
 }
@@ -363,7 +364,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
 
@@ -449,7 +450,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -474,7 +475,7 @@ mod tests {
             is_previewing: true,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -491,7 +492,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -512,7 +513,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -526,7 +527,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -711,7 +712,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -732,7 +733,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -757,7 +758,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -787,7 +788,7 @@ mod tests {
                 is_previewing: false,
                 guides: None,
                 canvas: None,
-                moved: None,
+                pending: &[],
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -929,7 +930,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: Some(0),
+            pending: &[0],
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -969,7 +970,7 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         plain.render(buf.area, &mut buf);
         assert!(!text_of(&buf).contains("Apply"), "no button without a move");
@@ -981,10 +982,40 @@ mod tests {
             is_previewing: false,
             guides: None,
             canvas: None,
-            moved: Some(0),
+            pending: &[0],
         };
         moved.render(buf.area, &mut buf);
         assert!(text_of(&buf).contains("Apply"), "the button is drawn");
+    }
+
+    #[test]
+    fn every_pending_monitor_gets_an_apply_button_and_disabled_ones_do_not() {
+        let mut a = monitor("A", 0, 0);
+        a.enabled = true;
+        let mut b = monitor("B", 2000, 0);
+        b.enabled = true;
+        let mut c = monitor("C", 4000, 0);
+        c.enabled = false; // disabled, so its pending move has no button
+        let monitors = vec![a, b, c];
+        let area = Rect::new(0, 0, 120, 30);
+
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[0, 1, 2],
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        assert_eq!(
+            text_of(&buf).matches("Apply").count(),
+            2,
+            "one button per *enabled* pending monitor: {}",
+            text_of(&buf)
+        );
     }
 
     #[test]
@@ -997,7 +1028,7 @@ mod tests {
                 is_previewing: false,
                 guides: None,
                 canvas: None,
-                moved: Some(0),
+                pending: &[0],
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -1021,7 +1052,7 @@ mod tests {
                 y: Some(0.0),
             }),
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1050,7 +1081,7 @@ mod tests {
                 y: None,
             }),
             canvas: None,
-            moved: None,
+            pending: &[],
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);

@@ -200,6 +200,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
 
 fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64), canvas: MonitorCanvas) {
     app.selected_monitor = index;
+    let was_pending = app.moved_monitor == Some(index);
     if let Some(position) = app.monitors[index].position.clone() {
         app.drag = Some(crate::app::state::DragState {
             monitor: index,
@@ -207,6 +208,7 @@ fn select_and_start_drag(app: &mut App, index: usize, world: (f64, f64), canvas:
             origin: (position.x, position.y),
             guides: Default::default(),
             canvas,
+            was_pending,
         });
     }
 }

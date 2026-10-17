@@ -60,6 +60,8 @@ pub struct DragState {
     // drag keeps the cursor-to-world mapping linear instead of feeding the
     // moving monitor back into its own coordinate space.
     pub canvas: crate::monitor::MonitorCanvas,
+    // Whether the dragged monitor already had a pending move before this drag.
+    pub was_pending: bool,
 }
 
 // Popup message displayed to the user.
@@ -530,6 +532,13 @@ impl App {
             return;
         }
 
+        // Escape cancels an in-progress mouse drag: the monitor snaps back to
+        // where the drag started and is no longer pending.
+        if self.drag.is_some() && key_event.code == KeyCode::Esc {
+            self.cancel_drag();
+            return;
+        }
+
         match key_event.code {
             // `q` only quits in View mode; inside a sub-mode it cancels back
             // to View (handled by the mode dispatchers below).
@@ -687,6 +696,22 @@ impl App {
     }
 
     // Commit the pending monitor move: persist the layout and drop the marker.
+    // Aborts an in-progress drag: the monitor returns to where the drag began
+    // and only stays pending if it already was before the drag.
+    fn cancel_drag(&mut self) {
+        if let Some(drag) = self.drag.take() {
+            if let Some(monitor) = self.monitors.get_mut(drag.monitor)
+                && let Some(position) = monitor.position.as_mut()
+            {
+                position.x = drag.origin.0;
+                position.y = drag.origin.1;
+            }
+            if !drag.was_pending {
+                self.moved_monitor = None;
+            }
+        }
+    }
+
     pub(crate) fn apply_move(&mut self) {
         if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
@@ -886,6 +911,7 @@ mod tests {
     use super::*;
     use crate::monitor::Position;
     use crate::test_utils::tests::TempDir;
+    use crossterm::event::KeyModifiers;
 
     fn monitor() -> Monitor {
         Monitor {
@@ -911,6 +937,58 @@ mod tests {
         assert!(
             dir.path().join("monitor_state.json").exists(),
             "App::exit must persist through the injected state path"
+        );
+    }
+
+    // Builds an app mid-drag with the given origin and whether a move was
+    // already pending before the drag began.
+    fn app_mid_drag(current: (i32, i32), origin: (i32, i32), was_pending: bool) -> App {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.monitors[0].position = Some(Position {
+            x: current.0,
+            y: current.1,
+        });
+        let canvas =
+            Monitor::get_monitors_canvas(&app.monitors, &ratatui::layout::Rect::new(0, 0, 100, 30));
+        app.drag = Some(DragState {
+            monitor: 0,
+            grab: (0.0, 0.0),
+            origin,
+            guides: Default::default(),
+            canvas,
+            was_pending,
+        });
+        app.moved_monitor = Some(0);
+        app
+    }
+
+    #[test]
+    fn escape_cancels_an_in_progress_drag() {
+        let mut app = app_mid_drag((250, 140), (100, 100), false);
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.drag.is_none(), "the drag is cleared");
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 100, y: 100 }),
+            "the monitor snaps back to where the drag began"
+        );
+        assert_eq!(app.moved_monitor, None, "the cancelled move is not pending");
+    }
+
+    #[test]
+    fn escape_keeps_a_move_that_was_already_pending() {
+        let mut app = app_mid_drag((300, 0), (200, 0), true);
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 200, y: 0 }));
+        assert_eq!(
+            app.moved_monitor,
+            Some(0),
+            "the earlier pending move survives"
         );
     }
 }

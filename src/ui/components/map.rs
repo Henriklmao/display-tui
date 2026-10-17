@@ -21,6 +21,10 @@ use ratatui::{
     },
 };
 
+// Size of the clickable Apply button (a bordered box) in the monitor centre.
+const APPLY_BUTTON_WIDTH: u16 = 11;
+const APPLY_BUTTON_HEIGHT: u16 = 3;
+
 #[derive(Debug)]
 pub struct Map<'a> {
     pub selected: usize,
@@ -110,8 +114,9 @@ impl<'a> Widget for Map<'a> {
             && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
         {
             Clear.render(rect, buf);
-            Paragraph::new(Line::from(" Apply ").green().bold())
+            Paragraph::new(Line::from("Apply").green().bold())
                 .alignment(Alignment::Center)
+                .block(Block::bordered().border_style(Style::default().fg(Color::Green)))
                 .render(rect, buf);
         }
     }
@@ -226,7 +231,8 @@ impl<'a> Map<'a> {
         let [left, right] = canvas.x_bounds;
         let [bottom, top] = canvas.y_bounds;
 
-        let width = 9u16.min(inner.width);
+        let width = APPLY_BUTTON_WIDTH.min(inner.width);
+        let height = APPLY_BUTTON_HEIGHT.min(inner.height);
         let center_x =
             inner.x as f64 + ((x + w / 2.0) - left) / (right - left) * inner.width as f64;
         let center_y =
@@ -236,10 +242,11 @@ impl<'a> Map<'a> {
         let bx = (center_x - width as f64 / 2.0)
             .round()
             .clamp(inner.x as f64, max_x) as u16;
-        let by = center_y
+        let max_y = (inner.bottom() as f64 - height as f64).max(inner.y as f64);
+        let by = (center_y - height as f64 / 2.0)
             .round()
-            .clamp(inner.y as f64, inner.bottom().saturating_sub(1) as f64) as u16;
-        Some(Rect::new(bx, by, width, 1))
+            .clamp(inner.y as f64, max_y) as u16;
+        Some(Rect::new(bx, by, width, height))
     }
 
     // Returns the index of the topmost enabled monitor containing `world`.
@@ -904,9 +911,40 @@ mod tests {
         let rect = Map::apply_button_rect(area, &canvas, &monitors[0]).expect("button rect");
         let inner = Block::bordered().inner(area);
 
-        assert!(rect.width >= 1 && rect.height == 1);
+        assert_eq!((rect.width, rect.height), (11, 3), "bordered button size");
         assert!(rect.x >= inner.x && rect.right() <= inner.right());
         assert!(rect.y >= inner.y && rect.bottom() <= inner.bottom());
+    }
+
+    #[test]
+    fn the_apply_button_is_drawn_with_a_green_border() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let canvas = Monitor::get_monitors_canvas(&monitors, &area);
+        let rect = Map::apply_button_rect(area, &canvas, &monitors[0]).expect("rect");
+
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            moved: Some(0),
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        // The box corners carry the green border style.
+        assert_eq!(
+            buf[(rect.x, rect.y)].style().fg,
+            Some(Color::Green),
+            "the button must be framed"
+        );
+        assert_ne!(
+            buf[(rect.x, rect.y)].symbol(),
+            " ",
+            "the border cell must be drawn"
+        );
     }
 
     #[test]

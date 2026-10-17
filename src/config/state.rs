@@ -227,7 +227,7 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
     apply_preset_in(&get_presets_dir(), name, monitors)
 }
 
-fn apply_preset_in(
+pub(crate) fn apply_preset_in(
     dir: &Path,
     name: &str,
     monitors: &mut [Monitor],

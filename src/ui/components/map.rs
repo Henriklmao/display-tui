@@ -34,7 +34,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Map<'a>{
     pub selected: usize,
-    pub monitors:&'a Vec<Monitor>,
+    pub monitors:&'a [Monitor],
     pub is_previewing: bool,
     // Alignment guides to overlay while a drag is snapped.
     pub guides: Option<SnapGuides>,
@@ -100,11 +100,15 @@ impl<'a> Widget for Map<'a>{
                         });
                     }
                     if let Some(gy) = guides.y {
+                        // The map draws in pre-flipped canvas coordinates
+                        // (see render_enabled_monitor), so world y values must
+                        // be mirrored the same way.
+                        let canvas_y = bottom + top - gy;
                         ctx.draw(&CanvasLine {
                             x1: left,
-                            y1: gy,
+                            y1: canvas_y,
                             x2: right,
-                            y2: gy,
+                            y2: canvas_y,
                             color: Color::Magenta,
                         });
                     }
@@ -116,6 +120,7 @@ impl<'a> Widget for Map<'a>{
         // its centre.
         if let Some(index) = self.moved
             && let Some(monitor) = self.monitors.get(index)
+            && monitor.enabled
             && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
         {
             Clear.render(rect, buf);
@@ -183,11 +188,14 @@ impl<'a> Map<'a> {
         let [left, right] = canvas.x_bounds;
         let [bottom, top] = canvas.y_bounds;
 
-        let fx = col.saturating_sub(inner.x) as f64 / inner.width as f64;
-        let fy = row.saturating_sub(inner.y) as f64 / inner.height as f64;
+        // Signed so points beyond the left/top edge extrapolate as well.
+        let fx = (col as i32 - inner.x as i32) as f64 / inner.width as f64;
+        let fy = (row as i32 - inner.y as i32) as f64 / inner.height as f64;
 
         // Screen rows grow downwards and so does the world y axis, so the top
         // row maps to the smallest bound (no flip); the flip lives in drawing.
+        // Points outside the canvas return coordinates outside the bounds,
+        // which keeps dragging beyond every edge working.
         Some((left + fx * (right - left), bottom + fy * (top - bottom)))
     }
 
@@ -819,6 +827,21 @@ mod tests {
     }
 
     #[test]
+    fn world_at_extrapolates_beyond_every_edge() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let inner = Block::bordered().inner(area);
+
+        let (cx, cy) = Map::world_at(area, &monitors, inner.x, inner.y).unwrap();
+        // Left of / above the inner area: without signed math these would be
+        // clamped to the bound instead of extrapolating.
+        let (lx, ly) = Map::world_at(area, &monitors, 0, 0).unwrap();
+
+        assert!(lx < cx, "left of the canvas must extrapolate: {lx} < {cx}");
+        assert!(ly < cy, "above the canvas must extrapolate: {ly} < {cy}");
+    }
+
+    #[test]
     fn monitor_at_finds_the_monitor_under_a_world_point() {
         let monitors = vec![monitor("A", 0, 0), monitor("B", 1920, 0)];
 
@@ -942,5 +965,64 @@ mod tests {
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
         }
+    }
+
+    // --- alignment guides -----------------------------------------------
+
+    #[test]
+    fn a_horizontal_guide_renders_on_the_same_side_as_the_world_coordinate() {
+        // A guide at world y = 0 marks the top edge of a monitor at the origin,
+        // so it must render near the top of the canvas, not the bottom.
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: Some(SnapGuides {
+                x: None,
+                y: Some(0.0),
+            }),
+            canvas: None,
+            moved: None,
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        let row = (area.top()..area.bottom())
+            .find(|&y| {
+                (area.left()..area.right()).any(|x| buf[(x, y)].style().fg == Some(Color::Magenta))
+            })
+            .expect("the guide is drawn");
+        assert!(
+            row < area.height / 2,
+            "guide drawn on the wrong side: row {row}"
+        );
+    }
+
+    #[test]
+    fn a_vertical_guide_renders_near_the_world_x() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let map = Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: Some(SnapGuides {
+                x: Some(0.0),
+                y: None,
+            }),
+            canvas: None,
+            moved: None,
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        let col = (area.left()..area.right())
+            .find(|&x| {
+                (area.top()..area.bottom()).any(|y| buf[(x, y)].style().fg == Some(Color::Magenta))
+            })
+            .expect("the guide is drawn");
+        assert!(col < area.width / 2, "vertical guide on the wrong side: col {col}");
     }
 }

@@ -38,7 +38,9 @@ pub struct App {
     pub moved_monitor: Option<usize>,
     // Last left-click cell and time, for double-click detection.
     pub last_click: Option<(u16, u16, std::time::Instant)>,
-    // Overrides where the monitor state is persisted: mode changes, exit and
+    // Overrides where presets are read/written: production uses the real
+    // config directory; tests point it at a temp dir.
+    pub presets_dir: Option<std::path::PathBuf>,    // Overrides where the monitor state is persisted: mode changes, exit and
     // preset apply all honour it. None (production) uses the real config path;
     // tests point it at a temp dir so those paths can be exercised.
     pub state_path: Option<std::path::PathBuf>,
@@ -83,6 +85,13 @@ impl App {
         self.state_path
             .clone()
             .unwrap_or_else(crate::config::get_state_path)
+    }
+
+    // Resolves the presets directory, honouring the injectable override.
+    pub(crate) fn presets_dir(&self) -> std::path::PathBuf {
+        self.presets_dir
+            .clone()
+            .unwrap_or_else(crate::config::get_presets_dir)
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -671,7 +680,7 @@ impl App {
     // Apply a preset as a live preview only; no save_state_as_last (that is
     // only done on the final apply).
     pub(crate) fn preview_preset(&mut self, name: &str) {
-        let _ = crate::config::apply_preset(name, &mut self.monitors);
+        let _ = crate::config::apply_preset_in(&self.presets_dir(), name, &mut self.monitors);
     }
 
     // Commit the pending monitor move: persist the layout and drop the marker.
@@ -687,10 +696,15 @@ impl App {
     // Enter this keeps the change in the working state (persisted) without
     // rewriting the Hyprland config; `w` (or Enter in the menu) writes it.
     pub(crate) fn apply_preset_click(&mut self, name: &str) {
-        let _ = crate::config::apply_preset(name, &mut self.monitors);
+        if crate::config::apply_preset_in(&self.presets_dir(), name, &mut self.monitors).is_err() {
+            // The preset is missing or invalid: leave the menu and layout alone.
+            return;
+        }
         self.active_preset = Some(name.to_string());
         self.preset_backup = None;
         self.show_preset_menu = None;
+        // The preset redefined the layout, so any pending move is stale.
+        self.moved_monitor = None;
         if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
         }

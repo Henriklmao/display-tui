@@ -39,10 +39,10 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         app.drag = None;
     }
 
-    let double_click = is_left_click(event.kind) && register_click(app, point(event), now);
-
     if app.show_help {
         if is_left_click(event.kind) {
+            // A modal-consumed click must not seed a later double-click.
+            app.last_click = None;
             app.show_help = false;
         }
         return;
@@ -50,19 +50,23 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
 
     if app.show_popup.is_some() {
         if is_left_click(event.kind) {
-            accept_popup(app);
+            // A click is the least deliberate gesture, so it only dismisses.
+            // Accepting (which writes the Hyprland config) stays on Enter/f.
+            app.last_click = None;
+            app.show_popup = None;
         }
         return;
     }
 
     if app.show_preset_menu.is_some() {
-        handle_preset(app, layout.area, event, double_click);
+        // The preset menu registers its own clicks (it supports double-click).
+        handle_preset(app, layout.area, event, now);
         return;
     }
 
     match event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_down(app, layout, point(event), double_click)
+            handle_left_down(app, layout, point(event), now)
         }
         MouseEventKind::Drag(MouseButton::Left) => handle_left_drag(app, layout, point(event)),
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
@@ -103,19 +107,20 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
     point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
 }
 
-// A click on a popup behaves like pressing Enter.
-fn accept_popup(app: &mut App) {
-    let is_error = app.show_popup.as_ref().is_some_and(|popup| popup.is_error);
-    if !is_error {
-        app.write();
-    }
-    app.show_popup = None;
+// Keeps the selected monitor index in range before indexing (defensive; the
+// navigation paths already stay within bounds).
+fn clamp_selection(app: &mut App) {
+    app.selected_monitor = app
+        .selected_monitor
+        .min(app.monitors.len().saturating_sub(1));
 }
 
-fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), double_click: bool) {
+fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now: Instant) {
     if app.monitors.is_empty() {
         return;
     }
+    clamp_selection(app);
+    let double_click = register_click(app, point, now);
 
     // The map selects a monitor and starts a drag in every mode.
     if inside(layout.canvas, point) {
@@ -130,6 +135,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), doub
         // The Apply button of a moved monitor takes precedence over dragging.
         if let Some(index) = app.moved_monitor
             && let Some(monitor) = app.monitors.get(index)
+            && monitor.enabled
             && let Some(rect) = Map::apply_button_rect(layout.canvas, &bounds, monitor)
             && inside(rect, point)
         {
@@ -176,12 +182,19 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), doub
         && let Some(row) =
             MonitorList::row_at(layout.list, &app.monitors, app.selected_monitor, point.1)
     {
+        // `row` is resolved against the current render's scroll window, so a
+        // click (and the toggle) always acts on the monitor actually drawn
+        // under the cursor.
         let already_selected = app.selected_monitor == row;
         app.selected_monitor = row;
         // The checkbox toggles only once the row is already selected, so the
         // first click selects and the next one enables/disables.
         if already_selected && point.0 < MonitorList::icon_column_end(layout.list) {
             toggle_monitor(app, row);
+            // Disabling the pending monitor drops its Apply button.
+            if !app.monitors[row].enabled && app.moved_monitor == Some(row) {
+                app.moved_monitor = None;
+            }
         }
     }
 }
@@ -236,6 +249,7 @@ fn handle_scroll(app: &mut App, layout: ScreenLayout, point: (u16, u16), delta: 
     if app.monitors.is_empty() {
         return;
     }
+    clamp_selection(app);
 
     if layout.side_table.is_some_and(|side| inside(side, point)) {
         match app.mode {
@@ -274,18 +288,20 @@ fn toggle_monitor(app: &mut App, index: usize) {
     }
 }
 
-fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, double_click: bool) {
+fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, now: Instant) {
     match event.kind {
         MouseEventKind::ScrollUp => preview_scrolled(app, -1),
         MouseEventKind::ScrollDown => preview_scrolled(app, 1),
         MouseEventKind::Down(MouseButton::Left) => {
             let point = point(event);
             if !inside(PresetMenu::rect(area), point) {
-                // Clicking outside cancels without applying.
+                // Clicking outside cancels; do not let it seed a double-click.
+                app.last_click = None;
                 app.restore_preset_backup();
                 app.show_preset_menu = None;
                 return;
             }
+            let double_click = register_click(app, point, now);
             let index = app
                 .show_preset_menu
                 .as_ref()
@@ -459,6 +475,32 @@ mod tests {
         down(&mut a, 10, row);
         assert!(!a.show_help, "the click closes help");
         assert_eq!(a.selected_monitor, 0, "the click must not fall through");
+    }
+
+    #[test]
+    fn a_click_on_a_non_error_popup_dismisses_without_writing() {
+        let dir = TempDir::new("mouse-popup-dismiss");
+        let mut a = app(TUIMode::View, test_monitors());
+        // Point the write targets at temp paths so a regression cannot touch
+        // the real Hyprland config.
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.config.monitors_config_path =
+            Some(dir.path().join("monitors.conf").to_string_lossy().into_owned());
+        a.show_popup = Some(Popup {
+            title: " Preset Mismatch ".to_string(),
+            lines: vec!["missing".to_string()],
+            is_error: false,
+            apply_preset: None,
+            is_forceable: true,
+        });
+
+        down(&mut a, 60, 20);
+
+        assert!(a.show_popup.is_none(), "the click dismisses the popup");
+        assert!(
+            !dir.path().join("monitors.conf").exists(),
+            "a mouse click must not write the Hyprland config"
+        );
     }
 
     #[test]
@@ -1053,6 +1095,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn clicking_the_apply_button_does_not_start_a_drag() {
+        let dir = TempDir::new("mouse-button-nodrag");
+        let mut a = app(TUIMode::View, vec![monitor("A", 0, 0, true)]);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.moved_monitor = Some(0);
+
+        let canvas = a.layout.unwrap().canvas;
+        let bounds = Monitor::get_monitors_canvas(&a.monitors, &canvas);
+        let rect = Map::apply_button_rect(canvas, &bounds, &a.monitors[0]).unwrap();
+        down(&mut a, rect.x, rect.y);
+
+        assert!(a.drag.is_none(), "the button click must not start a drag");
+        assert_eq!(a.moved_monitor, None, "and it applies the move");
+    }
+
+    #[test]
+    fn clicking_the_body_of_a_pending_monitor_starts_a_drag() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        // Move B so it is pending, then press its body away from the button.
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1));
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        assert!(a.drag.is_some(), "pressing the monitor body drags it");
+    }
+
     // --- double click applies -------------------------------------------
 
     #[test]
@@ -1123,25 +1198,130 @@ mod tests {
     #[test]
     fn double_clicking_a_preset_row_applies_it() {
         let dir = TempDir::new("mouse-preset-apply");
+        // A real preset in an injected presets directory.
+        let presets = dir.path().join("presets");
+        std::fs::create_dir_all(&presets).unwrap();
+        let state = vec![crate::config::MonitorState {
+            name: "Monitor 1".to_string(),
+            enabled: true,
+            position: Some(Position { x: 111, y: 0 }),
+            scale: Some(1.0),
+            workspace: None,
+            rotation: None,
+            resolution: None,
+        }];
+        std::fs::write(
+            presets.join("desk.json"),
+            serde_json::to_string(&state).unwrap(),
+        )
+        .unwrap();
+
         let mut a = app(TUIMode::View, test_monitors());
         a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.presets_dir = Some(presets);
         a.preset_backup = Some(vec![]);
-        a.show_preset_menu = Some(PresetMenu::new(
-            vec!["missing-a".to_string(), "missing-b".to_string()],
-            &[],
-            None,
-        ));
+        a.show_preset_menu = Some(PresetMenu::new(vec!["desk".to_string()], &[], None));
         let area = area();
         let top = PresetMenu::rect(area).y + 2;
         let t0 = Instant::now();
 
-        down_at(&mut a, 40, top + 1, t0);
+        down_at(&mut a, 40, top, t0);
         assert!(a.show_preset_menu.is_some(), "a single click keeps the menu open");
 
-        down_at(&mut a, 40, top + 1, t0 + Duration::from_millis(120));
+        down_at(&mut a, 40, top, t0 + Duration::from_millis(120));
         assert!(a.show_preset_menu.is_none(), "the double-click applies and closes");
-        assert_eq!(a.active_preset.as_deref(), Some("missing-b"));
+        assert_eq!(a.active_preset.as_deref(), Some("desk"));
+        assert_eq!(
+            a.monitors[0].position,
+            Some(Position { x: 111, y: 0 }),
+            "the preset was applied"
+        );
         assert!(dir.path().join("monitor_state.json").exists());
+    }
+
+    #[test]
+    fn double_clicking_a_missing_preset_keeps_the_menu_open() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.presets_dir = Some(std::path::PathBuf::from("/nonexistent-display-tui-presets"));
+        a.preset_backup = Some(vec![]);
+        a.show_preset_menu = Some(PresetMenu::new(vec!["ghost".to_string()], &[], None));
+        let area = area();
+        let top = PresetMenu::rect(area).y + 2;
+        let t0 = Instant::now();
+
+        down_at(&mut a, 40, top, t0);
+        down_at(&mut a, 40, top, t0 + Duration::from_millis(120));
+
+        assert!(a.show_preset_menu.is_some(), "a failed apply keeps the menu open");
+        assert!(a.active_preset.is_none(), "and marks nothing active");
+    }
+
+    #[test]
+    fn dismissing_a_modal_does_not_seed_a_double_click() {
+        let mut a = app(TUIMode::Resolution, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "1280x720").expect("second mode row");
+
+        // A click used to dismiss the help overlay must not pair with the next.
+        a.show_help = true;
+        let t0 = Instant::now();
+        down_at(&mut a, col, row, t0);
+        assert!(!a.show_help, "the click closes help");
+        assert!(a.monitors[0].modes[0].current, "and applies nothing");
+
+        down_at(&mut a, col, row, t0 + Duration::from_millis(50));
+        assert_eq!(a.selected_resolution, 1, "the next click only selects");
+        assert!(a.monitors[0].modes[0].current, "no bleed-through apply");
+    }
+
+    #[test]
+    fn applying_a_move_persists_state_but_not_the_hyprland_config() {
+        let dir = TempDir::new("mouse-apply-nowrite");
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.config.monitors_config_path =
+            Some(dir.path().join("monitors.conf").to_string_lossy().into_owned());
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+
+        let canvas = a.layout.unwrap().canvas;
+        let bounds = Monitor::get_monitors_canvas(&a.monitors, &canvas);
+        let rect = Map::apply_button_rect(canvas, &bounds, &a.monitors[1]).unwrap();
+        down(&mut a, rect.x, rect.y);
+
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "apply persists the state file"
+        );
+        assert!(
+            !dir.path().join("monitors.conf").exists(),
+            "apply must not write the Hyprland config"
+        );
+    }
+
+    #[test]
+    fn disabling_a_pending_monitor_by_keyboard_clears_the_move() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert_eq!(a.moved_monitor, Some(1));
+
+        a.selected_monitor = 1;
+        MonitorList::handle_events(&mut a, KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+
+        assert!(!a.monitors[1].enabled);
+        assert_eq!(
+            a.moved_monitor, None,
+            "a disabled monitor has no pending apply"
+        );
     }
 
     #[test]

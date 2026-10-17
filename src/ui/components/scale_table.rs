@@ -319,6 +319,20 @@ mod tests {
     }
 
     #[test]
+    fn q_and_upper_case_q_cancel_instead_of_quitting() {
+        for key in [KeyCode::Char('q'), KeyCode::Char('Q')] {
+            let mut a = app();
+            a.selected_scale = 8;
+
+            press(&mut a, key);
+
+            assert_eq!(a.mode, TUIMode::View, "{key:?} must cancel to View");
+            assert!(!a.exit, "{key:?} must not quit the app");
+            assert_eq!(a.monitors[0].scale, None, "{key:?} applies nothing");
+        }
+    }
+
+    #[test]
     fn enter_in_scale_mode_applies_and_persists_the_new_scale() {
         let (mut a, dir) = app_in_scale();
         a.selected_scale = 8; // 200%
@@ -361,5 +375,17 @@ mod tests {
             assert_eq!(a.monitors[0].scale, None, "{:?} must not apply", code);
             assert_eq!(a.mode, TUIMode::Resolution, "{:?} must not leave", code);
         }
+    }
+
+    // --- mouse hit testing ----------------------------------------------
+
+    #[test]
+    fn row_at_maps_the_rendered_rows() {
+        let area = Rect::new(0, 0, 20, 28);
+        // No header: the first inner line (y = 1) is the first entry.
+        assert_eq!(Scale::row_at(area, 0, 1), Some(0));
+        assert_eq!(Scale::row_at(area, 0, 2), Some(1));
+        assert_eq!(Scale::row_at(area, 0, 0), None, "border");
+        assert_eq!(Scale::row_at(area, 0, 28), None, "past the block");
     }
 }

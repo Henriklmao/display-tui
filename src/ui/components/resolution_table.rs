@@ -340,6 +340,20 @@ mod tests {
     }
 
     #[test]
+    fn q_and_upper_case_q_cancel_instead_of_quitting() {
+        for key in [KeyCode::Char('q'), KeyCode::Char('Q')] {
+            let mut a = app(3);
+            a.selected_resolution = 2;
+
+            press(&mut a, key);
+
+            assert_eq!(a.mode, TUIMode::View, "{key:?} must cancel to View");
+            assert!(!a.exit, "{key:?} must not quit the app");
+            assert_eq!(current_index(&a.monitors[0]), 0, "{key:?} applies nothing");
+        }
+    }
+
+    #[test]
     fn unrelated_keys_are_ignored() {
         let mut a = app(3);
         a.selected_resolution = 1;
@@ -360,5 +374,26 @@ mod tests {
 
         press(&mut a, KeyCode::Char('k'));
         assert_eq!(a.selected_resolution, 0);
+    }
+
+    // --- mouse hit testing ----------------------------------------------
+
+    #[test]
+    fn row_at_maps_the_rendered_rows() {
+        let area = Rect::new(0, 0, 30, 28);
+        // Border (1) + header and its margin (2) => first row at y = 3.
+        assert_eq!(Resolutions::row_at(area, 0, 5, 3), Some(0));
+        assert_eq!(Resolutions::row_at(area, 0, 5, 4), Some(1));
+        assert_eq!(Resolutions::row_at(area, 0, 5, 2), None, "header");
+        assert_eq!(Resolutions::row_at(area, 0, 5, 28), None, "past the block");
+    }
+
+    #[test]
+    fn row_at_honours_the_scroll_window() {
+        // A two-row window for ten modes scrolls once the selection passes
+        // the bottom.
+        let area = Rect::new(0, 0, 30, 6); // inner height 4 => two rows
+        assert_eq!(Resolutions::row_at(area, 9, 10, 3), Some(8));
+        assert_eq!(Resolutions::row_at(area, 9, 10, 4), Some(9));
     }
 }

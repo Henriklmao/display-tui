@@ -658,4 +658,66 @@ mod tests {
             }
         }
     }
+
+    // --- mouse hit testing ----------------------------------------------
+
+    #[test]
+    fn row_at_maps_the_rendered_rows() {
+        let monitors = test_monitors(); // two monitors, no duplicate workspace
+        let area = Rect::new(0, 0, 120, 12);
+        // Block border (1) + header and its margin (2) => first row at y = 3.
+        assert_eq!(MonitorList::row_at(area, &monitors, 0, 3), Some(0));
+        assert_eq!(MonitorList::row_at(area, &monitors, 0, 4), Some(1));
+    }
+
+    #[test]
+    fn row_at_rejects_the_border_header_and_empty_space() {
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 120, 12);
+
+        assert_eq!(MonitorList::row_at(area, &monitors, 0, 0), None, "border");
+        assert_eq!(MonitorList::row_at(area, &monitors, 0, 2), None, "header");
+        assert_eq!(
+            MonitorList::row_at(area, &monitors, 0, 6),
+            None,
+            "past the last monitor"
+        );
+    }
+
+    #[test]
+    fn row_at_honours_the_scroll_window() {
+        // 12 short rows in a small list force a scroll offset.
+        let monitors: Vec<Monitor> = (0..12)
+            .map(|i| Monitor {
+                name: format!("M{i}"),
+                enabled: true,
+                ..Default::default()
+            })
+            .collect();
+        let area = Rect::new(0, 0, 120, 12);
+
+        // Selecting the last row scrolls it to the bottom of the window; the
+        // top visible row then maps to a later index.
+        assert_eq!(MonitorList::row_at(area, &monitors, 11, 3), Some(5));
+        assert_eq!(MonitorList::row_at(area, &monitors, 11, 9), Some(11));
+    }
+
+    #[test]
+    fn the_checkbox_column_ends_before_the_name_column() {
+        let area = Rect::new(0, 0, 120, 12);
+        let end = MonitorList::icon_column_end(area);
+        // Block border (1) + highlight symbol (3) + 5% of 118 (5).
+        assert_eq!(end, 9);
+        assert!(4 < end, "the icon cell is inside the column");
+    }
+
+    #[test]
+    fn tiny_areas_do_not_break_row_at() {
+        let monitors = test_monitors();
+        for (width, height) in [(0u16, 0u16), (1, 1), (3, 2), (5, 4)] {
+            let area = Rect::new(0, 0, width, height);
+            assert_eq!(MonitorList::row_at(area, &monitors, 0, 0), None);
+            let _ = MonitorList::icon_column_end(area);
+        }
+    }
 }

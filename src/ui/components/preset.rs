@@ -978,4 +978,62 @@ mod tests {
         assert!(popup.x >= area.x && popup.y >= area.y);
         assert!(popup.width >= 1 && popup.height >= 1);
     }
+
+    // --- mouse hit testing ----------------------------------------------
+
+    #[test]
+    fn row_at_maps_the_list_entries() {
+        let m = two_presets();
+        let area = Rect::new(0, 0, 80, 30);
+        // Border line + leading blank line, then the entries.
+        let top = PresetMenu::rect(area).y + 2;
+
+        assert_eq!(m.row_at(area, top), Some(0));
+        assert_eq!(m.row_at(area, top + 1), Some(1));
+        assert_eq!(m.row_at(area, top - 1), None, "blank line");
+        assert_eq!(m.row_at(area, top + 2), None, "past the list");
+    }
+
+    #[test]
+    fn row_at_is_ignored_outside_the_list_state() {
+        let mut m = two_presets();
+        m.state = MenuState::CreateName("x".to_string());
+
+        assert_eq!(m.row_at(Rect::new(0, 0, 80, 30), 10), None);
+    }
+
+    #[test]
+    fn select_index_picks_a_preset_and_rejects_out_of_range() {
+        let mut m = two_presets();
+
+        assert_eq!(m.select_index(1), Some("gaming".to_string()));
+        assert_eq!(m.selected_index, 1);
+        assert_eq!(m.select_index(9), None);
+        assert_eq!(m.selected_index, 1, "selection must survive");
+    }
+
+    #[test]
+    fn scroll_clamps_without_wrapping() {
+        let mut m = two_presets();
+
+        // Already at the top: scrolling up stays put but still previews.
+        assert_eq!(m.scroll(-1), Some("desk".to_string()));
+        assert_eq!(m.selected_index, 0);
+        assert_eq!(m.scroll(1), Some("gaming".to_string()));
+        assert_eq!(m.scroll(1), Some("gaming".to_string()));
+        assert_eq!(m.selected_index, 1);
+    }
+
+    #[test]
+    fn select_and_scroll_do_nothing_while_typing() {
+        let mut m = creating("x");
+
+        assert_eq!(m.select_index(0), None);
+        assert_eq!(m.scroll(1), None);
+        assert_eq!(m.state, MenuState::CreateName("x".to_string()));
+
+        let mut empty = menu(vec![]);
+        assert_eq!(empty.scroll(1), None);
+        assert_eq!(empty.selected_index, 0);
+    }
 }

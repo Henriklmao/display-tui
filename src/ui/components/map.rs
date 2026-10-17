@@ -591,6 +591,22 @@ mod tests {
     }
 
     #[test]
+    fn q_leaves_move_mode_and_persists() {
+        let dir = TempDir::new("map-q");
+        let mut a = app(vec![monitor("A", 100, 100)], 0);
+        a.mode = TUIMode::Move;
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+
+        press(&mut a, KeyCode::Char('q'));
+
+        assert_eq!(a.mode, TUIMode::View, "q cancels back to View");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "leaving Move mode still persists the layout"
+        );
+    }
+
+    #[test]
     fn a_monitor_without_a_position_is_skipped_rather_than_panicking() {
         let mut unplaced = monitor("Ghost", 0, 0);
         unplaced.position = None;
@@ -677,5 +693,95 @@ mod tests {
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
         }
+    }
+
+    // --- world-space hit testing ----------------------------------------
+
+    #[test]
+    fn world_at_maps_the_canvas_corner_to_the_bounds() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let inner = Block::bordered().inner(area);
+        let canvas = Monitor::get_monitors_canvas(&monitors, &area);
+
+        let (x, y) = Map::world_at(area, &monitors, inner.x, inner.y).unwrap();
+
+        // Top-left inner cell is the (left, top) corner of the world.
+        assert_eq!(x, canvas.x_bounds[0]);
+        assert_eq!(y, canvas.y_bounds[1]);
+    }
+
+    #[test]
+    fn world_coordinates_grow_right_and_shrink_downwards() {
+        let monitors = vec![monitor("A", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+        let inner = Block::bordered().inner(area);
+
+        let (x0, y0) = Map::world_at(area, &monitors, inner.x, inner.y).unwrap();
+        let (x1, _) = Map::world_at(area, &monitors, inner.right() - 1, inner.y).unwrap();
+        let (_, y1) = Map::world_at(area, &monitors, inner.x, inner.bottom() - 1).unwrap();
+
+        assert!(x1 > x0, "moving right increases world x");
+        assert!(y1 < y0, "moving down decreases world y (canvas y is flipped)");
+    }
+
+    #[test]
+    fn world_at_rejects_a_degenerate_canvas() {
+        let monitors = vec![monitor("A", 0, 0)];
+        // A 1x1 area leaves no inner cells for the canvas.
+        assert_eq!(Map::world_at(Rect::new(0, 0, 1, 1), &monitors, 0, 0), None);
+    }
+
+    #[test]
+    fn monitor_at_finds_the_monitor_under_a_world_point() {
+        let monitors = vec![monitor("A", 0, 0), monitor("B", 1920, 0)];
+
+        assert_eq!(Map::monitor_at(&monitors, 0, (10.0, 10.0)), Some(0));
+        assert_eq!(Map::monitor_at(&monitors, 0, (1930.0, 10.0)), Some(1));
+    }
+
+    #[test]
+    fn monitor_at_returns_none_outside_every_monitor() {
+        let monitors = vec![monitor("A", 0, 0), monitor("B", 1920, 0)];
+
+        assert_eq!(Map::monitor_at(&monitors, 0, (5000.0, 10.0)), None);
+        assert_eq!(Map::monitor_at(&monitors, 0, (10.0, -5.0)), None);
+    }
+
+    #[test]
+    fn monitor_edges_are_half_open() {
+        // 1920x1080 at the origin: the right/bottom edge belongs to the next
+        // cell, not to the monitor.
+        let monitors = vec![monitor("A", 0, 0)];
+
+        assert_eq!(Map::monitor_at(&monitors, 0, (1919.9, 1079.9)), Some(0));
+        assert_eq!(Map::monitor_at(&monitors, 0, (1920.0, 500.0)), None);
+        assert_eq!(Map::monitor_at(&monitors, 0, (500.0, 1080.0)), None);
+    }
+
+    #[test]
+    fn monitor_at_prefers_the_selected_monitor_on_overlap() {
+        let monitors = vec![monitor("A", 0, 0), monitor("B", 0, 0)];
+
+        assert_eq!(Map::monitor_at(&monitors, 1, (10.0, 10.0)), Some(1));
+        assert_eq!(Map::monitor_at(&monitors, 0, (10.0, 10.0)), Some(0));
+    }
+
+    #[test]
+    fn monitor_at_ignores_disabled_monitors() {
+        let mut disabled = monitor("B", 1920, 0);
+        disabled.enabled = false;
+        let monitors = vec![monitor("A", 0, 0), disabled];
+
+        assert_eq!(Map::monitor_at(&monitors, 1, (1930.0, 10.0)), None);
+    }
+
+    #[test]
+    fn monitor_at_ignores_monitors_without_a_position() {
+        let mut unplaced = monitor("B", 0, 0);
+        unplaced.position = None;
+        let monitors = vec![unplaced];
+
+        assert_eq!(Map::monitor_at(&monitors, 0, (10.0, 10.0)), None);
     }
 }

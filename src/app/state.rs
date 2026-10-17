@@ -1054,7 +1054,6 @@ mod tests {
             app.move_origins.is_empty(),
             "the cancelled move is not pending"
         );
-        assert!(app.move_origins.is_empty(), "no move record is left behind");
     }
 
     #[test]
@@ -1088,7 +1087,6 @@ mod tests {
             "Escape puts the monitor back"
         );
         assert!(app.move_origins.is_empty(), "and drops the pending move");
-        assert!(app.move_origins.is_empty());
     }
 
     #[test]

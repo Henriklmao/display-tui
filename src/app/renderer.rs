@@ -33,7 +33,7 @@ impl Widget for &App {
             pending: &pending,
         };
         monitor_list.is_previewing = is_previewing;
-        monitor_list.moved_pending = self.moved_monitor.is_some();
+        monitor_list.moved_pending = self.has_pending_move();
 
         let layout = self
             .layout

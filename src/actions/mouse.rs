@@ -1061,13 +1061,13 @@ mod tests {
     fn dragging_marks_the_monitor_as_pending_apply() {
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
         let mut a = app(TUIMode::View, monitors);
-        assert_eq!(a.moved_monitor, None);
+        assert!(a.move_origins.is_empty());
 
         let (col, row) = cell_for_monitor(&a, 1);
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
 
-        assert_eq!(a.moved_monitor, Some(1));
+        assert!(a.move_origins.contains_key(&1));
         assert_eq!(
             a.move_origins.get(&1),
             Some(&(3000, 1000)),
@@ -1105,7 +1105,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1), "the move is pending");
+        assert!(a.move_origins.contains_key(&1), "the move is pending");
 
         a.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
@@ -1114,8 +1114,7 @@ mod tests {
             Some(Position { x: 3000, y: 1000 }),
             "Escape puts the released monitor back"
         );
-        assert_eq!(a.moved_monitor, None, "and clears the pending move");
-        assert!(a.move_origins.is_empty());
+        assert!(a.move_origins.is_empty(), "and clears the pending move");
     }
 
     #[test]
@@ -1126,7 +1125,7 @@ mod tests {
             "no button initially"
         );
 
-        a.moved_monitor = Some(0);
+        a.note_move(0, (0, 0));
         assert!(
             text_of(&render(&a)).contains("Apply"),
             "the button appears once a move is pending"
@@ -1144,7 +1143,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1), "the move is pending");
+        assert!(a.move_origins.contains_key(&1), "the move is pending");
 
         // The Apply button sits in the monitor's centre; click it.
         let canvas = a.layout.unwrap().canvas;
@@ -1153,8 +1152,7 @@ mod tests {
             Map::apply_button_rect(canvas, &bounds, &a.monitors[1]).expect("apply button rect");
         down(&mut a, rect.x, rect.y);
 
-        assert_eq!(a.moved_monitor, None, "apply clears the pending move");
-        assert!(a.move_origins.is_empty(), "and drops the move record");
+        assert!(a.move_origins.is_empty(), "apply clears the pending move");
         assert!(
             dir.path().join("monitor_state.json").exists(),
             "apply persists the layout"
@@ -1175,11 +1173,11 @@ mod tests {
             down(&mut a, col, row);
             drag(&mut a, col + 6, row);
             up(&mut a, col, row);
-            assert_eq!(a.moved_monitor, Some(1));
+            assert!(a.move_origins.contains_key(&1));
 
             a.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
 
-            assert_eq!(a.moved_monitor, None, "{key:?} applies the move");
+            assert!(!a.has_pending_move(), "{key:?} applies the move");
             assert!(
                 dir.path().join("monitor_state.json").exists(),
                 "{key:?} persists the layout"
@@ -1200,7 +1198,7 @@ mod tests {
         down(&mut a, rect.x, rect.y);
 
         assert!(a.drag.is_none(), "the button click must not start a drag");
-        assert_eq!(a.moved_monitor, None, "and it applies the move");
+        assert!(a.move_origins.is_empty(), "and it applies the move");
     }
 
     #[test]
@@ -1213,7 +1211,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1));
+        assert!(a.move_origins.contains_key(&1));
 
         let (col, row) = cell_for_monitor(&a, 1);
         down(&mut a, col, row);
@@ -1434,7 +1432,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1));
+        assert!(a.move_origins.contains_key(&1));
 
         a.selected_monitor = 1;
         MonitorList::handle_events(
@@ -1443,13 +1441,9 @@ mod tests {
         );
 
         assert!(!a.monitors[1].enabled);
-        assert_eq!(
-            a.moved_monitor, None,
-            "a disabled monitor has no pending apply"
-        );
         assert!(
             a.move_origins.is_empty(),
-            "disabling drops the recorded move as well"
+            "a disabled monitor drops its recorded move"
         );
     }
 
@@ -1462,7 +1456,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1));
+        assert!(a.move_origins.contains_key(&1));
 
         a.selected_monitor = 1;
         for key in [KeyCode::Char('d'), KeyCode::Char('m'), KeyCode::Char('o')] {
@@ -1474,7 +1468,10 @@ mod tests {
             "d must not disable a pending monitor"
         );
         assert_eq!(a.mode, TUIMode::View, "m must not open a sub-mode");
-        assert_eq!(a.moved_monitor, Some(1), "the move is still unresolved");
+        assert!(
+            a.move_origins.contains_key(&1),
+            "the move is still unresolved"
+        );
     }
 
     #[test]
@@ -1486,7 +1483,7 @@ mod tests {
         down(&mut a, col, row);
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
-        assert_eq!(a.moved_monitor, Some(1));
+        assert!(a.move_origins.contains_key(&1));
 
         // The pending row is selected already, so clicking its checkbox in the
         // list disables it. The first enabled icon is monitor A's row, and the
@@ -1496,7 +1493,6 @@ mod tests {
         down(&mut a, icon_col, first_row + 1);
 
         assert!(!a.monitors[1].enabled, "the click disabled the monitor");
-        assert_eq!(a.moved_monitor, None);
         assert!(a.move_origins.is_empty());
     }
 

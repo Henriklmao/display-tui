@@ -960,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn the_apply_button_label_is_drawn_only_for_the_moved_monitor() {
+    fn the_apply_button_label_is_drawn_only_for_a_pending_monitor() {
         let monitors = vec![monitor("A", 0, 0)];
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
 

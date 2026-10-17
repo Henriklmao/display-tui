@@ -74,6 +74,10 @@ fn left_sections() -> Vec<Line<'static>> {
         Line::from("Enable <e> | Disable <d>"),
         Line::from("Preset Menu <p>"),
         Line::from("Show Keybindings <K>"),
+        Line::from(""),
+        Line::from(" --- Mouse --- ".bold().yellow()),
+        Line::from("Click to select | Icon toggles"),
+        Line::from("Drag to move | Wheel scrolls"),
     ]
 }
 
@@ -83,11 +87,12 @@ fn right_sections() -> Vec<Line<'static>> {
         Line::from(" --- Move Mode --- ".bold().yellow()),
         Line::from("Freemove <H/J/K/L>"),
         Line::from("Snapmove <h/j/k/l>"),
-        Line::from("Quit <Esc/Enter>"),
+        Line::from("Done <Esc/Enter/q>"),
         Line::from(""),
         Line::from(" --- Res / Scale Mode --- ".bold().yellow()),
-        Line::from("Select <Space/Enter>"),
-        Line::from("Quit <Esc> | Up/Down <k/j>"),
+        Line::from("Apply <Enter/Space>"),
+        Line::from("Up/Down <k/j>"),
+        Line::from("Cancel <Esc/q>"),
         Line::from(""),
         Line::from(" --- Tip --- ".bold().yellow()),
         Line::from("Arrow keys work as alternative".light_blue()),
@@ -135,11 +140,15 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
+//
+// The popup is capped in height, so the blank separators are dropped to keep
+// every labelled section visible.
 fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     let mut lines = vec![version_line(), Line::from("")];
     lines.extend(left_sections());
     lines.push(Line::from(""));
     lines.extend(right_sections());
+    lines.retain(|line| line.width() > 0);
 
     let p = Paragraph::new(lines)
         .block(help_block())
@@ -243,6 +252,7 @@ mod tests {
         let sections = [
             "Global",
             "View Mode",
+            "Mouse",
             "Move Mode",
             "Res / Scale Mode",
             "Tip",
@@ -253,7 +263,8 @@ mod tests {
             "Preset Menu <p>",
             "Freemove",
             "Snapmove",
-            "Select <Space",
+            "Apply <Enter",
+            "Cancel <Esc/q>",
             "Up/Down <k/j>",
         ];
 

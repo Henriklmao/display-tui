@@ -9,11 +9,22 @@ if [[ -z "$TAG" ]]; then
   echo "usage: $0 <tag>" >&2
   exit 1
 fi
-# pkgver must not contain hyphens/colons/slashes: turn e.g. "v0.9.6-1" into "0.9.6.1".
 # SRCVER keeps the real tag spelling, which the tarball URL and the extracted
-# directory name (display-tui-0.9.6-1) must use.
+# directory name (display-tui-0.9.6-3) must use.
 SRCVER="${TAG#v}"
-PKGVER="${SRCVER//-/.}"
+
+# Tags look like "v0.9.6" (a release) or "v0.9.6-3" (the third revision of 0.9.6).
+# AUR versions are "<pkgver>-<pkgrel>", so map a trailing integer revision to
+# pkgrel: v0.9.6-3 -> pkgver=0.9.6, pkgrel=3, which shows as "0.9.6-3".
+# Any other suffix (e.g. v0.9.5-pre) cannot go into pkgver verbatim because that
+# field must not contain hyphens/colons/slashes, so replace '-' with '.'.
+PKGREL=1
+if [[ "$SRCVER" =~ ^(.+)-([0-9]+)$ ]]; then
+  PKGVER="${BASH_REMATCH[1]}"
+  PKGREL="${BASH_REMATCH[2]}"
+else
+  PKGVER="${SRCVER//-/.}"
+fi
 
 URL="https://github.com/${REPO}"
 
@@ -26,7 +37,7 @@ cat > PKGBUILD <<EOF
 # Maintainer: Henriklmao
 pkgname=display-tui
 pkgver=${PKGVER}
-pkgrel=1
+pkgrel=${PKGREL}
 pkgdesc="Minimalistic Hyprland monitor configuration TUI"
 arch=('x86_64')
 url="${URL}"

@@ -10,9 +10,19 @@ if [[ -z "$TAG" ]]; then
   echo "usage: $0 <tag>" >&2
   exit 1
 fi
-# pkgver must not contain hyphens/colons/slashes: turn e.g. "v0.9.6-1" into "0.9.6.1"
-PKGVER="${TAG#v}"
-PKGVER="${PKGVER//-/.}"
+# Tags look like "v0.9.6" (a release) or "v0.9.6-3" (the third revision of 0.9.6).
+# AUR versions are "<pkgver>-<pkgrel>", so map a trailing integer revision to
+# pkgrel: v0.9.6-3 -> pkgver=0.9.6, pkgrel=3, which shows as "0.9.6-3".
+# Any other suffix (e.g. v0.9.5-pre) cannot go into pkgver verbatim because that
+# field must not contain hyphens/colons/slashes, so replace '-' with '.'.
+PKGREL=1
+if [[ "${TAG#v}" =~ ^(.+)-([0-9]+)$ ]]; then
+  PKGVER="${BASH_REMATCH[1]}"
+  PKGREL="${BASH_REMATCH[2]}"
+else
+  PKGVER="${TAG#v}"
+  PKGVER="${PKGVER//-/.}"
+fi
 
 URL="https://github.com/${REPO}"
 BIN_NAME="display-tui-${TAG}-x86_64-unknown-linux-gnu"
@@ -47,7 +57,7 @@ cat > PKGBUILD <<EOF
 # Maintainer: Henriklmao
 pkgname=display-tui-bin
 pkgver=${PKGVER}
-pkgrel=1
+pkgrel=${PKGREL}
 pkgdesc="Minimalistic Hyprland monitor configuration TUI (pre-built binary)"
 arch=('x86_64')
 url="${URL}"

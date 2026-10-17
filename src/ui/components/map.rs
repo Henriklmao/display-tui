@@ -263,7 +263,7 @@ impl<'a> Map<'a> {
             w > 0.0 && h > 0.0 && wx >= x && wx < x + w && wy >= y && wy < y + h
         };
 
-        if monitors.get(selected).is_some_and(&contains) {
+        if monitors.get(selected).is_some_and(contains) {
             return Some(selected);
         }
         monitors.iter().position(contains)

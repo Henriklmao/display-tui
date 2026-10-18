@@ -68,6 +68,8 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         MouseEventKind::Down(MouseButton::Left) => handle_left_down(app, layout, point(event), now),
         MouseEventKind::Drag(MouseButton::Left) => handle_left_drag(app, layout, point(event)),
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
+        // The mouse's Apply: a right click resolves a pending move.
+        MouseEventKind::Down(MouseButton::Right) => handle_right_click(app),
         MouseEventKind::ScrollUp => handle_scroll(app, layout, point(event), -1),
         MouseEventKind::ScrollDown => handle_scroll(app, layout, point(event), 1),
         _ => {}
@@ -197,6 +199,17 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
                 app.discard_move(row);
             }
         }
+    }
+}
+
+// A right click confirms a pending move, mirroring the Enter/Space gate. It
+// only acts in View: in the sub-modes those keys apply the highlighted value,
+// and a right click must not commit the move behind the user's back.
+fn handle_right_click(app: &mut App) {
+    if app.mode == TUIMode::View && app.has_pending_move() {
+        app.apply_move();
+        // As with Enter/Space: a click during a drag ends the gesture too.
+        app.drag = None;
     }
 }
 
@@ -407,6 +420,10 @@ mod tests {
 
     fn up(a: &mut App, col: u16, row: u16) {
         handle_mouse(a, mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+    }
+
+    fn right_click(a: &mut App, col: u16, row: u16) {
+        handle_mouse(a, mouse(MouseEventKind::Down(MouseButton::Right), col, row));
     }
 
     fn wheel_down(a: &mut App, col: u16, row: u16) {
@@ -1183,6 +1200,79 @@ mod tests {
                 "{key:?} persists the layout"
             );
         }
+    }
+
+    #[test]
+    fn right_clicking_applies_a_pending_move_in_view_mode() {
+        let dir = TempDir::new("mouse-apply-right-click");
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col, row);
+        assert!(a.has_pending_move());
+
+        right_click(&mut a, col, row);
+
+        assert!(!a.has_pending_move(), "the right-click applies the move");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "and persists the layout"
+        );
+    }
+
+    #[test]
+    fn a_right_click_without_a_pending_move_changes_nothing() {
+        let dir = TempDir::new("mouse-right-click-idle");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+
+        let row = a.layout.unwrap().list.y + 4;
+        right_click(&mut a, 10, row);
+
+        assert_eq!(a.selected_monitor, 0, "a right click must not select");
+        assert!(!a.has_pending_move());
+        assert!(
+            !dir.path().join("monitor_state.json").exists(),
+            "an idle right click must not persist anything"
+        );
+    }
+
+    #[test]
+    fn a_right_click_keeps_a_pending_move_in_a_sub_mode() {
+        // In Resolution/Scale mode Enter/Space apply the highlighted row, so the
+        // right click must not commit the pending move behind the user's back.
+        let dir = TempDir::new("mouse-right-click-submode");
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::Resolution, monitors);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.note_move(1, (3000, 1000));
+
+        right_click(&mut a, 40, 20);
+
+        assert!(a.has_pending_move(), "the sub-mode keeps the move pending");
+        assert!(
+            !dir.path().join("monitor_state.json").exists(),
+            "and nothing is persisted"
+        );
+    }
+
+    #[test]
+    fn a_right_click_does_not_apply_behind_an_open_help_overlay() {
+        let dir = TempDir::new("mouse-right-click-help");
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.note_move(1, (3000, 1000));
+        a.show_help = true;
+
+        right_click(&mut a, 40, 20);
+
+        assert!(a.show_help, "the overlay keeps precedence");
+        assert!(a.has_pending_move(), "and the move stays pending");
     }
 
     #[test]

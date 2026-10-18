@@ -29,7 +29,7 @@ The interface is fully keyboard driven, but the mouse can drive the same actions
 
 - **Select**: click a display row, a resolution/scale row, or a monitor on the map.
 - **Enable/disable**: clicking a display row selects it; click its checkbox again (once it is selected) to enable/disable it.
-- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides. An **Apply** button then appears in the centre of every moved monitor — click it (or press `Enter`/`Space`) to persist the move. While a move is unconfirmed the other actions are hidden: `Enter`/`Space` (or a button) apply every pending move, and `Esc`/`q` cancel them by putting the monitors back.
+- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides. An **Apply** button then appears in the centre of every moved monitor — click it, **right-click**, or press `Enter`/`Space` to persist the move. While a move is unconfirmed the other actions are hidden: `Enter`/`Space` (or a button or a right-click) apply every pending move, and `Esc`/`q` cancel them by putting the monitors back.
 - **Double-click**: double-click a resolution, scale or preset row to apply it immediately.
 - **Scroll**: use the wheel over a list to step through it (displays, resolutions, scales or presets).
 - **Presets**: click a preset to preview it, double-click to apply it, and click outside the menu to close it.

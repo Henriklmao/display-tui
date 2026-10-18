@@ -292,11 +292,25 @@ impl<'a> MonitorList<'a> {
         if self.moved_pending && self.mode == TUIMode::View {
             // A pending mouse move is a confirm state: only Apply or
             // Cancel/Revert are offered, so the usual actions stay hidden until
-            // the move is resolved.
+            // the move is resolved. The right-click alternative is only
+            // advertised while the whole line fits the footer (44 inner columns
+            // at a 46-column terminal), so narrow terminals keep "<Esc/q>"
+            // instead of clipping it; the help modal names "Cancel/Revert all".
+            let full_hint = [
+                " Apply ",
+                "<Enter/Space> ",
+                " Right-click ",
+                " Cancel all ",
+                "<Esc/q> ",
+            ]
+            .iter()
+            .map(|item| item.len())
+            .sum::<usize>();
             instructions_items.push(" Apply ".white());
             instructions_items.push("<Enter/Space> ".blue().bold());
-            // Kept short (41 columns) so the hint still fits on 46-48 column
-            // terminals; the help modal spells out "Cancel/Revert all".
+            if full_hint <= area.width.saturating_sub(2) as usize {
+                instructions_items.push(" Right-click ".white());
+            }
             instructions_items.push(" Cancel all ".white());
             instructions_items.push("<Esc/q> ".blue().bold());
         } else if is_mini_mode {
@@ -797,6 +811,37 @@ mod tests {
 
         assert!(text.contains("<Enter/Space>"), "apply keys clipped: {text}");
         assert!(text.contains("<Esc/q>"), "cancel keys clipped: {text}");
+    }
+
+    #[test]
+    fn the_right_click_hint_is_only_shown_when_the_confirm_line_fits() {
+        let monitors = test_monitors();
+        let footer = |width: u16| {
+            let area = Rect::new(0, 0, width, 8);
+            let mut list = MonitorList {
+                state: TableState::default().with_selected(Some(0)),
+                selected_row: Some(0),
+                mode: TUIMode::View,
+                monitors: &monitors,
+                is_previewing: false,
+                moved_pending: true,
+            };
+            let mut buf = Buffer::empty(area);
+            list.render(area, &mut buf);
+            text_of(&buf)
+        };
+
+        // Wide enough: the mouse alternative is advertised next to the keys.
+        let wide = footer(130);
+        assert!(wide.contains("Right-click"), "right-click hint: {wide}");
+
+        // Too narrow for the longer line: the hint is dropped instead of
+        // clipping the keys (covered by the footer-fit test above).
+        let narrow = footer(46);
+        assert!(
+            !narrow.contains("Right-click"),
+            "hint must be dropped: {narrow}"
+        );
     }
 
     #[test]

@@ -78,7 +78,7 @@ fn left_sections() -> Vec<Line<'static>> {
         Line::from(" --- Mouse --- ".bold().yellow()),
         Line::from("Click to select; click again toggles"),
         Line::from("Drag to move; Apply saves"),
-        Line::from("Pending: Apply <Enter/Space>"),
+        Line::from("Pending: Apply <Enter/Space>/right-click"),
         Line::from("Cancel/Revert all <Esc/q>"),
     ]
 }
@@ -269,7 +269,8 @@ mod tests {
             "Snapmove",
             "Apply <Enter",
             "Cancel <Esc/q>",
-            "Pending: Apply <Enter/Space>",
+            "Pending: Apply",
+            "right-click",
             "Cancel/Revert all <Esc/q>",
             "Up/Down <k/j>",
         ];

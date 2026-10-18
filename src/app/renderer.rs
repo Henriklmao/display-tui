@@ -31,6 +31,8 @@ impl Widget for &App {
             guides: self.drag.as_ref().map(|drag| drag.guides),
             canvas: self.drag.as_ref().map(|drag| drag.canvas),
             pending: &pending,
+            highlights: self.highlights.as_ref(),
+            highlight_phase: self.highlight_visible(),
         };
         monitor_list.is_previewing = is_previewing;
         monitor_list.moved_pending = self.has_pending_move();

@@ -7,6 +7,7 @@ use crate::{
     actions::movement::{self, SnapGuides},
     monitor::{Monitor, MonitorCanvas},
     utils::TUIMode,
+    validation::diagnostics::{EdgeSegment, LayoutHighlights},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -37,6 +38,40 @@ pub struct Map<'a> {
     pub canvas: Option<MonitorCanvas>,
     // Monitors with an unapplied move; each shows a clickable Apply button.
     pub pending: &'a [usize],
+    // Overlap/detachment highlights to overlay, painted in world coordinates.
+    pub highlights: Option<&'a LayoutHighlights>,
+    // Blink phase: `true` paints the highlights hot (red), `false` leaves the
+    // monitor's normal border showing.
+    pub highlight_phase: bool,
+}
+
+// Draws one world-space highlight segment, mirroring y with the guide rule so
+// a horizontal world line lands on the same canvas row as the monitor edge.
+fn draw_highlight_segment(
+    ctx: &mut ratatui::widgets::canvas::Context,
+    canvas: &MonitorCanvas,
+    segment: &EdgeSegment,
+    color: Color,
+) {
+    let [bottom, top] = canvas.y_bounds;
+    let mirror = |y: f64| bottom + top - y;
+    if segment.horizontal {
+        ctx.draw(&CanvasLine {
+            x1: segment.start,
+            y1: mirror(segment.fixed),
+            x2: segment.end,
+            y2: mirror(segment.fixed),
+            color,
+        });
+    } else {
+        ctx.draw(&CanvasLine {
+            x1: segment.fixed,
+            y1: mirror(segment.start),
+            x2: segment.fixed,
+            y2: mirror(segment.end),
+            color,
+        });
+    }
 }
 
 impl<'a> Widget for Map<'a> {
@@ -103,6 +138,15 @@ impl<'a> Widget for Map<'a> {
                         });
                     }
                 }
+                // Overlap and detachment highlights, on top of every monitor
+                // rectangle (and the guides) but under the Apply buttons.
+                if self.highlight_phase
+                    && let Some(highlights) = self.highlights
+                {
+                    for segment in highlights.segments.iter().chain(&highlights.connectors) {
+                        draw_highlight_segment(ctx, &monitor_canvas, segment, Color::Red);
+                    }
+                }
             })
             .render(area, buf);
 
@@ -123,8 +167,7 @@ impl<'a> Widget for Map<'a> {
     }
 }
 impl<'a> Map<'a> {
-    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
-        let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {        let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
         let selected = app.selected_monitor;
         match key_event.code {
             KeyCode::Char('k') => movement::snap_vertical(&mut app.monitors, selected, -1),
@@ -365,6 +408,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
 
@@ -451,6 +496,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -476,6 +523,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -493,6 +542,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -514,6 +565,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -528,6 +581,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -713,6 +768,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -734,6 +791,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -759,6 +818,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -789,6 +850,8 @@ mod tests {
                 guides: None,
                 canvas: None,
                 pending: &[],
+                highlights: None,
+                highlight_phase: true,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -931,6 +994,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -971,6 +1036,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         plain.render(buf.area, &mut buf);
         assert!(!text_of(&buf).contains("Apply"), "no button without a move");
@@ -983,6 +1050,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0],
+            highlights: None,
+            highlight_phase: true,
         };
         moved.render(buf.area, &mut buf);
         assert!(text_of(&buf).contains("Apply"), "the button is drawn");
@@ -1006,6 +1075,8 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0, 1, 2],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1029,6 +1100,8 @@ mod tests {
                 guides: None,
                 canvas: None,
                 pending: &[0],
+                highlights: None,
+                highlight_phase: true,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -1053,6 +1126,8 @@ mod tests {
             }),
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1082,6 +1157,8 @@ mod tests {
             }),
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1095,5 +1172,146 @@ mod tests {
             col < area.width / 2,
             "vertical guide on the wrong side: col {col}"
         );
+    }
+
+    // --- overlap / detachment highlights --------------------------------
+
+    use crate::validation::diagnostics::{LayoutHighlights, layout_highlights};
+
+    fn sized(name: &str, x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        let mut m = monitor(name, x, y);
+        m.modes[0].width = w;
+        m.modes[0].height = h;
+        m
+    }
+
+    // Whether any red cell lies within `tol` world pixels of `world`.
+    fn red_near(
+        buf: &Buffer,
+        area: Rect,
+        monitors: &[Monitor],
+        world: (f64, f64),
+        tol: f64,
+    ) -> bool {
+        let canvas = Monitor::get_monitors_canvas(monitors, &area);
+        let inner = Block::bordered().inner(area);
+        for row in inner.top()..inner.bottom() {
+            for col in inner.left()..inner.right() {
+                if let Some((wx, wy)) = Map::world_at_in(area, &canvas, col, row)
+                    && (wx - world.0).abs() <= tol
+                    && (wy - world.1).abs() <= tol
+                {
+                    let style = buf[(col, row)].style();
+                    if style.fg == Some(Color::Red) || style.bg == Some(Color::Red) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn map_with<'a>(monitors: &'a [Monitor], highlights: &'a LayoutHighlights) -> Map<'a> {
+        Map {
+            selected: 0,
+            monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[],
+            highlights: Some(highlights),
+            highlight_phase: true,
+        }
+    }
+
+    #[test]
+    fn an_overlap_is_painted_red_only_from_the_overlap_point_onward() {
+        let monitors = vec![
+            sized("A", 0, 0, 100, 100),
+            sized("B", 50, 50, 100, 100),
+        ];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        map_with(&monitors, &highlights).render(area, &mut buf);
+
+        assert!(
+            red_near(&buf, area, &monitors, (100.0, 75.0), 6.0),
+            "the overlapping part of A's right edge is red"
+        );
+        assert!(
+            !red_near(&buf, area, &monitors, (100.0, 25.0), 6.0),
+            "the edge above the overlap point stays in the normal colour"
+        );
+    }
+
+    #[test]
+    fn a_detached_monitor_gets_its_full_border_its_anchor_edge_and_a_connector() {
+        let monitors = vec![
+            sized("A", 0, 0, 100, 100),
+            sized("C", 5000, 0, 100, 100),
+        ];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        map_with(&monitors, &highlights).render(area, &mut buf);
+
+        assert!(
+            red_near(&buf, area, &monitors, (5000.0, 90.0), 20.0),
+            "the detached monitor's whole left border is red"
+        );
+        assert!(
+            red_near(&buf, area, &monitors, (100.0, 90.0), 20.0),
+            "the anchor's facing edge is red"
+        );
+        assert!(
+            !red_near(&buf, area, &monitors, (0.0, 90.0), 20.0),
+            "the anchor's far edge is not red"
+        );
+        assert!(
+            red_near(&buf, area, &monitors, (2500.0, 50.0), 30.0),
+            "the connector runs between the two"
+        );
+    }
+
+    #[test]
+    fn the_blink_phase_hides_the_highlights() {
+        let monitors = vec![
+            sized("A", 0, 0, 100, 100),
+            sized("C", 5000, 0, 100, 100),
+        ];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+
+        let mut map = map_with(&monitors, &highlights);
+        map.highlight_phase = false;
+        map.render(area, &mut buf);
+
+        for row in area.top()..area.bottom() {
+            for col in area.left()..area.right() {
+                let style = buf[(col, row)].style();
+                assert_ne!(
+                    style.fg,
+                    Some(Color::Red),
+                    "cell ({col}, {row}) must not be red in the off phase"
+                );
+                assert_ne!(style.bg, Some(Color::Red));
+            }
+        }
+    }
+
+    #[test]
+    fn highlight_rendering_survives_tiny_areas() {
+        let monitors = vec![
+            sized("A", 0, 0, 100, 100),
+            sized("C", 5000, 0, 100, 100),
+        ];
+        let highlights = layout_highlights(&monitors);
+        for (width, height) in [(1u16, 1u16), (3, 2), (10, 5), (40, 12)] {
+            let area = Rect::new(0, 0, width, height);
+            let mut buf = Buffer::empty(area);
+            map_with(&monitors, &highlights).render(area, &mut buf);
+        }
     }
 }

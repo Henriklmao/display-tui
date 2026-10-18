@@ -32,6 +32,9 @@ pub struct App {
     pub cli_action: Option<CliAction>,
     // Rectangles of the last rendered frame, used to hit-test mouse events.
     pub layout: Option<ScreenLayout>,
+    // World-space highlights (overlap edges, detached borders, connectors)
+    // armed by the layout check and cleared on cancel/success.
+    pub highlights: Option<crate::validation::diagnostics::LayoutHighlights>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -96,6 +99,12 @@ impl App {
     // the on-map Apply buttons; derived from `move_origins` so it cannot drift.
     pub(crate) fn has_pending_move(&self) -> bool {
         !self.move_origins.is_empty()
+    }
+
+    // Whether the armed map highlights are currently painted hot. Blink toggles
+    // this over time; an un-armed layout never draws anything.
+    pub(crate) fn highlight_visible(&self) -> bool {
+        self.highlights.is_some()
     }
 
     // Resolves the presets directory, honouring the injectable override.

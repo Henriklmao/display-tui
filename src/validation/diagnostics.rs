@@ -608,6 +608,70 @@ pub fn plan_auto_fix(monitors: &[Monitor], moved: Option<usize>) -> Option<AutoF
     None
 }
 
+// Border segments and connectors to overlay on the map for the current
+// problems: overlap edge portions, the full border of every detached monitor,
+// the facing edge of each anchor, and the L-connectors between them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LayoutHighlights {
+    // Border portions drawn hot (red).
+    pub segments: Vec<EdgeSegment>,
+    // Axis-aligned connector paths for detached monitors.
+    pub connectors: Vec<EdgeSegment>,
+}
+
+impl LayoutHighlights {
+    // Whether there is anything to draw.
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty() && self.connectors.is_empty()
+    }
+}
+
+// Computes the map overlay for the current layout.
+pub fn layout_highlights(monitors: &[Monitor]) -> LayoutHighlights {
+    let mut segments = Vec::new();
+    for region in overlap_regions(monitors) {
+        for (_, segment) in region.edge_segments(monitors) {
+            segments.push(segment);
+        }
+    }
+
+    let mut connectors = Vec::new();
+    for info in detach_infos(monitors) {
+        segments.extend(full_border(monitors, info.monitor));
+        segments.push(facing_edge(monitors, info.anchor, info.direction));
+        connectors.extend(info.connector(monitors));
+    }
+
+    LayoutHighlights {
+        segments,
+        connectors,
+    }
+}
+
+// The four edges of a monitor's rectangle, full length.
+fn full_border(monitors: &[Monitor], index: usize) -> Vec<EdgeSegment> {
+    let (x, y, w, h) = monitors[index].get_geometry();
+    vec![
+        EdgeSegment::horizontal(y, x, x + w),
+        EdgeSegment::horizontal(y + h, x, x + w),
+        EdgeSegment::vertical(x, y, y + h),
+        EdgeSegment::vertical(x + w, y, y + h),
+    ]
+}
+
+// The anchor's edge facing back towards `direction` (the direction the
+// detached monitor lies in, so the anchor's facing edge is the opposite one).
+fn facing_edge(monitors: &[Monitor], index: usize, direction: Direction) -> EdgeSegment {
+    let (x, y, w, h) = monitors[index].get_geometry();
+    match direction {
+        // Detached monitor is to the right: the anchor faces it with its left.
+        Direction::Right => EdgeSegment::vertical(x, y, y + h),
+        Direction::Left => EdgeSegment::vertical(x + w, y, y + h),
+        Direction::Down => EdgeSegment::horizontal(y, x, x + w),
+        Direction::Up => EdgeSegment::horizontal(y + h, x, x + w),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // edge collection
 // ---------------------------------------------------------------------------
@@ -1070,5 +1134,67 @@ mod tests {
     fn an_isolated_monitor_has_no_fix() {
         assert_eq!(plan_auto_fix(&[monitor("A", 0, 0)], None), None);
         assert_eq!(plan_auto_fix(&[], None), None);
+    }
+
+    // --- layout highlights ----------------------------------------------
+
+    #[test]
+    fn highlights_are_empty_for_a_contiguous_layout() {
+        let monitors = vec![monitor("A", 0, 0), monitor("B", 1920, 0)];
+        assert!(layout_highlights(&monitors).is_empty());
+    }
+
+    #[test]
+    fn highlights_include_the_detached_border_anchor_edge_and_connector() {
+        let monitors = vec![
+            sized(monitor("A", 0, 0), 100, 100),
+            sized(monitor("C", 5000, 0), 100, 100),
+        ];
+
+        let highlights = layout_highlights(&monitors);
+
+        // C's detached border is flagged in full.
+        assert!(
+            highlights
+                .segments
+                .contains(&EdgeSegment::vertical(5000.0, 0.0, 100.0)),
+            "C's left border must be flagged"
+        );
+        // A contributes only its facing (right) edge.
+        assert!(
+            highlights
+                .segments
+                .contains(&EdgeSegment::vertical(100.0, 0.0, 100.0)),
+            "A's facing edge must be flagged"
+        );
+        assert!(
+            !highlights
+                .segments
+                .contains(&EdgeSegment::vertical(0.0, 0.0, 100.0)),
+            "A's far edge must not be flagged"
+        );
+        assert_eq!(
+            highlights.connectors.len(),
+            1,
+            "a level connector collapses to a single straight segment"
+        );
+    }
+
+    #[test]
+    fn highlights_include_the_overlap_edge_portions() {
+        let monitors = vec![
+            sized(monitor("A", 0, 0), 100, 100),
+            sized(monitor("B", 60, 0), 100, 100),
+        ];
+
+        let highlights = layout_highlights(&monitors);
+
+        assert!(highlights.connectors.is_empty(), "no detachment here");
+        assert!(
+            highlights
+                .segments
+                .contains(&EdgeSegment::vertical(100.0, 0.0, 100.0)),
+            "A's right edge overlaps B"
+        );
     }
 }

@@ -25,7 +25,7 @@ else
 fi
 
 URL="https://github.com/${REPO}"
-BIN_NAME="display-tui-${TAG}-x86_64-unknown-linux-gnu"
+BIN_NAME="display-tui-${TAG}-x86_64-linux-gnu"
 BIN_URL="${URL}/releases/download/${TAG}/${BIN_NAME}"
 
 # rust.yml builds the release binary in parallel with this workflow, so the

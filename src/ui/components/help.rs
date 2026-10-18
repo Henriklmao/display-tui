@@ -74,6 +74,12 @@ fn left_sections() -> Vec<Line<'static>> {
         Line::from("Enable <e> | Disable <d>"),
         Line::from("Preset Menu <p>"),
         Line::from("Show Keybindings <K>"),
+        Line::from(""),
+        Line::from(" --- Mouse --- ".bold().yellow()),
+        Line::from("Click to select; click again toggles"),
+        Line::from("Drag to move; Apply saves"),
+        Line::from("Pending: Apply <Enter/Space>/right-click"),
+        Line::from("Cancel/Revert all <Esc/q>"),
     ]
 }
 
@@ -83,11 +89,12 @@ fn right_sections() -> Vec<Line<'static>> {
         Line::from(" --- Move Mode --- ".bold().yellow()),
         Line::from("Freemove <H/J/K/L>"),
         Line::from("Snapmove <h/j/k/l>"),
-        Line::from("Quit <Esc/Enter>"),
+        Line::from("Done <Esc/Enter/q>"),
         Line::from(""),
         Line::from(" --- Res / Scale Mode --- ".bold().yellow()),
-        Line::from("Select <Space/Enter>"),
-        Line::from("Quit <Esc> | Up/Down <k/j>"),
+        Line::from("Apply <Enter/Space>"),
+        Line::from("Up/Down <k/j>"),
+        Line::from("Cancel <Esc/q>"),
         Line::from(""),
         Line::from(" --- Tip --- ".bold().yellow()),
         Line::from("Arrow keys work as alternative".light_blue()),
@@ -105,7 +112,11 @@ fn help_block() -> Block<'static> {
 
 // Renders a centered version line spanning the full popup width.
 fn version_line() -> Line<'static> {
-    Line::from(format!("Display-TUI v{}", env!("CARGO_PKG_VERSION")).bold().blue())
+    Line::from(
+        format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))
+            .bold()
+            .blue(),
+    )
 }
 
 // Two-column layout for terminals wide enough to fit both columns.
@@ -135,11 +146,15 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
+//
+// The popup is capped in height, so the blank separators are dropped to keep
+// every labelled section visible.
 fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     let mut lines = vec![version_line(), Line::from("")];
     lines.extend(left_sections());
     lines.push(Line::from(""));
     lines.extend(right_sections());
+    lines.retain(|line| line.width() > 0);
 
     let p = Paragraph::new(lines)
         .block(help_block())
@@ -153,8 +168,8 @@ fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     fn render_help(width: u16, height: u16) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
@@ -170,9 +185,7 @@ mod tests {
 
     fn find(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
         for y in 0..buf.area.height {
-            let row: String = (0..buf.area.width)
-                .map(|x| buf[(x, y)].symbol())
-                .collect();
+            let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
             if let Some(x) = row.find(needle) {
                 return Some((x as u16, y));
             }
@@ -243,6 +256,7 @@ mod tests {
         let sections = [
             "Global",
             "View Mode",
+            "Mouse",
             "Move Mode",
             "Res / Scale Mode",
             "Tip",
@@ -253,7 +267,11 @@ mod tests {
             "Preset Menu <p>",
             "Freemove",
             "Snapmove",
-            "Select <Space",
+            "Apply <Enter",
+            "Cancel <Esc/q>",
+            "Pending: Apply",
+            "right-click",
+            "Cancel/Revert all <Esc/q>",
             "Up/Down <k/j>",
         ];
 
@@ -342,19 +360,9 @@ mod tests {
                     && y < popup.y + popup.height;
                 let symbol = buf[(x, y)].symbol();
                 if inside {
-                    assert_ne!(
-                        symbol, "x",
-                        "popup did not overwrite ({}, {})",
-                        x,
-                        y
-                    );
+                    assert_ne!(symbol, "x", "popup did not overwrite ({}, {})", x, y);
                 } else {
-                    assert_eq!(
-                        symbol, "x",
-                        "background was clobbered at ({}, {})",
-                        x,
-                        y
-                    );
+                    assert_eq!(symbol, "x", "background was clobbered at ({}, {})", x, y);
                 }
             }
         }

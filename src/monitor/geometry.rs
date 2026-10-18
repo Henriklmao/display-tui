@@ -1,14 +1,14 @@
 //! Canvas geometry calculations for monitor layout rendering.
 
-use ratatui::layout::Rect;
 use super::types::{Monitor, MonitorCanvas};
+use ratatui::layout::Rect;
 
 impl Monitor {
     // Computes the bounding canvas for all enabled monitors.
     //
     // Returns a `MonitorCanvas` that defines the 2D bounds needed to render
     // monitors within a given terminal area.
-    pub fn get_monitors_canvas(monitors: &Vec<Monitor>, _area: &Rect) -> MonitorCanvas {
+    pub fn get_monitors_canvas(monitors: &[Monitor], _area: &Rect) -> MonitorCanvas {
         let mut left = 10000.0;
         let mut bottom = 10000.0;
         let mut right = -10000.0;
@@ -54,10 +54,7 @@ impl Monitor {
         let x_bounds = [left, right];
         let y_bounds = [bottom, top];
 
-        MonitorCanvas {
-            x_bounds,
-            y_bounds,
-        }
+        MonitorCanvas { x_bounds, y_bounds }
     }
 }
 
@@ -92,7 +89,7 @@ mod tests {
 
     #[test]
     fn single_monitor_bounds_include_margin() {
-        let canvas = Monitor::get_monitors_canvas(&vec![monitor("A", 0, 0, 1.0, true)], &area());
+        let canvas = Monitor::get_monitors_canvas(&[monitor("A", 0, 0, 1.0, true)], &area());
 
         assert_eq!(canvas.x_bounds, [-MARGIN, 1920.0 + MARGIN]);
         // y = 0 sits exactly one margin above the bottom of the canvas: the
@@ -157,7 +154,7 @@ mod tests {
         let mut unplaced = monitor("B", 0, 0, 1.0, true);
         unplaced.position = None;
 
-        let canvas = Monitor::get_monitors_canvas(&vec![unplaced, placed], &area());
+        let canvas = Monitor::get_monitors_canvas(&[unplaced, placed], &area());
 
         assert_eq!(canvas.x_bounds, [-1920.0 - MARGIN, MARGIN]);
         assert_eq!(canvas.y_bounds, [-MARGIN, 1080.0 + MARGIN]);
@@ -175,9 +172,9 @@ mod tests {
 
     #[test]
     fn canvas_grows_monotonically_with_more_monitors() {
-        let one = Monitor::get_monitors_canvas(&vec![monitor("A", 0, 0, 1.0, true)], &area());
+        let one = Monitor::get_monitors_canvas(&[monitor("A", 0, 0, 1.0, true)], &area());
         let two = Monitor::get_monitors_canvas(
-            &vec![
+            &[
                 monitor("A", 0, 0, 1.0, true),
                 monitor("B", 1920, 0, 1.0, true),
             ],

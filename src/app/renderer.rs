@@ -6,7 +6,7 @@ use crate::ui::layouts::centered_rect;
 use crate::utils::TUIMode;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Style, Stylize},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget},
@@ -19,42 +19,44 @@ impl Widget for &App {
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
 
+        // Every monitor with an unapplied move gets an Apply button; sort for a
+        // deterministic draw order (the map does not care about the set order).
+        let mut pending: Vec<usize> = self.move_origins.keys().copied().collect();
+        pending.sort_unstable();
+
         let canvas = Map {
             selected: self.selected_monitor,
             monitors: &self.monitors,
             is_previewing,
+            guides: self.drag.as_ref().map(|drag| drag.guides),
+            canvas: self.drag.as_ref().map(|drag| drag.canvas),
+            pending: &pending,
         };
         monitor_list.is_previewing = is_previewing;
-        let outer_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
-            .split(area);
+        monitor_list.moved_pending = self.has_pending_move();
 
-        match self.mode {
-            TUIMode::Resolution => {
-                let selected = &self.monitors[self.selected_monitor];
-                let mut resolutions = Resolutions::new(selected, Some(self.selected_resolution));
-                let inner_top_layout = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage(70), Constraint::Percentage(30)])
-                    .split(outer_layout[0]);
-                canvas.render(inner_top_layout[0], buf);
-                resolutions.render(inner_top_layout[1], buf);
-            }
-            TUIMode::Scale => {
-                let mut scale = Scale::new(self.selected_scale);
-                let inner_top_layout = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage(90), Constraint::Percentage(10)])
-                    .split(outer_layout[0]);
-                canvas.render(inner_top_layout[0], buf);
-                scale.render(inner_top_layout[1], buf);
-            }
-            _ => {
-                canvas.render(outer_layout[0], buf);
+        let layout = self
+            .layout
+            .unwrap_or_else(|| crate::ui::layouts::screen_layout(area, self.mode));
+
+        canvas.render(layout.canvas, buf);
+        if let Some(side) = layout.side_table {
+            match self.mode {
+                TUIMode::Resolution => {
+                    if let Some(selected) = self.monitors.get(self.selected_monitor) {
+                        let mut resolutions =
+                            Resolutions::new(selected, Some(self.selected_resolution));
+                        resolutions.render(side, buf);
+                    }
+                }
+                TUIMode::Scale => {
+                    let mut scale = Scale::new(self.selected_scale);
+                    scale.render(side, buf);
+                }
+                _ => {}
             }
         }
-        monitor_list.render(outer_layout[1], buf);
+        monitor_list.render(layout.list, buf);
 
         if let Some(ref preset_menu) = self.show_preset_menu {
             preset_menu.render(area, buf);
@@ -145,7 +147,10 @@ mod tests {
 
     #[test]
     fn resolution_mode_adds_the_resolution_table() {
-        let text = text_of(&render_app(&app(TUIMode::Resolution), Rect::new(0, 0, 120, 40)));
+        let text = text_of(&render_app(
+            &app(TUIMode::Resolution),
+            Rect::new(0, 0, 120, 40),
+        ));
 
         assert!(text.contains("Map"), "map must stay visible: {text}");
         assert!(text.contains("Resolutions"), "table missing: {text}");
@@ -180,7 +185,10 @@ mod tests {
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
         assert!(text.contains("Presets"), "menu missing: {text}");
-        assert!(text.contains("No presets found"), "placeholder missing: {text}");
+        assert!(
+            text.contains("No presets found"),
+            "placeholder missing: {text}"
+        );
     }
 
     #[test]
@@ -204,8 +212,14 @@ mod tests {
 
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
-        assert!(text.contains("<Esc/Enter> to close."), "close hint missing: {text}");
-        assert!(!text.contains("force write"), "force must not be offered: {text}");
+        assert!(
+            text.contains("<Esc/Enter> to close."),
+            "close hint missing: {text}"
+        );
+        assert!(
+            !text.contains("force write"),
+            "force must not be offered: {text}"
+        );
     }
 
     #[test]
@@ -216,7 +230,10 @@ mod tests {
         let mut error = app(TUIMode::View);
         error.show_popup = Some(error_popup(false));
         let buf = render_app(&error, area);
-        assert_eq!(buf[(popup_area.x, popup_area.y)].style().fg, Some(Color::Red));
+        assert_eq!(
+            buf[(popup_area.x, popup_area.y)].style().fg,
+            Some(Color::Red)
+        );
 
         let mut info = app(TUIMode::View);
         info.show_popup = Some(Popup {
@@ -237,11 +254,31 @@ mod tests {
     fn every_mode_survives_tiny_terminals() {
         for (width, height) in [(1u16, 1u16), (5, 3), (10, 5), (20, 8), (40, 12)] {
             let area = Rect::new(0, 0, width, height);
-            for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution, TUIMode::Scale] {
+            for mode in [
+                TUIMode::View,
+                TUIMode::Move,
+                TUIMode::Resolution,
+                TUIMode::Scale,
+            ] {
                 let mut a = app(mode);
                 a.show_help = true;
                 render_app(&a, area);
             }
+        }
+    }
+
+    #[test]
+    fn every_mode_renders_with_zero_monitors() {
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
+            let mut a = App::new(None);
+            a.mode = mode;
+            // Must not panic even though the tables index a selected monitor.
+            let _ = render_app(&a, Rect::new(0, 0, 120, 40));
         }
     }
 }

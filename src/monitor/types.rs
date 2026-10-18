@@ -48,7 +48,7 @@ pub struct Resolution {
 // The bounds are the only bookkeeping needed: the map mirrors monitor
 // positions around the centre of `y_bounds`, so monitor coordinates that
 // grow downwards render from top to bottom.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct MonitorCanvas {
     pub x_bounds: [f64; 2],
     pub y_bounds: [f64; 2],
@@ -204,7 +204,10 @@ mod tests {
 
     #[test]
     fn get_current_resolution_returns_the_marked_mode() {
-        let mut m = monitor(vec![resolution(1920, 1080, 60.0), resolution(1280, 720, 75.0)]);
+        let mut m = monitor(vec![
+            resolution(1920, 1080, 60.0),
+            resolution(1280, 720, 75.0),
+        ]);
         m.modes[1].current = true;
 
         let current = m.get_current_resolution().expect("current mode");
@@ -228,7 +231,10 @@ mod tests {
 
     #[test]
     fn get_prefered_resolution_returns_the_preferred_mode() {
-        let mut m = monitor(vec![resolution(1920, 1080, 60.0), resolution(1280, 720, 60.0)]);
+        let mut m = monitor(vec![
+            resolution(1920, 1080, 60.0),
+            resolution(1280, 720, 60.0),
+        ]);
         m.modes[1].preferred = true;
 
         let preferred = m.get_prefered_resolution().expect("preferred mode");
@@ -237,7 +243,10 @@ mod tests {
 
     #[test]
     fn get_best_resolution_prefers_the_current_mode() {
-        let mut m = monitor(vec![resolution(1920, 1080, 60.0), resolution(1280, 720, 60.0)]);
+        let mut m = monitor(vec![
+            resolution(1920, 1080, 60.0),
+            resolution(1280, 720, 60.0),
+        ]);
         m.modes[0].preferred = true;
         m.modes[1].current = true;
 
@@ -247,7 +256,10 @@ mod tests {
 
     #[test]
     fn get_best_resolution_falls_back_to_preferred() {
-        let mut m = monitor(vec![resolution(1920, 1080, 60.0), resolution(1280, 720, 60.0)]);
+        let mut m = monitor(vec![
+            resolution(1920, 1080, 60.0),
+            resolution(1280, 720, 60.0),
+        ]);
         m.modes[1].preferred = true;
 
         let best = m.get_best_resolution().expect("best mode");

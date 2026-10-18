@@ -95,10 +95,7 @@ mod tests {
 
     #[test]
     fn error_popup_is_red_and_offers_the_force_hint() {
-        let buf = render(
-            &popup(true, &["Monitor is busy"]),
-            Rect::new(0, 0, 60, 20),
-        );
+        let buf = render(&popup(true, &["Monitor is busy"]), Rect::new(0, 0, 60, 20));
 
         let popup_area = centered_rect(50, 40, Rect::new(0, 0, 60, 20));
         assert_eq!(

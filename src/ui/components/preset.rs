@@ -102,6 +102,58 @@ impl PresetMenu {
         self.error_message = Some(message);
     }
 
+    // The popup rectangle this menu occupies for a given screen area.
+    pub fn rect(area: Rect) -> Rect {
+        preset_rect(area)
+    }
+
+    // Maps a click's row to a preset index; only the list state is clickable.
+    pub fn row_at(&self, area: Rect, y: u16) -> Option<usize> {
+        if self.state != MenuState::List {
+            return None;
+        }
+        // One border line plus the leading blank line before the entries.
+        let top = preset_rect(area).y.saturating_add(2);
+        if y < top {
+            return None;
+        }
+        let index = (y - top) as usize;
+        if index < self.presets.len() {
+            Some(index)
+        } else {
+            None
+        }
+    }
+
+    // Selects a preset by index (list state only) and returns its name.
+    pub fn select_index(&mut self, index: usize) -> Option<String> {
+        if self.state != MenuState::List {
+            return None;
+        }
+        let name = self.presets.get(index)?.name.clone();
+        self.selected_index = index;
+        self.error_message = None;
+        Some(name)
+    }
+
+    // Moves the selection by a wheel notch (clamped, no wrap) and returns the
+    // newly selected preset name.
+    pub fn scroll(&mut self, delta: i32) -> Option<String> {
+        if self.state != MenuState::List || self.presets.is_empty() {
+            return None;
+        }
+        let last = self.presets.len() - 1;
+        self.selected_index = if delta < 0 {
+            self.selected_index.saturating_sub(1)
+        } else {
+            (self.selected_index + 1).min(last)
+        };
+        self.error_message = None;
+        self.presets
+            .get(self.selected_index)
+            .map(|e| e.name.clone())
+    }
+
     // Handles key events for the preset menu and returns how the event was consumed.
     pub fn handle_event(&mut self, key: KeyCode) -> MenuEvent {
         // Clear any stale error message from a previous key press.
@@ -136,7 +188,8 @@ impl PresetMenu {
                         if crate::config::is_last_preset(&entry.name) {
                             self.set_error("Cannot rename read-only 'last' preset".to_string());
                         } else {
-                            self.state = MenuState::RenameName(entry.name.clone(), entry.name.clone());
+                            self.state =
+                                MenuState::RenameName(entry.name.clone(), entry.name.clone());
                         }
                         MenuEvent::Handled
                     }
@@ -248,26 +301,17 @@ impl PresetMenu {
             },
         }
     }
-
 }
 // Responsive popup rect for preset menu
 fn preset_rect(area: Rect) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Max(30),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Max(30), Constraint::Min(1)])
         .split(area);
 
     Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Max(60),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Min(1), Constraint::Max(60), Constraint::Min(1)])
         .split(vertical[1])[1]
 }
 impl PresetMenu {
@@ -289,11 +333,17 @@ impl PresetMenu {
                         } else {
                             format!("{} ({} monitors)", entry.name, entry.enabled_count)
                         };
-                        let marker = if i == self.selected_index { " > " } else { "   " };
+                        let marker = if i == self.selected_index {
+                            " > "
+                        } else {
+                            "   "
+                        };
                         let number = format!("{:>2}. ", i + 1);
                         // Presets with 0 enabled monitors get a dimmed indicator.
                         if entry.enabled_count == 0 {
-                            lines.push(Line::from(format!("{}{}{}", marker, number, display)).dark_gray());
+                            lines.push(
+                                Line::from(format!("{}{}{}", marker, number, display)).dark_gray(),
+                            );
                             continue;
                         }
                         let mut line = Line::from(format!("{}{}{}", marker, number, display));
@@ -493,13 +543,22 @@ mod tests {
         assert_eq!(m.selected_index, 1);
 
         // Already at the bottom: stays put but still previews.
-        assert_eq!(m.handle_event(KeyCode::Char('j')), MenuEvent::Preview("gaming".to_string()));
+        assert_eq!(
+            m.handle_event(KeyCode::Char('j')),
+            MenuEvent::Preview("gaming".to_string())
+        );
         assert_eq!(m.selected_index, 1);
 
-        assert_eq!(m.handle_event(KeyCode::Char('k')), MenuEvent::Preview("desk".to_string()));
+        assert_eq!(
+            m.handle_event(KeyCode::Char('k')),
+            MenuEvent::Preview("desk".to_string())
+        );
         assert_eq!(m.selected_index, 0);
 
-        assert_eq!(m.handle_event(KeyCode::Up), MenuEvent::Preview("desk".to_string()));
+        assert_eq!(
+            m.handle_event(KeyCode::Up),
+            MenuEvent::Preview("desk".to_string())
+        );
         assert_eq!(m.selected_index, 0, "must not wrap around");
     }
 
@@ -508,8 +567,14 @@ mod tests {
         let mut m = two_presets();
         m.selected_index = 1;
 
-        assert_eq!(m.handle_event(KeyCode::Up), MenuEvent::Preview("desk".to_string()));
-        assert_eq!(m.handle_event(KeyCode::Down), MenuEvent::Preview("gaming".to_string()));
+        assert_eq!(
+            m.handle_event(KeyCode::Up),
+            MenuEvent::Preview("desk".to_string())
+        );
+        assert_eq!(
+            m.handle_event(KeyCode::Down),
+            MenuEvent::Preview("gaming".to_string())
+        );
     }
 
     #[test]
@@ -696,12 +761,18 @@ mod tests {
 
         let mut m = renaming("desk", "desk");
         assert_eq!(m.handle_event(KeyCode::Char('q')), MenuEvent::Handled);
-        assert_eq!(m.state, MenuState::RenameName("desk".into(), "deskq".into()));
+        assert_eq!(
+            m.state,
+            MenuState::RenameName("desk".into(), "deskq".into())
+        );
         assert_eq!(m.error_message, None);
 
         let mut m = renaming("desk", "desk");
         assert_eq!(m.handle_event(KeyCode::Char('Q')), MenuEvent::Handled);
-        assert_eq!(m.state, MenuState::RenameName("desk".into(), "deskQ".into()));
+        assert_eq!(
+            m.state,
+            MenuState::RenameName("desk".into(), "deskQ".into())
+        );
     }
 
     // --- rename sub state ---------------------------------------------
@@ -743,10 +814,7 @@ mod tests {
 
         assert_eq!(
             m.handle_event(KeyCode::Enter),
-            MenuEvent::Action(PresetAction::Rename(
-                "desk".to_string(),
-                "desx".to_string()
-            ))
+            MenuEvent::Action(PresetAction::Rename("desk".to_string(), "desx".to_string()))
         );
     }
 
@@ -841,7 +909,10 @@ mod tests {
         let text = text_of(&render(&m, Rect::new(0, 0, 80, 30)));
 
         assert!(text.contains("last [read-only]"), "got: {text}");
-        assert!(!text.contains("monitors)"), "count is replaced by the label");
+        assert!(
+            !text.contains("monitors)"),
+            "count is replaced by the label"
+        );
     }
 
     #[test]
@@ -928,5 +999,63 @@ mod tests {
         assert!(popup.height <= area.height);
         assert!(popup.x >= area.x && popup.y >= area.y);
         assert!(popup.width >= 1 && popup.height >= 1);
+    }
+
+    // --- mouse hit testing ----------------------------------------------
+
+    #[test]
+    fn row_at_maps_the_list_entries() {
+        let m = two_presets();
+        let area = Rect::new(0, 0, 80, 30);
+        // Border line + leading blank line, then the entries.
+        let top = PresetMenu::rect(area).y + 2;
+
+        assert_eq!(m.row_at(area, top), Some(0));
+        assert_eq!(m.row_at(area, top + 1), Some(1));
+        assert_eq!(m.row_at(area, top - 1), None, "blank line");
+        assert_eq!(m.row_at(area, top + 2), None, "past the list");
+    }
+
+    #[test]
+    fn row_at_is_ignored_outside_the_list_state() {
+        let mut m = two_presets();
+        m.state = MenuState::CreateName("x".to_string());
+
+        assert_eq!(m.row_at(Rect::new(0, 0, 80, 30), 10), None);
+    }
+
+    #[test]
+    fn select_index_picks_a_preset_and_rejects_out_of_range() {
+        let mut m = two_presets();
+
+        assert_eq!(m.select_index(1), Some("gaming".to_string()));
+        assert_eq!(m.selected_index, 1);
+        assert_eq!(m.select_index(9), None);
+        assert_eq!(m.selected_index, 1, "selection must survive");
+    }
+
+    #[test]
+    fn scroll_clamps_without_wrapping() {
+        let mut m = two_presets();
+
+        // Already at the top: scrolling up stays put but still previews.
+        assert_eq!(m.scroll(-1), Some("desk".to_string()));
+        assert_eq!(m.selected_index, 0);
+        assert_eq!(m.scroll(1), Some("gaming".to_string()));
+        assert_eq!(m.scroll(1), Some("gaming".to_string()));
+        assert_eq!(m.selected_index, 1);
+    }
+
+    #[test]
+    fn select_and_scroll_do_nothing_while_typing() {
+        let mut m = creating("x");
+
+        assert_eq!(m.select_index(0), None);
+        assert_eq!(m.scroll(1), None);
+        assert_eq!(m.state, MenuState::CreateName("x".to_string()));
+
+        let mut empty = menu(vec![]);
+        assert_eq!(empty.scroll(1), None);
+        assert_eq!(empty.selected_index, 0);
     }
 }

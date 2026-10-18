@@ -94,8 +94,8 @@ impl Configuration {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::state::MonitorState;
     use crate::config::Configuration;
+    use crate::config::state::MonitorState;
     use crate::monitor::{Monitor, Position};
 
     #[test]

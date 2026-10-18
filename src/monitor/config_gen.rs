@@ -2,9 +2,9 @@
 //!
 //! Generates both legacy .conf and Lua-style monitor configuration files.
 
-use std::io::Write;
-use crate::rotation::Rotation;
 use super::types::{Monitor, Position};
+use crate::rotation::Rotation;
+use std::io::Write;
 
 impl Monitor {
     // Generates a legacy-style hyprland.conf monitor line.
@@ -338,8 +338,7 @@ mod tests {
         m.position = None;
 
         assert!(
-            m.to_hyprland_lua_config()
-                .contains("position = \"0x0\""),
+            m.to_hyprland_lua_config().contains("position = \"0x0\""),
             "a missing position must not panic, it falls back to 0x0"
         );
     }
@@ -395,15 +394,16 @@ mod tests {
         );
         assert!(content.contains("output = \"DP-1\""));
         assert!(content.contains("mode = \"1920x1080@60\""));
-        assert!(content.contains("disabled = true"), "missing disabled block");
+        assert!(
+            content.contains("disabled = true"),
+            "missing disabled block"
+        );
         assert!(content.contains("-- Workspace assignments"));
         assert!(content.contains(
             "hl.workspace_rule({ workspace = \"2\", monitor = \"DP-1\", default = true })"
         ));
 
-        let rules = content
-            .matches("hl.workspace_rule")
-            .count();
+        let rules = content.matches("hl.workspace_rule").count();
         assert_eq!(rules, 1, "only the monitor with a workspace gets a rule");
     }
 

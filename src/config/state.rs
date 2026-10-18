@@ -3,12 +3,12 @@
 //! Handles saving and loading saved monitor positions, scales, and
 //! workspace assignments across sessions.
 
+use super::paths::{get_presets_dir, get_state_path};
+use crate::monitor::{Monitor, Position};
+use crate::validation::{validate, validate_preset_name};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use crate::monitor::{Monitor, Position};
-use super::paths::{get_state_path, get_presets_dir};
-use crate::validation::{validate, validate_preset_name};
 
 pub const LAST_PRESET_NAME: &str = "last";
 
@@ -68,10 +68,7 @@ pub fn save_monitor_state(monitors: &[Monitor]) -> std::io::Result<()> {
     save_monitor_state_in(&get_state_path(), monitors)
 }
 
-pub(crate) fn save_monitor_state_in(
-    path: &Path,
-    monitors: &[Monitor],
-) -> std::io::Result<()> {
+pub(crate) fn save_monitor_state_in(path: &Path, monitors: &[Monitor]) -> std::io::Result<()> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
@@ -104,10 +101,7 @@ pub fn save_state_as_last(monitors: &[Monitor]) -> std::io::Result<()> {
     save_state_as_last_in(&get_presets_dir(), monitors)
 }
 
-fn save_state_as_last_in(
-    dir: &Path,
-    monitors: &[Monitor],
-) -> std::io::Result<()> {
+fn save_state_as_last_in(dir: &Path, monitors: &[Monitor]) -> std::io::Result<()> {
     let preset_path = dir.join("last.json");
     if let Some(parent) = preset_path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
@@ -124,11 +118,7 @@ pub fn save_preset(name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
     save_preset_in(&get_presets_dir(), name, monitors)
 }
 
-fn save_preset_in(
-    dir: &Path,
-    name: &str,
-    monitors: &[Monitor],
-) -> std::io::Result<()> {
+fn save_preset_in(dir: &Path, name: &str, monitors: &[Monitor]) -> std::io::Result<()> {
     if is_last_preset(name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -147,7 +137,10 @@ fn save_preset_in(
     if let Err(errors) = validate(monitors) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("Monitor configuration validation failed: {}", errors.join(", ")),
+            format!(
+                "Monitor configuration validation failed: {}",
+                errors.join(", ")
+            ),
         ));
     }
 
@@ -204,10 +197,7 @@ fn validate_preset_monitors_match_in(
         None => return Err(vec![format!("Preset '{}' not found", preset_name)]),
     };
 
-    let connected_names: Vec<&str> = connected_monitors
-        .iter()
-        .map(|m| m.name.as_str())
-        .collect();
+    let connected_names: Vec<&str> = connected_monitors.iter().map(|m| m.name.as_str()).collect();
     let missing: Vec<String> = state
         .iter()
         .filter(|m| m.enabled)
@@ -227,7 +217,7 @@ pub fn apply_preset(name: &str, monitors: &mut [Monitor]) -> Result<(), String> 
     apply_preset_in(&get_presets_dir(), name, monitors)
 }
 
-fn apply_preset_in(
+pub(crate) fn apply_preset_in(
     dir: &Path,
     name: &str,
     monitors: &mut [Monitor],
@@ -264,11 +254,7 @@ pub fn override_preset(name: &str, monitors: &[Monitor]) -> Result<(), String> {
     override_preset_in(&get_presets_dir(), name, monitors)
 }
 
-fn override_preset_in(
-    dir: &Path,
-    name: &str,
-    monitors: &[Monitor],
-) -> Result<(), String> {
+fn override_preset_in(dir: &Path, name: &str, monitors: &[Monitor]) -> Result<(), String> {
     save_preset_in(dir, name, monitors)
         .map_err(|e| format!("Failed to save preset '{}': {}", name, e))
 }
@@ -351,11 +337,7 @@ pub fn rename_preset(old_name: &str, new_name: &str) -> std::io::Result<()> {
     rename_preset_in(&get_presets_dir(), old_name, new_name)
 }
 
-fn rename_preset_in(
-    dir: &Path,
-    old_name: &str,
-    new_name: &str,
-) -> std::io::Result<()> {
+fn rename_preset_in(dir: &Path, old_name: &str, new_name: &str) -> std::io::Result<()> {
     if is_last_preset(old_name) || is_last_preset(new_name) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -475,7 +457,6 @@ mod tests {
 
         assert_eq!(loaded[1].name, "HDMI-A-1");
         assert_eq!(loaded[1].position, Some(Position { x: 1536, y: 0 }));
-
     }
 
     #[test]
@@ -489,7 +470,6 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         let parsed: Vec<MonitorState> = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed.len(), 2);
-
     }
 
     #[test]
@@ -501,7 +481,6 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("read-only preset 'last'"));
         assert!(!dir.join("last.json").exists(), "nothing may be written");
-
     }
 
     #[test]
@@ -510,7 +489,12 @@ mod tests {
 
         for name in ["", "with space", "../escape", "under_score"] {
             let err = save_preset_in(&dir, name, &valid_layout()).unwrap_err();
-            assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "name: {:?}", name);
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::InvalidData,
+                "name: {:?}",
+                name
+            );
             assert!(
                 err.to_string().contains("Preset name validation failed"),
                 "unexpected message: {}",
@@ -518,7 +502,6 @@ mod tests {
             );
         }
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
-
     }
 
     #[test]
@@ -535,7 +518,6 @@ mod tests {
             err
         );
         assert!(!dir.join("overlapping.json").exists());
-
     }
 
     #[test]
@@ -560,7 +542,6 @@ mod tests {
 
         let loaded = load_preset_in(&dir, "desk").unwrap();
         assert_eq!(loaded[0].workspace, Some(9), "the second save must win");
-
     }
 
     #[test]
@@ -570,7 +551,6 @@ mod tests {
         assert!(load_preset_in(&dir, "does-not-exist").is_none());
         assert!(load_preset_in(&dir, "bad name").is_none());
         assert!(load_preset_in(&dir, "../escape").is_none());
-
     }
 
     #[test]
@@ -579,7 +559,6 @@ mod tests {
         fs::write(dir.join("broken.json"), "{ not json").unwrap();
 
         assert!(load_preset_in(&dir, "broken").is_none());
-
     }
 
     #[test]
@@ -588,7 +567,6 @@ mod tests {
         fs::write(dir.join("wrong.json"), r#"{"name": "DP-1"}"#).unwrap();
 
         assert!(load_preset_in(&dir, "wrong").is_none());
-
     }
 
     #[test]
@@ -625,7 +603,6 @@ mod tests {
                 "last".to_string()
             ]
         );
-
     }
 
     #[test]
@@ -639,7 +616,6 @@ mod tests {
         assert!(!dir.join("drop.json").exists());
         assert!(dir.join("keep.json").exists());
         assert_eq!(list_presets_in(&dir), vec!["keep".to_string()]);
-
     }
 
     #[test]
@@ -647,7 +623,6 @@ mod tests {
         let dir = temp_dir("delete-missing");
 
         assert!(delete_preset_in(&dir, "never-existed").is_ok());
-
     }
 
     #[test]
@@ -659,7 +634,6 @@ mod tests {
 
         let err = delete_preset_in(&dir, "bad name").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-
     }
 
     #[test]
@@ -674,7 +648,6 @@ mod tests {
         let loaded = load_preset_in(&dir, "new").expect("renamed preset loads");
         assert_eq!(loaded.len(), 2);
         assert_eq!(list_presets_in(&dir), vec!["new".to_string()]);
-
     }
 
     #[test]
@@ -688,7 +661,6 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
         assert!(dir.join("a.json").exists(), "source must survive");
         assert!(dir.join("b.json").exists(), "target must survive");
-
     }
 
     #[test]
@@ -707,7 +679,6 @@ mod tests {
 
         let reserved_new = rename_preset_in(&dir, "a", "last").unwrap_err();
         assert_eq!(reserved_new.kind(), std::io::ErrorKind::InvalidInput);
-
     }
 
     #[test]
@@ -718,7 +689,6 @@ mod tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
         assert!(!dir.join("target.json").exists());
-
     }
 
     #[test]
@@ -741,7 +711,6 @@ mod tests {
         assert_eq!(live[0].workspace, Some(4));
         assert_eq!(live[0].transform.as_deref(), Some("90"));
         assert!(!live[1].enabled, "preset may disable a monitor");
-
     }
 
     #[test]
@@ -777,7 +746,6 @@ mod tests {
 
         assert!(!live[0].modes[0].current);
         assert!(live[0].modes[1].current, "1280x720@75 must become current");
-
     }
 
     #[test]
@@ -803,7 +771,6 @@ mod tests {
 
         assert!(live[0].modes[0].current, "unmatched mode is ignored");
         assert_eq!(live[0].modes.len(), 1);
-
     }
 
     #[test]
@@ -829,7 +796,6 @@ mod tests {
             "monitors absent from the preset keep their values"
         );
         assert_eq!(live[1].workspace, Some(7));
-
     }
 
     #[test]
@@ -845,7 +811,6 @@ mod tests {
             Some(Position { x: 0, y: 0 }),
             "nothing may change on failure"
         );
-
     }
 
     #[test]
@@ -863,7 +828,6 @@ mod tests {
 
         assert_eq!(count_enabled_monitors_in_preset_in(&dir, "ghost"), None);
         assert_eq!(count_enabled_monitors_in_preset_in(&dir, "bad name"), None);
-
     }
 
     #[test]
@@ -880,7 +844,6 @@ mod tests {
             validate_preset_monitors_match_in(&dir, "p", &connected),
             Ok(())
         );
-
     }
 
     #[test]
@@ -892,7 +855,6 @@ mod tests {
         let missing = validate_preset_monitors_match_in(&dir, "p", &connected).unwrap_err();
 
         assert_eq!(missing, vec!["HDMI-A-1".to_string()]);
-
     }
 
     #[test]
@@ -902,7 +864,6 @@ mod tests {
         let err = validate_preset_monitors_match_in(&dir, "ghost", &[]).unwrap_err();
 
         assert_eq!(err, vec!["Preset 'ghost' not found".to_string()]);
-
     }
 
     #[test]
@@ -917,7 +878,6 @@ mod tests {
             err
         );
         assert!(!dir.join("broken.json").exists());
-
     }
 
     #[test]
@@ -927,7 +887,6 @@ mod tests {
         override_preset_in(&dir, "desk", &valid_layout()).expect("save");
 
         assert_eq!(list_presets_in(&dir), vec!["desk".to_string()]);
-
     }
 
     #[test]
@@ -940,7 +899,6 @@ mod tests {
         let loaded = load_preset_in(&dir, "last").expect("last preset loads");
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].position, loaded[1].position);
-
     }
 
     #[test]
@@ -955,6 +913,5 @@ mod tests {
 
         let loaded = load_preset_in(&dir, "last").unwrap();
         assert_eq!(loaded[0].scale, Some(2.0));
-
     }
 }

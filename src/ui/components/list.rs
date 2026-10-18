@@ -295,7 +295,9 @@ impl<'a> MonitorList<'a> {
             // the move is resolved.
             instructions_items.push(" Apply ".white());
             instructions_items.push("<Enter/Space> ".blue().bold());
-            instructions_items.push(" Cancel/Revert all ".white());
+            // Kept short (41 columns) so the hint still fits on 46-48 column
+            // terminals; the help modal spells out "Cancel/Revert all".
+            instructions_items.push(" Cancel all ".white());
             instructions_items.push("<Esc/q> ".blue().bold());
         } else if is_mini_mode {
             instructions_items.push(" Save ".white());
@@ -766,10 +768,7 @@ mod tests {
             let text = text_of(&buf);
 
             assert!(text.contains("Apply"), "apply hint missing: {text}");
-            assert!(
-                text.contains("Cancel/Revert"),
-                "revert hint missing: {text}"
-            );
+            assert!(text.contains("Cancel all"), "revert hint missing: {text}");
             assert!(text.contains("<Esc/q>"), "revert keys missing: {text}");
             for hidden in ["<m>", "<r>", "<s>", "<o>", "<0-9>", "<w>", "<q>", "<K>"] {
                 assert!(!text.contains(hidden), "{hidden} must be hidden: {text}");
@@ -798,7 +797,7 @@ mod tests {
         assert!(text.contains("<k/j>"), "navigation hint missing: {text}");
         assert!(text.contains("<Enter/Space>"), "row apply missing: {text}");
         assert!(
-            !text.contains("Cancel/Revert"),
+            !text.contains("Cancel all"),
             "the View confirm hint must stay in View: {text}"
         );
     }

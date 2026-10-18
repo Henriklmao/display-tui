@@ -803,107 +803,12 @@ impl App {
         self.exit = true;
     }
 
+    // Runs the shared validation module over the live layout and flattens the
+    // structured errors to the strings the popup shows. Keeping a single rule
+    // engine means the write check and the diagnostics highlights can never
+    // drift apart.
     fn validate(&self) -> Result<(), Vec<String>> {
-        let mut errors = Vec::new();
-        let mut ws_counts = std::collections::HashMap::new();
-        for m in &self.monitors {
-            if let Some(ws) = m.workspace {
-                *ws_counts.entry(ws).or_insert(0) += 1;
-            }
-        }
-
-        let mut duplicated_ws = Vec::new();
-        for (ws, count) in ws_counts {
-            if count > 1 {
-                duplicated_ws.push(ws.to_string());
-            }
-        }
-        if !duplicated_ws.is_empty() {
-            errors.push(format!(
-                "Duplicate workspace assignment detected: {}",
-                duplicated_ws.join(", ")
-            ));
-        }
-
-        let enabled_indices: Vec<usize> = self
-            .monitors
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.enabled)
-            .map(|(i, _)| i)
-            .collect();
-
-        if enabled_indices.len() > 1 {
-            let mut adj = vec![vec![]; enabled_indices.len()];
-            let mut geoms = Vec::new();
-            for &idx in &enabled_indices {
-                geoms.push(self.monitors[idx].get_geometry());
-            }
-
-            let eps = 2.0;
-            for i in 0..geoms.len() {
-                for j in (i + 1)..geoms.len() {
-                    let (x1, y1, w1, h1) = geoms[i];
-                    let (x2, y2, w2, h2) = geoms[j];
-
-                    if x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1 {
-                        let name1 = &self.monitors[enabled_indices[i]].name;
-                        let name2 = &self.monitors[enabled_indices[j]].name;
-                        errors.push(format!("Monitors overlap: {} and {}", name1, name2));
-                    }
-
-                    let touches_x = x1 <= x2 + w2 + eps && x2 <= x1 + w1 + eps;
-                    let touches_y = y1 <= y2 + h2 + eps && y2 <= y1 + h1 + eps;
-
-                    if touches_x && touches_y {
-                        adj[i].push(j);
-                        adj[j].push(i);
-                    }
-                }
-            }
-
-            let mut components = Vec::new();
-            let mut global_visited = vec![false; enabled_indices.len()];
-
-            for i in 0..enabled_indices.len() {
-                if !global_visited[i] {
-                    let mut comp = Vec::new();
-                    let mut q = vec![i];
-                    global_visited[i] = true;
-
-                    while let Some(node) = q.pop() {
-                        comp.push(node);
-                        for &neighbor in &adj[node] {
-                            if !global_visited[neighbor] {
-                                global_visited[neighbor] = true;
-                                q.push(neighbor);
-                            }
-                        }
-                    }
-                    components.push(comp);
-                }
-            }
-
-            if components.len() > 1 {
-                components.sort_by_key(|a| std::cmp::Reverse(a.len()));
-                let mut disconnected = Vec::new();
-                for comp in components.iter().skip(1) {
-                    for &idx in comp {
-                        disconnected.push(self.monitors[enabled_indices[idx]].name.clone());
-                    }
-                }
-                errors.push(format!(
-                    "Monitors not contiguous. Disconnected: {}",
-                    disconnected.join(", ")
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
+        crate::validation::validate(&self.monitors)
     }
 
     pub(crate) fn write(&mut self) {
@@ -1278,5 +1183,89 @@ mod tests {
             "the other move stays pending"
         );
         assert_eq!(app.move_origins.get(&0), Some(&(10, 20)));
+    }
+
+    // App::validate must delegate to the shared rule module so the write check
+    // and the structured diagnostics report exactly the same problems.
+    #[test]
+    fn validate_reports_the_shared_rule_messages() {
+        let overlap = app_with(vec![
+            Monitor {
+                name: "A".to_string(),
+                enabled: true,
+                position: Some(Position { x: 0, y: 0 }),
+                workspace: Some(1),
+                modes: vec![crate::monitor::Resolution {
+                    width: 1920,
+                    height: 1080,
+                    refresh: 60.0,
+                    preferred: true,
+                    current: true,
+                }],
+                ..Default::default()
+            },
+            Monitor {
+                name: "B".to_string(),
+                enabled: true,
+                position: Some(Position { x: 100, y: 0 }),
+                workspace: Some(1),
+                modes: vec![crate::monitor::Resolution {
+                    width: 1920,
+                    height: 1080,
+                    refresh: 60.0,
+                    preferred: true,
+                    current: true,
+                }],
+                ..Default::default()
+            },
+        ]);
+
+        let errors = overlap.validate().unwrap_err();
+
+        assert_eq!(
+            errors,
+            vec![
+                "Workspace 1 is assigned to multiple monitors: A, B".to_string(),
+                "Monitors overlap: A and B".to_string(),
+            ],
+            "App::validate must surface the module's structured messages"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_a_contiguous_layout() {
+        let mut app = app_with(vec![
+            Monitor {
+                name: "A".to_string(),
+                enabled: true,
+                position: Some(Position { x: 0, y: 0 }),
+                modes: vec![crate::monitor::Resolution {
+                    width: 1920,
+                    height: 1080,
+                    refresh: 60.0,
+                    preferred: true,
+                    current: true,
+                }],
+                ..Default::default()
+            },
+            Monitor {
+                name: "B".to_string(),
+                enabled: true,
+                position: Some(Position { x: 1920, y: 0 }),
+                modes: vec![crate::monitor::Resolution {
+                    width: 1920,
+                    height: 1080,
+                    refresh: 60.0,
+                    preferred: true,
+                    current: true,
+                }],
+                ..Default::default()
+            },
+        ]);
+
+        assert_eq!(app.validate(), Ok(()));
+        // Sanity: the delegate is what actually runs.
+        app.monitors[1].position = Some(Position { x: 0, y: 0 });
+        assert!(app.validate().is_err());
     }
 }

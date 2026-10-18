@@ -777,6 +777,29 @@ mod tests {
     }
 
     #[test]
+    fn the_pending_move_footer_fits_a_narrow_terminal() {
+        // The confirm line is the longest hint the list draws, and it is shown
+        // at every width. At 46 columns (44 inner cells) both keys must survive,
+        // so a longer label cannot silently clip "<Esc/q>".
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 46, 8);
+        let mut list = MonitorList {
+            state: TableState::default().with_selected(Some(0)),
+            selected_row: Some(0),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: true,
+        };
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+        let text = text_of(&buf);
+
+        assert!(text.contains("<Enter/Space>"), "apply keys clipped: {text}");
+        assert!(text.contains("<Esc/q>"), "cancel keys clipped: {text}");
+    }
+
+    #[test]
     fn a_pending_move_does_not_change_the_sub_mode_footer() {
         // In a sub-mode Enter/Space apply the highlighted row, so the reduced
         // View hint must not leak in there.

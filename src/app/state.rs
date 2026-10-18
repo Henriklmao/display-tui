@@ -47,6 +47,10 @@ pub struct App {
     pub hover_frame: u32,
     // When the current hover began, for scheduling the shimmer.
     pub hover_since: Option<Instant>,
+    // The last pointer cell, used to place the tooltip.
+    pub hover_point: (u16, u16),
+    // The tooltip to draw this frame, computed in `draw`.
+    pub tooltip: Option<crate::ui::tooltip::TooltipState>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -237,7 +241,8 @@ impl App {
     }
 
     // Records the hovered element, restarting the shimmer only on a change.
-    pub(crate) fn set_hover(&mut self, target: Option<HoverTarget>, now: Instant) {
+    pub(crate) fn set_hover(&mut self, target: Option<HoverTarget>, point: (u16, u16), now: Instant) {
+        self.hover_point = point;
         if self.hover == target {
             return;
         }
@@ -249,6 +254,25 @@ impl App {
     // The current hover shimmer step, for the components to style with.
     pub(crate) fn hover_tick(&self) -> u32 {
         self.hover_frame
+    }
+
+    // The tooltip for the current hover, once the pointer has rested long
+    // enough. Injected `now` keeps the dwell math testable.
+    pub(crate) fn tooltip_at(&self, now: Instant) -> Option<crate::ui::tooltip::TooltipState> {
+        use crate::ui::tooltip::{TOOLTIP_DELAY, TOOLTIP_FADE, text_for};
+
+        let target = self.hover?;
+        let since = self.hover_since?;
+        let elapsed = now.saturating_duration_since(since);
+        if elapsed < TOOLTIP_DELAY {
+            return None;
+        }
+        let step = (((elapsed - TOOLTIP_DELAY).as_millis() / TOOLTIP_FADE.as_millis()) as u8).min(3);
+        Some(crate::ui::tooltip::TooltipState {
+            text: text_for(target),
+            step,
+            anchor: self.hover_point,
+        })
     }
 
     // Resolves the presets directory, honouring the injectable override.
@@ -437,6 +461,8 @@ impl App {
             .as_ref()
             .map(|popup| popup.layout(area));
         self.layout = Some(layout);
+        // The tooltip is derived from the dwell time at draw time.
+        self.tooltip = self.tooltip_at(Instant::now());
         frame.render_widget(&*self, area);
     }
 
@@ -1659,7 +1685,7 @@ mod tests {
     fn hover_arms_the_shimmer_and_advances_it_on_the_deadline() {
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::ListRow(0)), t0);
+        app.set_hover(Some(HoverTarget::ListRow(0)), (10, 10), t0);
 
         assert_eq!(app.next_deadline_at(t0), Some(HOVER_TOGGLE));
 
@@ -1669,7 +1695,7 @@ mod tests {
         app.advance_animation_at(t0 + Duration::from_millis(80));
         assert_eq!(app.hover_tick(), 1, "the shimmer advanced");
 
-        app.set_hover(None, t0 + Duration::from_millis(100));
+        app.set_hover(None, (10, 10), t0 + Duration::from_millis(100));
         assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(100)), None);
         assert_eq!(app.hover_tick(), 0, "hover-out resets the shimmer");
     }
@@ -1679,13 +1705,56 @@ mod tests {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.arm_blink(t0);
-        app.set_hover(Some(HoverTarget::Map(0)), t0 + Duration::from_millis(450));
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0 + Duration::from_millis(450));
 
         // 50ms of blink remain, 80ms of hover.
         assert_eq!(
             app.next_deadline_at(t0 + Duration::from_millis(450)),
             Some(Duration::from_millis(50))
         );
+    }
+
+    #[test]
+    fn the_tooltip_appears_only_after_the_dwell_and_fades_in() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+
+        assert!(
+            app.tooltip_at(t0 + Duration::from_millis(2999)).is_none(),
+            "nothing before the 3s dwell"
+        );
+
+        let state = app
+            .tooltip_at(t0 + Duration::from_millis(3000))
+            .expect("tooltip");
+        assert_eq!(state.text, "Drag to move the monitor");
+        assert_eq!(state.step, 0, "first fade step");
+        assert_eq!(state.anchor, (10, 5));
+
+        assert_eq!(
+            app.tooltip_at(t0 + Duration::from_millis(3250)).unwrap().step,
+            2
+        );
+        assert_eq!(
+            app.tooltip_at(t0 + Duration::from_secs(5)).unwrap().step,
+            3,
+            "fully faded in and stable"
+        );
+    }
+
+    #[test]
+    fn changing_the_hover_target_restarts_the_dwell() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+        app.set_hover(Some(HoverTarget::Map(1)), (20, 5), t0 + Duration::from_secs(3));
+
+        assert!(
+            app.tooltip_at(t0 + Duration::from_millis(3100)).is_none(),
+            "the new element's dwell starts over"
+        );
+        assert!(app.tooltip_at(t0 + Duration::from_secs(6)).is_some());
     }
 
     // --- validate on apply + Space auto-fix -----------------------------

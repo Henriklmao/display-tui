@@ -75,6 +75,11 @@ impl Widget for &App {
         if let Some(ref popup) = self.show_popup {
             popup.render_with(area, buf, hover, hover_tick);
         }
+
+        // Topmost layer: the hover tooltip.
+        if let Some(ref tooltip) = self.tooltip {
+            crate::ui::tooltip::render(tooltip, area, buf);
+        }
     }
 }
 
@@ -255,6 +260,23 @@ mod tests {
             // Must not panic even though the tables index a selected monitor.
             let _ = render_app(&a, Rect::new(0, 0, 120, 40));
         }
+    }
+
+    #[test]
+    fn the_tooltip_is_drawn_on_top_of_everything() {
+        let mut a = app(TUIMode::View);
+        a.tooltip = Some(crate::ui::tooltip::TooltipState {
+            text: "Click to save your changes",
+            step: 3,
+            anchor: (10, 10),
+        });
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(
+            text.contains("Click to save your changes"),
+            "tooltip missing: {text}"
+        );
     }
 
     #[test]

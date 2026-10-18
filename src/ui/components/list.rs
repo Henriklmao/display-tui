@@ -56,6 +56,54 @@ fn has_duplicate_workspace(monitors: &[Monitor]) -> bool {
     workspace_counts(monitors).values().any(|&count| count > 1)
 }
 
+// A footer hint and how soon it is dropped when the line does not fit: lower
+// ranks go first, and hints sharing a rank go together.
+type Hint = (usize, Vec<Span<'static>>);
+
+// Ranks hints in display order, so the last one is dropped first. The hints are
+// listed most important first, which is also how they read.
+fn ranked(groups: Vec<Vec<Span<'static>>>) -> Vec<Hint> {
+    let last = groups.len().saturating_sub(1);
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, spans)| (last - index, spans))
+        .collect()
+}
+
+// Drops the least important hints until the line fits `inner_width`, so a narrow
+// terminal loses whole hints instead of clipping half a key. Everything goes
+// before the line is allowed to overflow.
+fn fit_footer(hints: &mut Vec<Hint>, inner_width: usize) {
+    let mut ranks: Vec<usize> = hints.iter().map(|(rank, _)| *rank).collect();
+    ranks.sort_unstable();
+    ranks.dedup();
+
+    for rank in ranks {
+        if footer_width(hints) <= inner_width {
+            return;
+        }
+        hints.retain(|(hint_rank, _)| *hint_rank != rank);
+    }
+}
+
+// The drawn width of the footer hints in cells, ignoring the separator space
+// after the last hint: it is invisible, so it must not cost a hint at the
+// boundary.
+fn footer_width(hints: &[Hint]) -> usize {
+    let width: usize = hints
+        .iter()
+        .flat_map(|(_, spans)| spans)
+        .map(Span::width)
+        .sum();
+    let hanging_space = hints
+        .last()
+        .and_then(|(_, spans)| spans.last())
+        .is_some_and(|span| span.content.ends_with(' '));
+
+    width.saturating_sub(usize::from(hanging_space))
+}
+
 #[derive(Debug)]
 pub struct MonitorList<'a> {
     pub mode: TUIMode,
@@ -283,111 +331,98 @@ impl<'a> MonitorList<'a> {
             .white()
             .bold(),
         );
-        let mut instructions_items = vec![];
-
         let workspace_counts = workspace_counts(self.monitors);
         let has_duplicate_workspace = has_duplicate_workspace(self.monitors);
 
         let is_mini_mode = area.width < 115;
+        // Footer hints as (drop rank, spans), drawn in the order given: when the
+        // line does not fit, `fit_footer` drops the lowest ranks until it does,
+        // so a narrow terminal loses whole hints instead of half a key.
+        let mut hints: Vec<Hint> = Vec::new();
         if self.moved_pending && self.mode == TUIMode::View {
             // A pending mouse move is a confirm state: only Apply or
             // Cancel/Revert are offered, so the usual actions stay hidden until
-            // the move is resolved.
-            const RIGHT_CLICK_HINT: usize = 2;
-            instructions_items = vec![
-                " Apply ".white(),
-                "<Enter/Space> ".blue().bold(),
-                " Right-click ".white(),
-                " Cancel all ".white(),
-                "<Esc/q> ".blue().bold(),
-            ];
-            // The mouse alternative is the first thing to go when the line no
-            // longer fits the footer: narrow terminals keep both keys instead of
-            // a clipped "<Esc/q>". The help modal names right-click and
-            // "Cancel/Revert all" in full.
-            let hint_width: usize = instructions_items.iter().map(Span::width).sum();
-            if hint_width > area.width.saturating_sub(2) as usize {
-                instructions_items.remove(RIGHT_CLICK_HINT);
-            }
-        } else if is_mini_mode {
-            instructions_items.push(" Save ".white());
-            instructions_items.push("<w> ".blue().bold());
-            if self.mode == TUIMode::View {
-                instructions_items.push(" Quit ".white());
-                instructions_items.push("<q> ".blue().bold());
-                instructions_items.push(" Keybinds ".white());
-                instructions_items.push("<K> ".blue().bold());
-            } else {
-                instructions_items.push(" Cancel ".white());
-                instructions_items.push("<Esc/q> ".blue().bold());
-            }
+            // the move is resolved. The help modal is gated while the move is
+            // pending, so these hints are the only documentation: the mouse
+            // alternative goes first, then the longer verb, and the two keys
+            // last and together. "Apply" outlives "Cancel all" so the surviving
+            // verb stays with the key it names.
+            hints.extend([
+                (2, vec![" Apply ".white()]),
+                (3, vec!["<Enter/Space> ".blue().bold()]),
+                (0, vec![" Right-click ".white()]),
+                (1, vec![" Cancel all ".white()]),
+                (3, vec!["<Esc/q> ".blue().bold()]),
+            ]);
         } else {
-            // nerdfont symbols:      (nf-oct-arrow_...)
-            match self.mode {
-                TUIMode::View => {
-                    instructions_items.push(" Scroll  ".white());
-                    instructions_items.push("<k/j> ".blue().bold());
-                    instructions_items.push(" Move ".white());
-                    instructions_items.push("<m> ".blue().bold());
-                    instructions_items.push(" Resolution ".white());
-                    instructions_items.push("<r> ".blue().bold());
-                    instructions_items.push(" Scale ".white());
-                    instructions_items.push("<s> ".blue().bold());
-                    instructions_items.push(" Rotate ".white());
-                    instructions_items.push("<o> ".blue().bold());
-                    instructions_items.push(" Workspace ".white());
-                    instructions_items.push("<0-9> ".blue().bold());
-                    match self.monitors.get(self.selected_row.unwrap_or(0)) {
-                        Some(monitor) if monitor.enabled => {
-                            instructions_items.push(" Disable ".white());
-                            instructions_items.push("<d> ".blue().bold());
+            let mut groups: Vec<Vec<Span<'static>>> = Vec::new();
+            if is_mini_mode {
+                groups.push(vec![" Save ".white(), "<w> ".blue().bold()]);
+                if self.mode == TUIMode::View {
+                    groups.push(vec![" Quit ".white(), "<q> ".blue().bold()]);
+                    groups.push(vec![" Keybinds ".white(), "<K> ".blue().bold()]);
+                } else {
+                    groups.push(vec![" Cancel ".white(), "<Esc/q> ".blue().bold()]);
+                }
+            } else {
+                // nerdfont symbols:      (nf-oct-arrow_...)
+                match self.mode {
+                    TUIMode::View => {
+                        groups.push(vec![" Scroll  ".white(), "<k/j> ".blue().bold()]);
+                        groups.push(vec![" Move ".white(), "<m> ".blue().bold()]);
+                        groups.push(vec![" Resolution ".white(), "<r> ".blue().bold()]);
+                        groups.push(vec![" Scale ".white(), "<s> ".blue().bold()]);
+                        groups.push(vec![" Rotate ".white(), "<o> ".blue().bold()]);
+                        groups.push(vec![" Workspace ".white(), "<0-9> ".blue().bold()]);
+                        match self.monitors.get(self.selected_row.unwrap_or(0)) {
+                            Some(monitor) if monitor.enabled => {
+                                groups.push(vec![" Disable ".white(), "<d> ".blue().bold()]);
+                            }
+                            Some(_) => {
+                                groups.push(vec![" Enable ".white(), "<e> ".blue().bold()]);
+                            }
+                            None => {}
                         }
-                        Some(_) => {
-                            instructions_items.push(" Enable ".white());
-                            instructions_items.push("<e> ".blue().bold());
-                        }
-                        None => {}
+                    }
+
+                    TUIMode::Resolution | TUIMode::Scale => {
+                        groups.push(vec![" Navigate ".white(), "<k/j> ".blue().bold()]);
+                        groups.push(vec![" Apply ".white(), "<Enter/Space> ".blue().bold()]);
+                    }
+
+                    TUIMode::Move => {
+                        groups.push(vec![" Fastmove ".white(), "<H/J/K/L> ".blue().bold()]);
+                        groups.push(vec![" Snapmove ".white(), "<h/j/k/l> ".blue().bold()]);
                     }
                 }
 
-                TUIMode::Resolution | TUIMode::Scale => {
-                    instructions_items.push(" Navigate ".white());
-                    instructions_items.push("<k/j> ".blue().bold());
-                    instructions_items.push(" Apply ".white());
-                    instructions_items.push("<Enter/Space> ".blue().bold());
-                }
-
-                TUIMode::Move => {
-                    instructions_items.push(" Fastmove ".white());
-                    instructions_items.push("<H/J/K/L> ".blue().bold());
-                    instructions_items.push(" Snapmove ".white());
-                    instructions_items.push("<h/j/k/l> ".blue().bold());
-                }
-            }
-
-            instructions_items.push(" Save ".white());
-            instructions_items.push("<w> ".blue().bold());
-            match self.mode {
-                TUIMode::View => {
-                    instructions_items.push(" Quit ".white());
-                    instructions_items.push("<q> ".blue().bold());
-                    instructions_items.push(" Help ".white());
-                    instructions_items.push("<K> ".blue().bold());
-                }
-                TUIMode::Move => {
-                    instructions_items.push(" Done ".white());
-                    instructions_items.push("<Esc/Enter/q> ".blue().bold());
-                }
-                // In the resolution/scale tables q cancels back to View
-                // instead of quitting, so it is advertised as Cancel.
-                TUIMode::Resolution | TUIMode::Scale => {
-                    instructions_items.push(" Cancel ".white());
-                    instructions_items.push("<Esc/q> ".blue().bold());
+                groups.push(vec![" Save ".white(), "<w> ".blue().bold()]);
+                match self.mode {
+                    TUIMode::View => {
+                        groups.push(vec![" Quit ".white(), "<q> ".blue().bold()]);
+                        groups.push(vec![" Help ".white(), "<K> ".blue().bold()]);
+                    }
+                    TUIMode::Move => {
+                        groups.push(vec![" Done ".white(), "<Esc/Enter/q> ".blue().bold()]);
+                    }
+                    // In the resolution/scale tables q cancels back to View
+                    // instead of quitting, so it is advertised as Cancel.
+                    TUIMode::Resolution | TUIMode::Scale => {
+                        groups.push(vec![" Cancel ".white(), "<Esc/q> ".blue().bold()]);
+                    }
                 }
             }
+            hints = ranked(groups);
         }
 
-        let instructions = Line::from(instructions_items);
+        fit_footer(&mut hints, area.width.saturating_sub(2) as usize);
+
+        let instructions = Line::from(
+            hints
+                .into_iter()
+                .flat_map(|(_, spans)| spans)
+                .collect::<Vec<Span<'static>>>(),
+        );
 
         let block = Block::bordered()
             .title(title.centered())
@@ -451,6 +486,31 @@ mod tests {
     use super::*;
     use crate::test_utils::tests::{find_cell, find_text, test_monitors, text_of};
     use ratatui::style::Style;
+
+    // The instruction footer of a rendered list, without the border column and
+    // the centring spaces (so it is the drawn hint text, not the padding).
+    fn footer(width: u16, mode: TUIMode, pending: bool) -> String {
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, width, 8);
+        let mut list = MonitorList {
+            state: TableState::default().with_selected(Some(0)),
+            selected_row: Some(0),
+            mode,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: pending,
+        };
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+
+        // The footer is the last inner row, above the bottom border.
+        let row = area.height - 2;
+        (0..width)
+            .map(|x| buf[(x, row)].symbol())
+            .collect::<String>()
+            .trim_matches(|symbol| symbol == ' ' || symbol == '┃')
+            .to_string()
+    }
 
     #[test]
     fn render_list() {
@@ -787,53 +847,106 @@ mod tests {
     }
 
     #[test]
-    fn the_pending_move_footer_fits_a_narrow_terminal() {
-        // The confirm line is the longest hint the list draws, and it is shown
-        // at every width. At 46 columns (44 inner cells) both keys must survive,
-        // so a longer label cannot silently clip "<Esc/q>".
-        let monitors = test_monitors();
-        let area = Rect::new(0, 0, 46, 8);
-        let mut list = MonitorList {
-            state: TableState::default().with_selected(Some(0)),
-            selected_row: Some(0),
-            mode: TUIMode::View,
-            monitors: &monitors,
-            is_previewing: false,
-            moved_pending: true,
-        };
-        let mut buf = Buffer::empty(area);
-        list.render(area, &mut buf);
-        let text = text_of(&buf);
+    fn the_footer_drops_whole_hints_instead_of_clipping_them() {
+        // The footer is the only place several hints appear, and ratatui clips a
+        // centred line silently, so assert on the drawn cells: no word and no key
+        // may be cut in half, whatever the width.
+        const KEYS: [&str; 16] = [
+            "<k/j>",
+            "<m>",
+            "<r>",
+            "<s>",
+            "<o>",
+            "<0-9>",
+            "<d>",
+            "<e>",
+            "<w>",
+            "<q>",
+            "<K>",
+            "<Enter/Space>",
+            "<Esc/q>",
+            "<H/J/K/L>",
+            "<h/j/k/l>",
+            "<Esc/Enter/q>",
+        ];
+        const WORDS: [&str; 21] = [
+            "Apply",
+            "Cancel",
+            "all",
+            "Right-click",
+            "Save",
+            "Quit",
+            "Keybinds",
+            "Scroll",
+            "Move",
+            "Resolution",
+            "Scale",
+            "Rotate",
+            "Workspace",
+            "Disable",
+            "Enable",
+            "Navigate",
+            "Fastmove",
+            "Snapmove",
+            "Done",
+            "Help",
+            // The scroll arrows of the View hint.
+            "\u{f431}\u{f433}",
+        ];
 
-        assert!(text.contains("<Enter/Space>"), "apply keys clipped: {text}");
-        assert!(text.contains("<Esc/q>"), "cancel keys clipped: {text}");
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
+            for width in [16u16, 24, 30, 40, 46, 60, 90, 114, 115, 120, 130, 160] {
+                for pending in [false, true] {
+                    let line = footer(width, mode, pending);
+                    let cut: Vec<&str> = line
+                        .split_whitespace()
+                        .filter(|token| !KEYS.contains(token) && !WORDS.contains(token))
+                        .collect();
+
+                    assert!(
+                        cut.is_empty(),
+                        "{mode:?} at {width} clipped {cut:?}: {line}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_pending_move_footer_keeps_both_keys_or_neither() {
+        // The help modal is gated while a move is pending, so the footer is the
+        // only documentation: it must not offer Apply without its Cancel.
+        for width in 8u16..170 {
+            let line = footer(width, TUIMode::View, true);
+            assert_eq!(
+                line.contains("<Enter/Space>"),
+                line.contains("<Esc/q>"),
+                "at {width}: {line}"
+            );
+        }
+
+        // At 46 columns - the width that once clipped it - both survive.
+        let line = footer(46, TUIMode::View, true);
+        assert!(
+            line.contains("<Enter/Space>") && line.contains("<Esc/q>"),
+            "{line}"
+        );
     }
 
     #[test]
     fn the_right_click_hint_is_only_shown_when_the_confirm_line_fits() {
-        let monitors = test_monitors();
-        let footer = |width: u16| {
-            let area = Rect::new(0, 0, width, 8);
-            let mut list = MonitorList {
-                state: TableState::default().with_selected(Some(0)),
-                selected_row: Some(0),
-                mode: TUIMode::View,
-                monitors: &monitors,
-                is_previewing: false,
-                moved_pending: true,
-            };
-            let mut buf = Buffer::empty(area);
-            list.render(area, &mut buf);
-            text_of(&buf)
-        };
-
         // Wide enough: the mouse alternative is advertised next to the keys.
-        let wide = footer(130);
+        let wide = footer(130, TUIMode::View, true);
         assert!(wide.contains("Right-click"), "right-click hint: {wide}");
 
         // Too narrow for the longer line: the hint is dropped instead of
-        // clipping the keys (covered by the footer-fit test above).
-        let narrow = footer(46);
+        // clipping the keys (covered by the overflow test above).
+        let narrow = footer(46, TUIMode::View, true);
         assert!(
             !narrow.contains("Right-click"),
             "hint must be dropped: {narrow}"

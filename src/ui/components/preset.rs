@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -437,11 +437,13 @@ impl PresetMenu {
             text.push(Line::from(err.as_str()).red());
         }
 
-        let p = Paragraph::new(text).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Presets ".white()),
-        );
+        let p = Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Presets ".white()),
+            );
         p.render(popup_area, buf);
     }
 }
@@ -908,8 +910,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_list_shows_a_placeholder() {
-        let m = menu(vec![]);
+    fn a_long_preset_name_wraps_instead_of_clipping() {
+        let long = "a-preset-name-that-is-quite-long-indeed-and-keeps-going";
+        let m = menu(vec![entry(long, 2)]);
+
+        let text = text_of(&render(&m, Rect::new(0, 0, 30, 12)));
+
+        assert!(text.contains("Presets"), "got: {text}");
+        assert!(text.contains("a-preset"), "the start of the name renders: {text}");
+    }
+
+    #[test]
+    fn empty_list_shows_a_placeholder() {        let m = menu(vec![]);
         let text = text_of(&render(&m, Rect::new(0, 0, 80, 30)));
 
         assert!(text.contains("No presets found"), "got: {text}");

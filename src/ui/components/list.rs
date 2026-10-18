@@ -40,6 +40,22 @@ const COLUMN_WIDTHS: [Constraint; 8] = [
     Constraint::Percentage(10),
 ];
 
+// The columns shown at a given terminal width: trailing columns are dropped
+// instead of being squeezed into unreadable slivers. The checkbox and name
+// columns always survive, so hit-testing stays meaningful.
+fn visible_columns(width: u16) -> Vec<Constraint> {
+    let count = if width < 60 {
+        2 // icon, name
+    } else if width < 90 {
+        4 // icon, name, description, resolution
+    } else if width < 110 {
+        6 // ... position, scale
+    } else {
+        COLUMN_WIDTHS.len()
+    };
+    COLUMN_WIDTHS[..count].to_vec()
+}
+
 // Gap between table columns.
 const COLUMN_SPACING: u16 = 1;
 
@@ -483,7 +499,7 @@ impl<'a> MonitorList<'a> {
             ])
             .split(inner_area);
 
-        let widths = COLUMN_WIDTHS;
+        let widths = visible_columns(area.width);
 
         let table = Table::new(self.monitors_to_rows(&workspace_counts, &caution), widths)
             .column_spacing(COLUMN_SPACING)
@@ -1297,8 +1313,41 @@ mod tests {
     }
 
     #[test]
-    fn a_hovered_row_shimmers_in_the_accent_colour() {
-        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+    fn narrow_lists_drop_trailing_columns_instead_of_squeezing() {
+        let monitors = test_monitors();
+
+        let wide = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 140, 9),
+        ));
+        assert!(wide.contains("workspace"), "wide keeps every column: {wide}");
+
+        let medium = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 70, 9),
+        ));
+        assert!(medium.contains("description"), "medium keeps descriptions");
+        assert!(!medium.contains("rotation"), "medium drops rotation: {medium}");
+
+        let narrow = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 50, 9),
+        ));
+        assert!(narrow.contains("name"), "narrow keeps names: {narrow}");
+        assert!(
+            !narrow.contains("description"),
+            "narrow drops descriptions: {narrow}"
+        );
+    }
+
+    #[test]
+    fn a_hovered_row_shimmers_in_the_accent_colour() {        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
         let mut list = MonitorList {
             state: TableState::default().with_selected(Some(2)),
             selected_row: Some(2),

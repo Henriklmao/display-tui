@@ -1282,10 +1282,7 @@ mod tests {
         for x in inner.left()..inner.right() {
             let style = buf[(x, row)].style();
             if let (Some(fg), Some(bg)) = (style.fg, style.bg) {
-                assert_ne!(
-                    fg, bg,
-                    "cell ({x}, {row}) would be invisible when reversed"
-                );
+                assert_ne!(fg, bg, "cell ({x}, {row}) would be invisible when reversed");
             }
         }
     }
@@ -1322,7 +1319,10 @@ mod tests {
             0,
             Rect::new(0, 0, 140, 9),
         ));
-        assert!(wide.contains("workspace"), "wide keeps every column: {wide}");
+        assert!(
+            wide.contains("workspace"),
+            "wide keeps every column: {wide}"
+        );
 
         let medium = text_of(&render_list_to(
             &monitors,
@@ -1331,7 +1331,10 @@ mod tests {
             Rect::new(0, 0, 70, 9),
         ));
         assert!(medium.contains("description"), "medium keeps descriptions");
-        assert!(!medium.contains("rotation"), "medium drops rotation: {medium}");
+        assert!(
+            !medium.contains("rotation"),
+            "medium drops rotation: {medium}"
+        );
 
         let narrow = text_of(&render_list_to(
             &monitors,
@@ -1347,7 +1350,8 @@ mod tests {
     }
 
     #[test]
-    fn a_hovered_row_shimmers_in_the_accent_colour() {        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+    fn a_hovered_row_shimmers_in_the_accent_colour() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
         let mut list = MonitorList {
             state: TableState::default().with_selected(Some(2)),
             selected_row: Some(2),

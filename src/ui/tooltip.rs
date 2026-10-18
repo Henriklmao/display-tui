@@ -75,7 +75,9 @@ pub fn tooltip_rect(area: Rect, anchor: (u16, u16), text: &str, max_width: u16) 
     if area.width == 0 || area.height == 0 {
         return Rect::new(area.x, area.y, 0, 0);
     }
-    let inner_width = max_width.saturating_sub(2).min(area.width.saturating_sub(2));
+    let inner_width = max_width
+        .saturating_sub(2)
+        .min(area.width.saturating_sub(2));
     let text = fit_text(text, inner_width);
     let width = (text.chars().count() as u16)
         .saturating_add(2)
@@ -188,14 +190,7 @@ mod tests {
 
     #[test]
     fn it_is_clamped_inside_tiny_areas() {
-        for (width, height) in [
-            (0u16, 0u16),
-            (1, 1),
-            (3, 2),
-            (10, 4),
-            (2, 40),
-            (40, 2),
-        ] {
+        for (width, height) in [(0u16, 0u16), (1, 1), (3, 2), (10, 4), (2, 40), (40, 2)] {
             let area = Rect::new(0, 0, width, height);
             let rect = tooltip_rect(area, (0, 0), "a tooltip", 20);
             assert!(

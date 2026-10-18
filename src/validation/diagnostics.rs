@@ -115,22 +115,10 @@ impl DetachInfo {
         let m = monitors[self.monitor].get_geometry();
         let a = monitors[self.anchor].get_geometry();
         let (p, q) = match self.direction {
-            Direction::Right => (
-                (m.0 + m.2, m.1 + m.3 / 2.0),
-                (a.0, a.1 + a.3 / 2.0),
-            ),
-            Direction::Left => (
-                (m.0, m.1 + m.3 / 2.0),
-                (a.0 + a.2, a.1 + a.3 / 2.0),
-            ),
-            Direction::Down => (
-                (m.0 + m.2 / 2.0, m.1 + m.3),
-                (a.0 + a.2 / 2.0, a.1),
-            ),
-            Direction::Up => (
-                (m.0 + m.2 / 2.0, m.1),
-                (a.0 + a.2 / 2.0, a.1 + a.3),
-            ),
+            Direction::Right => ((m.0 + m.2, m.1 + m.3 / 2.0), (a.0, a.1 + a.3 / 2.0)),
+            Direction::Left => ((m.0, m.1 + m.3 / 2.0), (a.0 + a.2, a.1 + a.3 / 2.0)),
+            Direction::Down => ((m.0 + m.2 / 2.0, m.1 + m.3), (a.0 + a.2 / 2.0, a.1)),
+            Direction::Up => ((m.0 + m.2 / 2.0, m.1), (a.0 + a.2 / 2.0, a.1 + a.3)),
         };
 
         let mut segments = Vec::new();
@@ -231,7 +219,11 @@ fn axis_gap(a0: f64, a1: f64, b0: f64, b1: f64) -> f64 {
 fn overlap_span(a0: f64, a1: f64, b0: f64, b1: f64) -> Option<(f64, f64)> {
     let start = a0.max(b0);
     let end = a1.min(b1);
-    if end > start { Some((start, end)) } else { None }
+    if end > start {
+        Some((start, end))
+    } else {
+        None
+    }
 }
 
 // The distance between the nearest points of two rectangles.
@@ -444,20 +436,14 @@ fn build_detach(monitors: &[Monitor], monitor: usize, anchor: usize, gap: f64) -
         } else {
             Direction::Left
         };
-        (
-            direction,
-            overlap_span(m.1, m.1 + m.3, a.1, a.1 + a.3),
-        )
+        (direction, overlap_span(m.1, m.1 + m.3, a.1, a.1 + a.3))
     } else {
         let direction = if a.1 >= m.1 {
             Direction::Down
         } else {
             Direction::Up
         };
-        (
-            direction,
-            overlap_span(m.0, m.0 + m.2, a.0, a.0 + a.2),
-        )
+        (direction, overlap_span(m.0, m.0 + m.2, a.0, a.0 + a.2))
     };
 
     DetachInfo {
@@ -573,7 +559,11 @@ pub fn plan_auto_fix(monitors: &[Monitor], moved: Option<usize>) -> Option<AutoF
     let regions = overlap_regions(monitors);
     if let Some(region) = regions.first() {
         let chosen = choose_overlap_monitor(monitors, region.a, region.b, moved);
-        let other = if chosen == region.a { region.b } else { region.a };
+        let other = if chosen == region.a {
+            region.b
+        } else {
+            region.a
+        };
 
         let (dx, dy) = separation_delta(monitors, chosen, other);
         if dials_back(monitors, &shifted(monitors, chosen, dx, dy)) {
@@ -771,7 +761,10 @@ mod tests {
 
     #[test]
     fn a_partial_overlap_reports_the_intersection() {
-        let monitors = vec![sized(monitor("A", 0, 0), 100, 100), sized(monitor("B", 60, 0), 100, 100)];
+        let monitors = vec![
+            sized(monitor("A", 0, 0), 100, 100),
+            sized(monitor("B", 60, 0), 100, 100),
+        ];
 
         let regions = overlap_regions(&monitors);
 
@@ -812,7 +805,11 @@ mod tests {
         let small = segments_for(&monitors, 1);
 
         assert_eq!(small.len(), 4, "got {small:?}");
-        assert!(small.iter().any(|s| s == &EdgeSegment::horizontal(100.0, 100.0, 200.0)));
+        assert!(
+            small
+                .iter()
+                .any(|s| s == &EdgeSegment::horizontal(100.0, 100.0, 200.0))
+        );
         assert!(
             small
                 .iter()
@@ -916,10 +913,7 @@ mod tests {
     #[test]
     fn connector_steps_are_axis_aligned() {
         // Diagonal-ish: C is to the right and slightly above its anchor.
-        let monitors = vec![
-            monitor("A", 0, 0),
-            monitor("C", 5000, -300),
-        ];
+        let monitors = vec![monitor("A", 0, 0), monitor("C", 5000, -300)];
         let info = detach_infos(&monitors).into_iter().next().unwrap();
 
         let connector = info.connector(&monitors);

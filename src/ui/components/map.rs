@@ -198,7 +198,8 @@ impl<'a> Map<'a> {
         }
     }
 
-    pub fn handle_events(app: &mut App, key_event: KeyEvent) {        let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
+    pub fn handle_events(app: &mut App, key_event: KeyEvent) {
+        let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
         let selected = app.selected_monitor;
         match key_event.code {
             KeyCode::Char('k') => movement::snap_vertical(&mut app.monitors, selected, -1),
@@ -1293,10 +1294,7 @@ mod tests {
 
     #[test]
     fn an_overlap_is_painted_red_only_from_the_overlap_point_onward() {
-        let monitors = vec![
-            sized("A", 0, 0, 100, 100),
-            sized("B", 50, 50, 100, 100),
-        ];
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("B", 50, 50, 100, 100)];
         let highlights = layout_highlights(&monitors);
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
@@ -1314,10 +1312,7 @@ mod tests {
 
     #[test]
     fn a_detached_monitor_gets_its_full_border_its_anchor_edge_and_a_connector() {
-        let monitors = vec![
-            sized("A", 0, 0, 100, 100),
-            sized("C", 5000, 0, 100, 100),
-        ];
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
         let highlights = layout_highlights(&monitors);
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
@@ -1343,10 +1338,7 @@ mod tests {
 
     #[test]
     fn the_blink_phase_hides_the_highlights() {
-        let monitors = vec![
-            sized("A", 0, 0, 100, 100),
-            sized("C", 5000, 0, 100, 100),
-        ];
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
         let highlights = layout_highlights(&monitors);
         let area = Rect::new(0, 0, 100, 30);
         let mut buf = Buffer::empty(area);
@@ -1370,10 +1362,7 @@ mod tests {
 
     #[test]
     fn highlight_rendering_survives_tiny_areas() {
-        let monitors = vec![
-            sized("A", 0, 0, 100, 100),
-            sized("C", 5000, 0, 100, 100),
-        ];
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
         let highlights = layout_highlights(&monitors);
         for (width, height) in [(1u16, 1u16), (3, 2), (10, 5), (40, 12)] {
             let area = Rect::new(0, 0, width, height);

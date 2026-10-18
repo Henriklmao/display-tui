@@ -194,7 +194,10 @@ mod tests {
 
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
-        assert!(text.contains("[ Esc close ]"), "close button missing: {text}");
+        assert!(
+            text.contains("[ Esc close ]"),
+            "close button missing: {text}"
+        );
         assert!(
             !text.contains("force write"),
             "force must not be offered: {text}"
@@ -210,7 +213,10 @@ mod tests {
         let error_frame = error_popup.layout(area).frame;
         error.show_popup = Some(error_popup);
         let buf = render_app(&error, area);
-        assert_eq!(buf[(error_frame.x, error_frame.y)].style().fg, Some(Color::Red));
+        assert_eq!(
+            buf[(error_frame.x, error_frame.y)].style().fg,
+            Some(Color::Red)
+        );
 
         let mut info = app(TUIMode::View);
         let info_popup = Popup {

@@ -437,13 +437,11 @@ impl PresetMenu {
             text.push(Line::from(err.as_str()).red());
         }
 
-        let p = Paragraph::new(text)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Presets ".white()),
-            );
+        let p = Paragraph::new(text).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Presets ".white()),
+        );
         p.render(popup_area, buf);
     }
 }
@@ -917,11 +915,15 @@ mod tests {
         let text = text_of(&render(&m, Rect::new(0, 0, 30, 12)));
 
         assert!(text.contains("Presets"), "got: {text}");
-        assert!(text.contains("a-preset"), "the start of the name renders: {text}");
+        assert!(
+            text.contains("a-preset"),
+            "the start of the name renders: {text}"
+        );
     }
 
     #[test]
-    fn empty_list_shows_a_placeholder() {        let m = menu(vec![]);
+    fn empty_list_shows_a_placeholder() {
+        let m = menu(vec![]);
         let text = text_of(&render(&m, Rect::new(0, 0, 80, 30)));
 
         assert!(text.contains("No presets found"), "got: {text}");

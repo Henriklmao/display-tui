@@ -9,9 +9,7 @@ use crate::monitor::Monitor;
 use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
-use crate::validation::diagnostics::{
-    AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix,
-};
+use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
@@ -241,7 +239,12 @@ impl App {
     }
 
     // Records the hovered element, restarting the shimmer only on a change.
-    pub(crate) fn set_hover(&mut self, target: Option<HoverTarget>, point: (u16, u16), now: Instant) {
+    pub(crate) fn set_hover(
+        &mut self,
+        target: Option<HoverTarget>,
+        point: (u16, u16),
+        now: Instant,
+    ) {
         self.hover_point = point;
         if self.hover == target {
             return;
@@ -267,7 +270,8 @@ impl App {
         if elapsed < TOOLTIP_DELAY {
             return None;
         }
-        let step = (((elapsed - TOOLTIP_DELAY).as_millis() / TOOLTIP_FADE.as_millis()) as u8).min(3);
+        let step =
+            (((elapsed - TOOLTIP_DELAY).as_millis() / TOOLTIP_FADE.as_millis()) as u8).min(3);
         Some(crate::ui::tooltip::TooltipState {
             text: text_for(target),
             step,
@@ -456,10 +460,7 @@ impl App {
         // button rects are computed from the same function the renderer uses.
         let area = frame.area();
         let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
-        layout.popup = self
-            .show_popup
-            .as_ref()
-            .map(|popup| popup.layout(area));
+        layout.popup = self.show_popup.as_ref().map(|popup| popup.layout(area));
         self.layout = Some(layout);
         // The tooltip is derived from the dwell time at draw time.
         self.tooltip = self.tooltip_at(Instant::now());
@@ -503,7 +504,10 @@ impl App {
                 // Space applies the offered auto-fix; without one it keeps the
                 // original "close without action" meaning.
                 KeyCode::Char(' ') => {
-                    let has_fix = self.show_popup.as_ref().is_some_and(|popup| popup.fix.is_some());
+                    let has_fix = self
+                        .show_popup
+                        .as_ref()
+                        .is_some_and(|popup| popup.fix.is_some());
                     self.handle_popup_action(if has_fix {
                         PopupAction::AutoFix
                     } else {
@@ -1705,7 +1709,11 @@ mod tests {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.arm_blink(t0);
-        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0 + Duration::from_millis(450));
+        app.set_hover(
+            Some(HoverTarget::Map(0)),
+            (10, 5),
+            t0 + Duration::from_millis(450),
+        );
 
         // 50ms of blink remain, 80ms of hover.
         assert_eq!(
@@ -1733,7 +1741,9 @@ mod tests {
         assert_eq!(state.anchor, (10, 5));
 
         assert_eq!(
-            app.tooltip_at(t0 + Duration::from_millis(3250)).unwrap().step,
+            app.tooltip_at(t0 + Duration::from_millis(3250))
+                .unwrap()
+                .step,
             2
         );
         assert_eq!(
@@ -1748,7 +1758,11 @@ mod tests {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
-        app.set_hover(Some(HoverTarget::Map(1)), (20, 5), t0 + Duration::from_secs(3));
+        app.set_hover(
+            Some(HoverTarget::Map(1)),
+            (20, 5),
+            t0 + Duration::from_secs(3),
+        );
 
         assert!(
             app.tooltip_at(t0 + Duration::from_millis(3100)).is_none(),

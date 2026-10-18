@@ -87,10 +87,7 @@ impl PopupFrame {
 
 // Half-open containment so adjacent rects never both claim a cell.
 fn inside(rect: Rect, point: (u16, u16)) -> bool {
-    point.0 >= rect.x
-        && point.0 < rect.right()
-        && point.1 >= rect.y
-        && point.1 < rect.bottom()
+    point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
 }
 
 // A run of buttons on one footer row.
@@ -203,7 +200,10 @@ impl Popup {
 
     // The message lines, without the footer.
     fn content_lines(&self) -> Vec<Line<'static>> {
-        self.lines.iter().map(|line| Line::from(line.clone())).collect()
+        self.lines
+            .iter()
+            .map(|line| Line::from(line.clone()))
+            .collect()
     }
 
     // Computes the content-sized frame and the button rects for `area`.
@@ -434,7 +434,11 @@ mod tests {
         let area = Rect::new(0, 0, 120, 40);
         let (_, small) = render(&popup(false, false, &["hi"]), area);
         let (_, wide) = render(
-            &popup(false, false, &["a message that is clearly longer than the minimum width"]),
+            &popup(
+                false,
+                false,
+                &["a message that is clearly longer than the minimum width"],
+            ),
             area,
         );
 
@@ -543,11 +547,7 @@ mod tests {
                 if inside_frame {
                     continue;
                 }
-                assert_eq!(
-                    buf[(x, y)].symbol(),
-                    " ",
-                    "content spilled at ({x}, {y})"
-                );
+                assert_eq!(buf[(x, y)].symbol(), " ", "content spilled at ({x}, {y})");
             }
         }
     }
@@ -570,7 +570,10 @@ mod tests {
         assert!(layout.button(PopupAction::Close).is_some());
         let force = layout.button(PopupAction::Force).unwrap();
         let close = layout.button(PopupAction::Close).unwrap();
-        assert!(force.y < close.y || force.x < close.x, "buttons must not overlap");
+        assert!(
+            force.y < close.y || force.x < close.x,
+            "buttons must not overlap"
+        );
         assert!(text(&buf).contains("force"));
     }
 
@@ -608,14 +611,8 @@ mod tests {
     }
 
     #[test]
-    fn popup_survives_areas_that_are_smaller_than_itself() {        for (width, height) in [
-            (0u16, 0u16),
-            (1, 1),
-            (4, 2),
-            (10, 3),
-            (20, 8),
-            (2, 40),
-        ] {
+    fn popup_survives_areas_that_are_smaller_than_itself() {
+        for (width, height) in [(0u16, 0u16), (1, 1), (4, 2), (10, 3), (20, 8), (2, 40)] {
             let area = Rect::new(0, 0, width, height);
             let mut buf = Buffer::empty(area);
             popup(true, true, &["x"]).render(area, &mut buf);
@@ -628,7 +625,10 @@ mod tests {
         // rendering to a matrix of sizes never panics.
         for (width, height) in [(0u16, 0u16), (20, 8), (40, 12), (120, 40), (240, 80)] {
             let area = Rect::new(0, 0, width, height);
-            let (buf, _) = render(&popup(true, true, &["a longish message that needs wrapping"]), area);
+            let (buf, _) = render(
+                &popup(true, true, &["a longish message that needs wrapping"]),
+                area,
+            );
             assert_eq!(buf.area, area);
             let _ = find_text(&buf, "Warning");
         }

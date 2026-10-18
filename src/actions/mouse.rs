@@ -63,7 +63,10 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
             // A click is the least deliberate gesture. A button dispatches its
             // key; anywhere else (inside or outside the frame) just closes.
             app.last_click = None;
-            let layout = app.layout.and_then(|layout| layout.popup).unwrap_or_default();
+            let layout = app
+                .layout
+                .and_then(|layout| layout.popup)
+                .unwrap_or_default();
             match layout.button_at(point(event)) {
                 Some(action) => app.handle_popup_action(action),
                 None => app.handle_popup_action(PopupAction::Close),
@@ -188,8 +191,7 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
                     .map(HoverTarget::ResolutionRow);
             }
             TUIMode::Scale => {
-                return Scale::row_at(side, app.selected_scale, point.1)
-                    .map(HoverTarget::ScaleRow);
+                return Scale::row_at(side, app.selected_scale, point.1).map(HoverTarget::ScaleRow);
             }
             _ => {}
         }

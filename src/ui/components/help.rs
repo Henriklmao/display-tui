@@ -95,6 +95,7 @@ fn right_sections() -> Vec<Line<'static>> {
         Line::from("Apply <Enter/Space>"),
         Line::from("Up/Down <k/j>"),
         Line::from("Cancel <Esc/q>"),
+        Line::from("[f] force write  [Space] auto fix"),
         Line::from(""),
         Line::from(" --- Tip --- ".bold().yellow()),
         Line::from("Arrow keys work as alternative".light_blue()),
@@ -289,6 +290,7 @@ mod tests {
             "right-click",
             "Cancel/Revert all <Esc/q>",
             "Up/Down <k/j>",
+            "[f] force write",
         ];
 
         for (width, height) in [(120u16, 40u16), (60, 30)] {
@@ -362,7 +364,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
-                buf[(x, y)].set_symbol("x");
+                buf[(x, y)].set_symbol("#");
             }
         }
 
@@ -376,9 +378,9 @@ mod tests {
                     && y < popup.y + popup.height;
                 let symbol = buf[(x, y)].symbol();
                 if inside {
-                    assert_ne!(symbol, "x", "popup did not overwrite ({}, {})", x, y);
+                    assert_ne!(symbol, "#", "popup did not overwrite ({}, {})", x, y);
                 } else {
-                    assert_eq!(symbol, "x", "background was clobbered at ({}, {})", x, y);
+                    assert_eq!(symbol, "#", "background was clobbered at ({}, {})", x, y);
                 }
             }
         }

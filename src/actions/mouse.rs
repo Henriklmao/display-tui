@@ -164,6 +164,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
                     // A double-click applies the highlighted mode immediately.
                     if double_click {
                         app.monitors[app.selected_monitor].set_current_resolution(row);
+                        app.check_layout();
                     }
                 }
             }
@@ -173,6 +174,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
                     if double_click {
                         app.monitors[app.selected_monitor].scale =
                             Some(ScaleValue::table()[row].value);
+                        app.check_layout();
                     }
                 }
             }
@@ -517,6 +519,7 @@ mod tests {
             is_error: false,
             apply_preset: None,
             is_forceable: true,
+            fix: None,
         });
 
         down(&mut a, 60, 20);
@@ -537,6 +540,7 @@ mod tests {
             is_error: true,
             apply_preset: None,
             is_forceable: false,
+            fix: None,
         });
 
         wheel_down(&mut a, 40, 32);

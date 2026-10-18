@@ -201,10 +201,14 @@ impl<'a> MonitorList<'a> {
         }
     }
     fn cycle_rotation(app: &mut App) {
-        let monitor = &mut app.monitors[app.selected_monitor];
-        let current_rotation = Rotation::from_transform(&monitor.transform);
-        let next_rotation = current_rotation.cycle();
-        monitor.transform = Some(next_rotation.to_transform().to_string());
+        {
+            let monitor = &mut app.monitors[app.selected_monitor];
+            let current_rotation = Rotation::from_transform(&monitor.transform);
+            let next_rotation = current_rotation.cycle();
+            monitor.transform = Some(next_rotation.to_transform().to_string());
+        }
+        // A quarter turn swaps the logical width/height, so validate now.
+        app.check_layout();
     }
 
     fn next_monitor(app: &mut App) {

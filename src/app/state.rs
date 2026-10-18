@@ -9,6 +9,9 @@ use crate::monitor::Monitor;
 use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
+use crate::validation::diagnostics::{
+    AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix,
+};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
@@ -35,7 +38,7 @@ pub struct App {
     pub layout: Option<ScreenLayout>,
     // World-space highlights (overlap edges, detached borders, connectors)
     // armed by the layout check and cleared on cancel/success.
-    pub highlights: Option<crate::validation::diagnostics::LayoutHighlights>,
+    pub highlights: Option<LayoutHighlights>,
     // The running validation blink, if the highlights are animating.
     pub blink: Option<BlinkState>,
     // An in-progress mouse drag of a monitor on the map, if any.
@@ -113,6 +116,8 @@ pub struct Popup {
     pub is_error: bool,
     pub apply_preset: Option<String>,
     pub is_forceable: bool,
+    // A single move that resolves the reported problem, offered on Space.
+    pub fix: Option<AutoFix>,
 }
 
 impl App {
@@ -283,6 +288,7 @@ impl App {
                     is_error: false,
                     apply_preset: None,
                     is_forceable: true,
+                    fix: None,
                 });
             }
             Ok(()) => {
@@ -300,6 +306,7 @@ impl App {
                         is_error: false,
                         apply_preset: None,
                         is_forceable: false,
+                        fix: None,
                     });
                 } else {
                     // Apply and write
@@ -325,6 +332,7 @@ impl App {
                                 is_error: true,
                                 apply_preset: None,
                                 is_forceable: false,
+                                fix: None,
                             });
                         }
                     }
@@ -393,10 +401,17 @@ impl App {
         if let Some(popup) = &self.show_popup {
             let is_error = popup.is_error;
             let is_forceable = popup.is_forceable;
+            let fix = popup.fix;
             match key_event.code {
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
-                    // Close popup without action
+                // Space applies the offered auto-fix; without one it keeps the
+                // original "close without action" meaning.
+                KeyCode::Char(' ') if fix.is_some() => {
+                    self.apply_auto_fix(fix.unwrap());
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Char(' ') => {
+                    // Close without action; stop any blink but keep the layout.
                     self.show_popup = None;
+                    self.clear_highlights();
                 }
                 KeyCode::Enter => {
                     if !is_error {
@@ -405,11 +420,13 @@ impl App {
                     }
                     // Close the popup
                     self.show_popup = None;
+                    self.clear_highlights();
                 }
                 KeyCode::Char('f') | KeyCode::Char('F') if is_forceable => {
                     // Force write for forceable popups
                     self.write();
                     self.show_popup = None;
+                    self.clear_highlights();
                 }
                 _ => {
                     // For unrelated keys, keep the popup visible
@@ -530,6 +547,7 @@ impl App {
                                             is_error: false, // Not a hard error
                                             apply_preset: Some(name),
                                             is_forceable: true,
+                                            fix: None,
                                         });
                                     }
                                     Ok(()) => {
@@ -557,6 +575,7 @@ impl App {
                                                 is_error: false,
                                                 apply_preset: None,
                                                 is_forceable: false,
+                                                fix: None,
                                             });
                                         } else {
                                             let _ =
@@ -668,18 +687,13 @@ impl App {
             // `q` only quits in View mode; inside a sub-mode it cancels back
             // to View (handled by the mode dispatchers below).
             KeyCode::Char('q') if self.mode == TUIMode::View => self.exit(),
-            KeyCode::Char('w') => match self.validate() {
-                Ok(_) => self.write(),
-                Err(errs) => {
-                    self.show_popup = Some(Popup {
-                        title: " Error ".to_string(),
-                        lines: errs,
-                        is_error: true,
-                        apply_preset: None,
-                        is_forceable: true,
-                    })
+            KeyCode::Char('w') => {
+                // Validate first: a clean layout writes, an invalid one opens
+                // the highlighted error popup (and offers an auto-fix).
+                if self.check_layout() {
+                    self.write();
                 }
-            },
+            }
             KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
             _ => match self.mode {
                 TUIMode::View => {
@@ -822,11 +836,19 @@ impl App {
 
     // Commit the pending monitor move: persist the layout and drop the record.
     pub(crate) fn apply_move(&mut self) {
+        // A single pending monitor is the natural candidate to separate when
+        // the applied layout overlaps.
+        let moved = if self.move_origins.len() == 1 {
+            self.move_origins.keys().next().copied()
+        } else {
+            None
+        };
         if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
             eprintln!("✗ Failed to save monitor state: {}", e);
         }
         self.move_origins.clear();
         self.clear_active_preset_if_changed();
+        self.check_layout_for(moved);
     }
 
     // Records that `index` has an unapplied move from `origin`. A monitor already
@@ -908,6 +930,74 @@ impl App {
         crate::validation::validate(&self.monitors)
     }
 
+    // Runs the layout check with no pending-move hint.
+    pub(crate) fn check_layout(&mut self) -> bool {
+        self.check_layout_for(None)
+    }
+
+    // Validates the live layout: on success the highlights and popup are
+    // cleared; on failure the map highlights are armed (and blink) and the
+    // error popup gains the next auto-fix, if one exists.
+    fn check_layout_for(&mut self, moved: Option<usize>) -> bool {
+        let errors = match self.validate() {
+            Ok(()) => {
+                self.clear_highlights();
+                self.show_popup = None;
+                return true;
+            }
+            Err(errors) => errors,
+        };
+
+        self.highlights = Some(layout_highlights(&self.monitors));
+        self.arm_blink(Instant::now());
+
+        let fix = plan_auto_fix(&self.monitors, moved);
+        let mut lines = errors;
+        lines.push(String::new());
+        if fix.is_some() {
+            lines.push("<Space> to auto fix".to_string());
+        } else {
+            lines.push("No auto fix possible".to_string());
+        }
+
+        self.show_popup = Some(Popup {
+            title: " Error ".to_string(),
+            lines,
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix,
+        });
+        false
+    }
+
+    // Applies one auto-fix to the working layout, persists the state (never the
+    // Hyprland config) and refreshes the popup with whatever problems remain.
+    fn apply_auto_fix(&mut self, fix: AutoFix) {
+        let (index, dx, dy) = match fix {
+            AutoFix::Separate { monitor, dx, dy } | AutoFix::Abut { monitor, dx, dy } => {
+                (monitor, dx, dy)
+            }
+        };
+        if let Some(position) = self
+            .monitors
+            .get_mut(index)
+            .and_then(|monitor| monitor.position.as_mut())
+        {
+            position.x += dx;
+            position.y += dy;
+        }
+        self.clear_active_preset_if_changed();
+
+        if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
+            eprintln!("✗ Failed to save monitor state: {}", e);
+        }
+
+        // One fix per press: re-validate and either refresh the popup with the
+        // next problem or close it once the layout is clean.
+        self.check_layout_for(Some(index));
+    }
+
     pub(crate) fn write(&mut self) {
         // Check that at least one monitor is enabled (not forceable)
         if !self.monitors.iter().any(|m| m.enabled) {
@@ -917,6 +1007,7 @@ impl App {
                 is_error: true,
                 apply_preset: None,
                 is_forceable: false,
+                fix: None,
             });
             return;
         }
@@ -936,6 +1027,7 @@ impl App {
                 is_error: true,
                 apply_preset: None,
                 is_forceable: false,
+                fix: None,
             });
         } else {
             let _ = std::process::Command::new("hyprctl")
@@ -1461,5 +1553,216 @@ mod tests {
         assert!(app.highlights.is_none());
         assert!(!app.highlight_visible());
         assert_eq!(app.next_deadline_at(Instant::now()), None);
+    }
+
+    // --- validate on apply + Space auto-fix -----------------------------
+
+    fn sized_monitor(name: &str, x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        let mut monitor = monitor();
+        monitor.name = name.to_string();
+        monitor.position = Some(Position { x, y });
+        monitor.modes = vec![crate::monitor::Resolution {
+            width: w,
+            height: h,
+            refresh: 60.0,
+            preferred: true,
+            current: true,
+        }];
+        monitor
+    }
+
+    fn app_with_state(monitors: Vec<Monitor>, tag: &str) -> (App, TempDir) {
+        let dir = TempDir::new(tag);
+        let mut app = app_with(monitors);
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        (app, dir)
+    }
+
+    #[test]
+    fn applying_an_overlapping_move_arms_highlights_and_an_auto_fix() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 1920, 1080),
+                sized_monitor("B", 100, 0, 1920, 1080),
+            ],
+            "apply-overlap",
+        );
+        app.note_move(1, (1920, 0));
+
+        app.apply_move();
+
+        let popup = app.show_popup.as_ref().expect("validation popup");
+        assert!(popup.lines.iter().any(|line| line.contains("overlap")));
+        assert!(
+            popup.lines.iter().any(|line| line.contains("<Space> to auto fix")),
+            "the fix must be advertised: {:?}",
+            popup.lines
+        );
+        assert!(popup.fix.is_some(), "a move-only fix exists");
+        assert!(app.highlights.is_some(), "the map overlay is armed");
+    }
+
+    #[test]
+    fn space_applies_the_auto_fix_and_closes_the_popup() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 1920, 1080),
+                sized_monitor("B", 1800, 0, 1920, 1080),
+            ],
+            "fix-close",
+        );
+        assert!(!app.check_layout(), "the layout is invalid");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert!(app.show_popup.is_none(), "the fix resolved the problem");
+        assert!(app.highlights.is_none());
+        assert!(app.blink.is_none());
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 0 }),
+            "B was pushed flush off A"
+        );
+    }
+
+    #[test]
+    fn each_space_press_applies_the_next_fix() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 100, 100),
+                sized_monitor("B", 50, 0, 100, 100),
+                sized_monitor("C", 5000, 0, 100, 100),
+            ],
+            "fix-next",
+        );
+        assert!(!app.check_layout());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.show_popup.is_some(), "the detachment remains");
+        assert_eq!(app.monitors[1].position, Some(Position { x: 100, y: 0 }));
+        assert_eq!(
+            app.monitors[2].position,
+            Some(Position { x: 5000, y: 0 }),
+            "one problem per press"
+        );
+        assert!(app.highlights.is_some());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.show_popup.is_none(), "the second fix cleans the layout");
+        assert_eq!(app.monitors[2].position, Some(Position { x: 200, y: 0 }));
+        assert!(app.highlights.is_none());
+    }
+
+    #[test]
+    fn no_auto_fix_is_reported_when_every_move_would_create_a_new_overlap() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 80, 0, 100, 100),
+                sized_monitor("B", 100, 0, 100, 100),
+                sized_monitor("C", 250, 0, 100, 100),
+                sized_monitor("D", -50, 0, 100, 100),
+            ],
+            "no-fix",
+        );
+        assert!(!app.check_layout());
+
+        let popup = app.show_popup.as_ref().expect("validation popup");
+        assert_eq!(popup.fix, None);
+        assert!(
+            popup
+                .lines
+                .iter()
+                .any(|line| line.contains("No auto fix possible")),
+            "got {:?}",
+            popup.lines
+        );
+
+        // Space without a fix keeps the old "close" semantics.
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.show_popup.is_none());
+        assert!(app.highlights.is_none());
+    }
+
+    #[test]
+    fn escape_closes_the_validation_popup_without_touching_the_layout() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 100, 100),
+                sized_monitor("B", 50, 0, 100, 100),
+            ],
+            "escape-validate",
+        );
+        assert!(!app.check_layout());
+        let positions: Vec<_> = app.monitors.iter().map(|m| m.position.clone()).collect();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.show_popup.is_none());
+        assert!(app.highlights.is_none(), "the blink stops");
+        assert!(app.blink.is_none());
+        let after: Vec<_> = app.monitors.iter().map(|m| m.position.clone()).collect();
+        assert_eq!(positions, after);
+    }
+
+    #[test]
+    fn a_rotation_apply_rechecks_the_layout() {
+        let dir = TempDir::new("rotate-validate");
+        let mut app = app_with(vec![
+            sized_monitor("A", 0, 0, 1920, 1080),
+            sized_monitor("B", 1920, 0, 1920, 1080),
+        ]);
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        assert!(app.check_layout(), "the starting layout is valid");
+
+        // A quarter turn swaps A's logical size, opening a gap to B.
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
+
+        assert!(
+            app.show_popup.is_some(),
+            "the rotation must validate immediately"
+        );
+        assert!(app.highlights.is_some());
+    }
+
+    #[test]
+    fn a_scale_apply_rechecks_the_layout() {
+        let dir = TempDir::new("scale-validate");
+        let mut app = app_with(vec![
+            sized_monitor("A", 0, 0, 1920, 1080),
+            sized_monitor("B", 1920, 0, 1920, 1080),
+        ]);
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        app.mode = TUIMode::Scale;
+        app.selected_scale = 8; // 200%
+        assert!(app.check_layout(), "the starting layout is valid");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].scale, Some(2.0));
+        assert!(
+            app.show_popup.is_some(),
+            "the scale change must validate immediately"
+        );
+        assert!(app.highlights.is_some());
+    }
+
+    #[test]
+    fn a_clean_check_closes_a_stale_validation_popup() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 100, 100),
+                sized_monitor("B", 50, 0, 100, 100),
+            ],
+            "clean-check",
+        );
+        assert!(!app.check_layout());
+        assert!(app.show_popup.is_some());
+
+        // Fix the layout by hand, then re-check.
+        app.monitors[1].position = Some(Position { x: 100, y: 0 });
+
+        assert!(app.check_layout());
+        assert!(app.show_popup.is_none());
+        assert!(app.highlights.is_none());
     }
 }

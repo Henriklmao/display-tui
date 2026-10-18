@@ -74,6 +74,8 @@ impl Scale {
     fn select(app: &mut App) {
         let scale_value = Some(ScaleValue::table()[app.selected_scale].value);
         app.monitors[app.selected_monitor].scale = scale_value;
+        // A new scale changes the logical size: re-check the layout now.
+        app.check_layout();
     }
 
     fn scale_to_rows(&self) -> Vec<Row<'static>> {

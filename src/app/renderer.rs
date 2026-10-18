@@ -134,6 +134,7 @@ mod tests {
             is_error: true,
             apply_preset: None,
             is_forceable,
+            fix: None,
         }
     }
 
@@ -244,6 +245,7 @@ mod tests {
             is_error: false,
             apply_preset: None,
             is_forceable: false,
+            fix: None,
         });
         let buf = render_app(&info, area);
         assert_eq!(

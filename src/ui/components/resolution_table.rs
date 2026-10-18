@@ -77,6 +77,9 @@ impl<'a> Resolutions<'a> {
 
     fn select(app: &mut App) {
         app.monitors[app.selected_monitor].set_current_resolution(app.selected_resolution);
+        // Applying a resolution changes the monitor's logical size, so it can
+        // create an overlap or a gap: validate immediately.
+        app.check_layout();
     }
 
     fn resolutions_to_rows(&self) -> Vec<Row<'static>> {

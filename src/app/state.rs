@@ -6,7 +6,7 @@ use crate::CliAction;
 use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
-use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{
@@ -365,9 +365,16 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         // Record the interactive regions so mouse events can be hit-tested
-        // against exactly what was drawn.
-        self.layout = Some(crate::ui::layouts::screen_layout(frame.area(), self.mode));
-        frame.render_widget(&*self, frame.area());
+        // against exactly what was drawn. The popup's content-sized frame and
+        // button rects are computed from the same function the renderer uses.
+        let area = frame.area();
+        let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
+        layout.popup = self
+            .show_popup
+            .as_ref()
+            .map(|popup| popup.layout(area));
+        self.layout = Some(layout);
+        frame.render_widget(&*self, area);
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -398,35 +405,28 @@ impl App {
             return;
         }
 
-        if let Some(popup) = &self.show_popup {
-            let is_error = popup.is_error;
-            let is_forceable = popup.is_forceable;
-            let fix = popup.fix;
+        if self.show_popup.is_some() {
+            let is_forceable = self
+                .show_popup
+                .as_ref()
+                .is_some_and(|popup| popup.is_forceable);
             match key_event.code {
                 // Space applies the offered auto-fix; without one it keeps the
                 // original "close without action" meaning.
-                KeyCode::Char(' ') if fix.is_some() => {
-                    self.apply_auto_fix(fix.unwrap());
+                KeyCode::Char(' ') => {
+                    let has_fix = self.show_popup.as_ref().is_some_and(|popup| popup.fix.is_some());
+                    self.handle_popup_action(if has_fix {
+                        PopupAction::AutoFix
+                    } else {
+                        PopupAction::Close
+                    });
                 }
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Char(' ') => {
-                    // Close without action; stop any blink but keep the layout.
-                    self.show_popup = None;
-                    self.clear_highlights();
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    self.handle_popup_action(PopupAction::Close)
                 }
-                KeyCode::Enter => {
-                    if !is_error {
-                        // For non-error popups (mismatch/warning), Enter accepts and writes
-                        self.write();
-                    }
-                    // Close the popup
-                    self.show_popup = None;
-                    self.clear_highlights();
-                }
+                KeyCode::Enter => self.handle_popup_action(PopupAction::Accept),
                 KeyCode::Char('f') | KeyCode::Char('F') if is_forceable => {
-                    // Force write for forceable popups
-                    self.write();
-                    self.show_popup = None;
-                    self.clear_highlights();
+                    self.handle_popup_action(PopupAction::Force)
                 }
                 _ => {
                     // For unrelated keys, keep the popup visible
@@ -953,10 +953,10 @@ impl App {
 
         let fix = plan_auto_fix(&self.monitors, moved);
         let mut lines = errors;
-        lines.push(String::new());
-        if fix.is_some() {
-            lines.push("<Space> to auto fix".to_string());
-        } else {
+        if fix.is_none() {
+            // With a fix the "Space auto fix" button advertises the action; the
+            // popup only has to say when nothing can be done.
+            lines.push(String::new());
             lines.push("No auto fix possible".to_string());
         }
 
@@ -996,6 +996,43 @@ impl App {
         // One fix per press: re-validate and either refresh the popup with the
         // next problem or close it once the layout is clean.
         self.check_layout_for(Some(index));
+    }
+
+    // Dispatches a popup action. The key handler and the mouse buttons share
+    // this path, so clicking a button does exactly what its key does.
+    pub(crate) fn handle_popup_action(&mut self, action: PopupAction) {
+        let (is_error, is_forceable, fix) = match &self.show_popup {
+            Some(popup) => (popup.is_error, popup.is_forceable, popup.fix),
+            None => return,
+        };
+        match action {
+            PopupAction::AutoFix => match fix {
+                Some(fix) => self.apply_auto_fix(fix),
+                None => {
+                    self.show_popup = None;
+                    self.clear_highlights();
+                }
+            },
+            PopupAction::Force => {
+                if is_forceable {
+                    self.write();
+                    self.show_popup = None;
+                    self.clear_highlights();
+                }
+            }
+            PopupAction::Accept => {
+                if !is_error {
+                    // Non-error popups (mismatch/warning) accept by writing.
+                    self.write();
+                }
+                self.show_popup = None;
+                self.clear_highlights();
+            }
+            PopupAction::Close => {
+                self.show_popup = None;
+                self.clear_highlights();
+            }
+        }
     }
 
     pub(crate) fn write(&mut self) {
@@ -1593,12 +1630,14 @@ mod tests {
 
         let popup = app.show_popup.as_ref().expect("validation popup");
         assert!(popup.lines.iter().any(|line| line.contains("overlap")));
-        assert!(
-            popup.lines.iter().any(|line| line.contains("<Space> to auto fix")),
-            "the fix must be advertised: {:?}",
-            popup.lines
-        );
         assert!(popup.fix.is_some(), "a move-only fix exists");
+        assert!(
+            !popup
+                .lines
+                .iter()
+                .any(|line| line.contains("No auto fix possible")),
+            "a fix exists, so the impossible message must stay hidden"
+        );
         assert!(app.highlights.is_some(), "the map overlay is armed");
     }
 

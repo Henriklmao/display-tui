@@ -4,4 +4,4 @@ pub mod components;
 pub mod layouts;
 pub mod styles;
 
-pub use components::{HelpModal, Map, MonitorList, Popup, PresetMenu, Resolutions, Scale};
+pub use components::{HelpModal, Map, MonitorList, PresetMenu, Resolutions, Scale};

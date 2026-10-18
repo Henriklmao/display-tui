@@ -110,6 +110,12 @@ fn help_block() -> Block<'static> {
         .border_style(Style::default().fg(Color::Cyan))
 }
 
+// The footer button line, mirroring the popup buttons (help closes on any
+// click, so this is purely visual parity).
+fn close_hint() -> Line<'static> {
+    Line::from("[ Esc close ]").gray()
+}
+
 // Renders a centered version line spanning the full popup width.
 fn version_line() -> Line<'static> {
     Line::from(
@@ -124,7 +130,11 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     let columns = Layout::default()
@@ -143,6 +153,10 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
     left.render(columns[0], buf);
     right.render(columns[1], buf);
+
+    Paragraph::new(close_hint())
+        .alignment(Alignment::Center)
+        .render(rows[2], buf);
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
@@ -155,6 +169,8 @@ fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     lines.push(Line::from(""));
     lines.extend(right_sections());
     lines.retain(|line| line.width() > 0);
+    lines.push(Line::from(""));
+    lines.push(close_hint());
 
     let p = Paragraph::new(lines)
         .block(help_block())

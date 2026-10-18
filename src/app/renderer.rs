@@ -2,15 +2,8 @@
 
 use super::state::App;
 use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
-use crate::ui::layouts::centered_rect;
 use crate::utils::TUIMode;
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -69,38 +62,7 @@ impl Widget for &App {
         }
 
         if let Some(ref popup) = self.show_popup {
-            let popup_area = centered_rect(50, 40, area);
-            let mut text = vec![Line::from("")];
-            for line in &popup.lines {
-                text.push(Line::from(line.clone()));
-                text.push(Line::from(""));
-            }
-            if popup.is_error && popup.is_forceable {
-                text.push(Line::from(
-                    "Press <f> to force write, or <Esc/Enter> to close.".gray(),
-                ));
-            } else if popup.is_error {
-                text.push(Line::from("<Esc/Enter> to close.".gray()));
-            }
-            let color = if popup.is_error {
-                Color::Red
-            } else {
-                Color::Yellow
-            };
-            let border_style = Style::default().fg(color);
-            let title = Line::from(popup.title.clone().bold().white());
-
-            let p = Paragraph::new(text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(title)
-                        .border_style(border_style),
-                )
-                .alignment(Alignment::Center);
-
-            Clear.render(popup_area, buf);
-            p.render(popup_area, buf);
+            popup.render(area, buf);
         }
     }
 }
@@ -110,6 +72,7 @@ mod tests {
     use super::*;
     use crate::test_utils::tests::{test_monitors, text_of};
     use crate::ui::components::PresetMenu;
+    use ratatui::style::Color;
     use ratatui::widgets::Widget;
 
     use super::super::state::Popup;
@@ -203,8 +166,8 @@ mod tests {
 
         assert!(text.contains("hyprctl refused"), "message missing: {text}");
         assert!(
-            text.contains("Press <f> to force write"),
-            "force hint missing: {text}"
+            text.contains("[ f force write ]"),
+            "force button missing: {text}"
         );
     }
 
@@ -215,10 +178,7 @@ mod tests {
 
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
-        assert!(
-            text.contains("<Esc/Enter> to close."),
-            "close hint missing: {text}"
-        );
+        assert!(text.contains("[ Esc close ]"), "close button missing: {text}");
         assert!(
             !text.contains("force write"),
             "force must not be offered: {text}"
@@ -228,28 +188,28 @@ mod tests {
     #[test]
     fn popup_border_colour_follows_the_error_flag() {
         let area = Rect::new(0, 0, 120, 40);
-        let popup_area = centered_rect(50, 40, area);
 
         let mut error = app(TUIMode::View);
-        error.show_popup = Some(error_popup(false));
+        let error_popup = error_popup(false);
+        let error_frame = error_popup.layout(area).frame;
+        error.show_popup = Some(error_popup);
         let buf = render_app(&error, area);
-        assert_eq!(
-            buf[(popup_area.x, popup_area.y)].style().fg,
-            Some(Color::Red)
-        );
+        assert_eq!(buf[(error_frame.x, error_frame.y)].style().fg, Some(Color::Red));
 
         let mut info = app(TUIMode::View);
-        info.show_popup = Some(Popup {
+        let info_popup = Popup {
             title: "Saved".to_string(),
             lines: vec!["Preset written".to_string()],
             is_error: false,
             apply_preset: None,
             is_forceable: false,
             fix: None,
-        });
+        };
+        let info_frame = info_popup.layout(area).frame;
+        info.show_popup = Some(info_popup);
         let buf = render_app(&info, area);
         assert_eq!(
-            buf[(popup_area.x, popup_area.y)].style().fg,
+            buf[(info_frame.x, info_frame.y)].style().fg,
             Some(Color::Yellow)
         );
     }
@@ -283,6 +243,40 @@ mod tests {
             a.mode = mode;
             // Must not panic even though the tables index a selected monitor.
             let _ = render_app(&a, Rect::new(0, 0, 120, 40));
+        }
+    }
+
+    #[test]
+    fn every_overlay_survives_the_size_matrix() {
+        for (width, height) in [
+            (0u16, 0u16),
+            (1, 1),
+            (6, 3),
+            (20, 8),
+            (40, 12),
+            (80, 24),
+            (120, 40),
+            (240, 80),
+        ] {
+            let area = Rect::new(0, 0, width, height);
+            for mode in [
+                TUIMode::View,
+                TUIMode::Move,
+                TUIMode::Resolution,
+                TUIMode::Scale,
+            ] {
+                let mut a = app(mode);
+                a.show_help = true;
+                render_app(&a, area);
+
+                a.show_help = false;
+                a.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+                render_app(&a, area);
+
+                let mut a = app(mode);
+                a.show_popup = Some(error_popup(true));
+                render_app(&a, area);
+            }
         }
     }
 }

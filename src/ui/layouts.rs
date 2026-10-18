@@ -1,5 +1,6 @@
 //! UI layout definitions.
 
+use crate::ui::components::popup::PopupFrame;
 use crate::utils::TUIMode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -30,6 +31,8 @@ pub struct ScreenLayout {
     pub side_table: Option<Rect>,
     // The monitor list at the bottom.
     pub list: Rect,
+    // The open popup's frame and button rects, when one is drawn.
+    pub popup: Option<PopupFrame>,
 }
 
 // Computes the interactive rectangles for the current mode.
@@ -71,6 +74,7 @@ pub fn screen_layout(area: Rect, mode: TUIMode) -> ScreenLayout {
         canvas,
         side_table,
         list: outer[1],
+        popup: None,
     }
 }
 
@@ -109,6 +113,21 @@ pub fn row_in_window(
     }
     let index = local + offset;
     if index < total { Some(index) } else { None }
+}
+
+// Centers a `width` x `height` box inside `area`, clamped to fit.
+//
+// Unlike [`centered_rect`] this sizes the box from its content, so a popup
+// grows or shrinks with the message and never clips a long error line.
+pub fn fitted_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    }
 }
 
 // Creates a centered popup rectangle.

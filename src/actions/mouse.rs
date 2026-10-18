@@ -7,7 +7,7 @@
 use crate::App;
 use crate::actions::movement::snap_to_alignment;
 use crate::monitor::{Monitor, MonitorCanvas};
-use crate::ui::components::{Map, MonitorList, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -50,10 +50,14 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
 
     if app.show_popup.is_some() {
         if is_left_click(event.kind) {
-            // A click is the least deliberate gesture, so it only dismisses.
-            // Accepting (which writes the Hyprland config) stays on Enter/f.
+            // A click is the least deliberate gesture. A button dispatches its
+            // key; anywhere else (inside or outside the frame) just closes.
             app.last_click = None;
-            app.show_popup = None;
+            let layout = app.layout.and_then(|layout| layout.popup).unwrap_or_default();
+            match layout.button_at(point(event)) {
+                Some(action) => app.handle_popup_action(action),
+                None => app.handle_popup_action(PopupAction::Close),
+            }
         }
         return;
     }
@@ -548,6 +552,121 @@ mod tests {
 
         down(&mut a, 60, 20);
         assert!(a.show_popup.is_none(), "the click dismisses the popup");
+    }
+
+    // Places a popup in the app and records its real (content-sized) layout, so
+    // clicks can be mapped onto the drawn buttons exactly as in production.
+    fn with_popup(mut a: App, popup: Popup) -> App {
+        let mut layout = screen_layout(area(), a.mode);
+        layout.popup = Some(popup.layout(area()));
+        a.layout = Some(layout);
+        a.show_popup = Some(popup);
+        a
+    }
+
+    #[test]
+    fn clicking_the_auto_fix_button_dispatches_the_fix() {
+        let dir = TempDir::new("mouse-popup-autofix");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        let popup = Popup {
+            title: " Error ".to_string(),
+            lines: vec!["Monitors overlap: A and B".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: Some(crate::validation::diagnostics::AutoFix::Separate {
+                monitor: 0,
+                dx: 10,
+                dy: 0,
+            }),
+        };
+        let mut a = with_popup(a, popup);
+        let rect = a
+            .layout
+            .unwrap()
+            .popup
+            .unwrap()
+            .button(PopupAction::AutoFix)
+            .expect("auto fix button");
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(
+            a.monitors[0].position,
+            Some(Position { x: 10, y: 0 }),
+            "the button applied the fix"
+        );
+        assert!(a.show_popup.is_none(), "the clean layout closed the popup");
+    }
+
+    #[test]
+    fn clicking_the_close_button_only_dismisses() {
+        let dir = TempDir::new("mouse-popup-close-btn");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.config.monitors_config_path = Some(
+            dir.path()
+                .join("monitors.conf")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let popup = Popup {
+            title: " Preset Mismatch ".to_string(),
+            lines: vec!["missing".to_string()],
+            is_error: false,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        };
+        let mut a = with_popup(a, popup);
+        let rect = a
+            .layout
+            .unwrap()
+            .popup
+            .unwrap()
+            .button(PopupAction::Close)
+            .expect("close button");
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(a.show_popup.is_none());
+        assert!(
+            !dir.path().join("monitors.conf").exists(),
+            "closing must not write"
+        );
+    }
+
+    #[test]
+    fn a_click_outside_the_popup_frame_closes_it() {
+        let dir = TempDir::new("mouse-popup-outside");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.config.monitors_config_path = Some(
+            dir.path()
+                .join("monitors.conf")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let popup = Popup {
+            title: " Preset Mismatch ".to_string(),
+            lines: vec!["missing".to_string()],
+            is_error: false,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        };
+        let mut a = with_popup(a, popup);
+        // The frame is centered; the very top-left corner is always outside it.
+        assert!(!inside(a.layout.unwrap().popup.unwrap().frame, (0, 0)));
+
+        down(&mut a, 0, 0);
+
+        assert!(a.show_popup.is_none(), "outside closes like Esc");
+        assert!(
+            !dir.path().join("monitors.conf").exists(),
+            "outside close must never write"
+        );
     }
 
     #[test]

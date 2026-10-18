@@ -313,7 +313,7 @@ impl<'a> MonitorList<'a> {
             // nerdfont symbols:      (nf-oct-arrow_...)
             match self.mode {
                 TUIMode::View => {
-                    instructions_items.push(" Scroll  ".white());
+                    instructions_items.push(" Scroll  ".white());
                     instructions_items.push("<k/j> ".blue().bold());
                     instructions_items.push(" Move ".white());
                     instructions_items.push("<m> ".blue().bold());

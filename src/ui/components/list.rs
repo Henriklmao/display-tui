@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     symbols::border,
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, Cell, Row, StatefulWidget, Table, TableState, Widget},
 };
 
@@ -293,6 +293,7 @@ impl<'a> MonitorList<'a> {
             // A pending mouse move is a confirm state: only Apply or
             // Cancel/Revert are offered, so the usual actions stay hidden until
             // the move is resolved.
+            const RIGHT_CLICK_HINT: usize = 2;
             instructions_items = vec![
                 " Apply ".white(),
                 "<Enter/Space> ".blue().bold(),
@@ -300,14 +301,13 @@ impl<'a> MonitorList<'a> {
                 " Cancel all ".white(),
                 "<Esc/q> ".blue().bold(),
             ];
-            // The mouse alternative (index 2) is the first thing to go when the
-            // line no longer fits the footer: narrow terminals keep both keys
-            // instead of a clipped "<Esc/q>". The help modal names right-click
-            // and "Cancel/Revert all" in full.
-            if Line::from(instructions_items.clone()).width()
-                > area.width.saturating_sub(2) as usize
-            {
-                instructions_items.remove(2);
+            // The mouse alternative is the first thing to go when the line no
+            // longer fits the footer: narrow terminals keep both keys instead of
+            // a clipped "<Esc/q>". The help modal names right-click and
+            // "Cancel/Revert all" in full.
+            let hint_width: usize = instructions_items.iter().map(Span::width).sum();
+            if hint_width > area.width.saturating_sub(2) as usize {
+                instructions_items.remove(RIGHT_CLICK_HINT);
             }
         } else if is_mini_mode {
             instructions_items.push(" Save ".white());

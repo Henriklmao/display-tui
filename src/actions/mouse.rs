@@ -1214,10 +1214,15 @@ mod tests {
         drag(&mut a, col + 6, row);
         up(&mut a, col, row);
         assert!(a.has_pending_move());
+        let moved = a.monitors[1].position.clone();
 
         right_click(&mut a, col, row);
 
         assert!(!a.has_pending_move(), "the right-click applies the move");
+        assert_eq!(
+            a.monitors[1].position, moved,
+            "the right-click keeps the moved position instead of reverting it"
+        );
         assert!(
             dir.path().join("monitor_state.json").exists(),
             "and persists the layout"

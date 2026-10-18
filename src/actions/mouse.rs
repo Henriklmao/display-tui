@@ -6,6 +6,7 @@
 
 use crate::App;
 use crate::actions::movement::snap_to_alignment;
+use crate::app::state::HoverTarget;
 use crate::monitor::{Monitor, MonitorCanvas};
 use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
 use crate::ui::layouts::ScreenLayout;
@@ -37,6 +38,17 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     // press so the drag cannot stay armed behind an overlay.
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.drag = None;
+        app.hover = None;
+    }
+
+    // Hover is resolved for every state (including open overlays) and always
+    // before the modal branches return.
+    if matches!(event.kind, MouseEventKind::Moved) {
+        let target = resolve_hover(app, layout, point(event));
+        if app.hover != target {
+            app.hover = target;
+        }
+        return;
     }
 
     if app.show_help {
@@ -66,6 +78,15 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         // The preset menu registers its own clicks (it supports double-click).
         handle_preset(app, layout.area, event, now);
         return;
+    }
+
+    // A button gesture takes the pointer off any hovered element; the next
+    // motion event repopulates it.
+    if matches!(
+        event.kind,
+        MouseEventKind::Down(_) | MouseEventKind::Drag(_)
+    ) {
+        app.hover = None;
     }
 
     match event.kind {
@@ -109,6 +130,81 @@ fn point(event: MouseEvent) -> (u16, u16) {
 // Half-open containment test so adjacent rectangles never both claim a cell.
 fn inside(rect: Rect, point: (u16, u16)) -> bool {
     point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
+}
+
+// Resolves the interactive element under `point`, honouring the same modal
+// precedence as the click handler. Pure so it can be unit-tested.
+fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<HoverTarget> {
+    if app.show_help {
+        return None;
+    }
+
+    if app.show_popup.is_some() {
+        let frame = layout.popup.unwrap_or_default();
+        return frame.button_at(point).map(HoverTarget::Popup);
+    }
+
+    if let Some(menu) = app.show_preset_menu.as_ref() {
+        if inside(PresetMenu::rect(layout.area), point) {
+            return menu
+                .row_at(layout.area, point.1)
+                .map(HoverTarget::PresetRow);
+        }
+        return None;
+    }
+
+    if inside(layout.canvas, point) {
+        let bounds = app
+            .drag
+            .as_ref()
+            .map(|drag| drag.canvas)
+            .unwrap_or_else(|| Monitor::get_monitors_canvas(&app.monitors, &layout.canvas));
+
+        if let Some(index) = app.move_origins.keys().copied().find(|&index| {
+            app.monitors
+                .get(index)
+                .filter(|monitor| monitor.enabled)
+                .and_then(|monitor| Map::apply_button_rect(layout.canvas, &bounds, monitor))
+                .is_some_and(|rect| inside(rect, point))
+        }) {
+            return Some(HoverTarget::ApplyButton(index));
+        }
+
+        if let Some(world) = Map::world_at_in(layout.canvas, &bounds, point.0, point.1)
+            && let Some(index) = Map::monitor_at(&app.monitors, app.selected_monitor, world)
+        {
+            return Some(HoverTarget::Map(index));
+        }
+        return None;
+    }
+
+    if let Some(side) = layout.side_table.filter(|side| inside(*side, point)) {
+        match app.mode {
+            TUIMode::Resolution => {
+                let total = app
+                    .monitors
+                    .get(app.selected_monitor)
+                    .map(|monitor| monitor.modes.len())
+                    .unwrap_or(0);
+                return Resolutions::row_at(side, app.selected_resolution, total, point.1)
+                    .map(HoverTarget::ResolutionRow);
+            }
+            TUIMode::Scale => {
+                return Scale::row_at(side, app.selected_scale, point.1)
+                    .map(HoverTarget::ScaleRow);
+            }
+            _ => {}
+        }
+    }
+
+    if inside(layout.list, point)
+        && let Some(row) =
+            MonitorList::row_at(layout.list, &app.monitors, app.selected_monitor, point.1)
+    {
+        return Some(HoverTarget::ListRow(row));
+    }
+
+    None
 }
 
 // Keeps the selected monitor index in range before indexing (defensive; the
@@ -667,6 +763,152 @@ mod tests {
             !dir.path().join("monitors.conf").exists(),
             "outside close must never write"
         );
+    }
+
+    // --- hover tracking --------------------------------------------------
+
+    fn moved(a: &mut App, col: u16, row: u16) {
+        handle_mouse(a, mouse(MouseEventKind::Moved, col, row));
+    }
+
+    #[test]
+    fn moving_over_a_monitor_sets_the_map_hover() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+
+        let (col, row) = cell_for_monitor(&a, 1);
+        moved(&mut a, col, row);
+
+        assert_eq!(a.hover, Some(HoverTarget::Map(1)));
+    }
+
+    #[test]
+    fn moving_onto_empty_canvas_clears_the_hover() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 0);
+        moved(&mut a, col, row);
+        assert!(a.hover.is_some());
+
+        let canvas = a.layout.unwrap().canvas;
+        moved(&mut a, canvas.x + 1, canvas.y + 1);
+
+        assert_eq!(a.hover, None, "empty canvas is not a target");
+    }
+
+    #[test]
+    fn an_unchanged_hover_target_is_stable() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+
+        moved(&mut a, col, row);
+        let first = a.hover;
+        moved(&mut a, col, row);
+        moved(&mut a, col, row);
+
+        assert_eq!(a.hover, first, "repeated moves keep the same target");
+    }
+
+    #[test]
+    fn the_list_row_hover_tracks_the_drawn_row() {
+        let mut a = app(TUIMode::View, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "Monitor 2").expect("second row");
+
+        moved(&mut a, col, row);
+
+        assert_eq!(a.hover, Some(HoverTarget::ListRow(1)));
+    }
+
+    #[test]
+    fn the_resolution_and_scale_rows_track_hover() {
+        let mut a = app(TUIMode::Resolution, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "1280x720").expect("second mode");
+        moved(&mut a, col, row);
+        assert_eq!(a.hover, Some(HoverTarget::ResolutionRow(1)));
+
+        let mut a = app(TUIMode::Scale, test_monitors());
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "125%").expect("scale row");
+        let index = ScaleValue::table()
+            .iter()
+            .position(|entry| entry.name == "125%")
+            .unwrap();
+        moved(&mut a, col, row);
+        assert_eq!(a.hover, Some(HoverTarget::ScaleRow(index)));
+    }
+
+    #[test]
+    fn the_apply_button_hover_is_distinct_from_the_monitor() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        a.note_move(1, (3000, 1000));
+
+        let canvas = a.layout.unwrap().canvas;
+        let bounds = Monitor::get_monitors_canvas(&a.monitors, &canvas);
+        let rect = Map::apply_button_rect(canvas, &bounds, &a.monitors[1]).unwrap();
+        moved(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.hover, Some(HoverTarget::ApplyButton(1)));
+    }
+
+    #[test]
+    fn the_preset_row_hover_tracks_the_list_entry() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.preset_backup = Some(vec![]);
+        a.show_preset_menu = Some(PresetMenu::new(
+            vec!["missing-a".to_string(), "missing-b".to_string()],
+            &[],
+            None,
+        ));
+
+        let top = PresetMenu::rect(area()).y + 2;
+        moved(&mut a, 40, top + 1);
+
+        assert_eq!(a.hover, Some(HoverTarget::PresetRow(1)));
+    }
+
+    #[test]
+    fn the_popup_button_hover_maps_to_the_button() {
+        let a = app(TUIMode::View, test_monitors());
+        let popup = Popup {
+            title: " Error ".to_string(),
+            lines: vec!["boom".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        };
+        let mut a = with_popup(a, popup);
+        let rect = a
+            .layout
+            .unwrap()
+            .popup
+            .unwrap()
+            .button(PopupAction::Close)
+            .unwrap();
+
+        moved(&mut a, rect.x + 1, rect.y);
+
+        assert_eq!(a.hover, Some(HoverTarget::Popup(PopupAction::Close)));
+    }
+
+    #[test]
+    fn a_press_and_release_clear_the_hover() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+        moved(&mut a, col, row);
+        assert!(a.hover.is_some());
+
+        down(&mut a, col, row);
+        assert_eq!(a.hover, None, "a press takes the hover off");
+
+        moved(&mut a, col, row);
+        up(&mut a, col, row);
+        assert_eq!(a.hover, None, "a release clears the hover");
     }
 
     #[test]

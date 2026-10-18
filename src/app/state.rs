@@ -41,6 +41,8 @@ pub struct App {
     pub highlights: Option<LayoutHighlights>,
     // The running validation blink, if the highlights are animating.
     pub blink: Option<BlinkState>,
+    // The interactive element currently under the pointer, if any.
+    pub hover: Option<HoverTarget>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -74,6 +76,25 @@ pub struct DragState {
     pub canvas: crate::monitor::MonitorCanvas,
     // Whether the dragged monitor already had a pending move before this drag.
     pub was_pending: bool,
+}
+
+// An interactive element the pointer can rest on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HoverTarget {
+    // A monitor body on the map.
+    Map(usize),
+    // The Apply button of a pending monitor.
+    ApplyButton(usize),
+    // A display-list row.
+    ListRow(usize),
+    // A resolution-table row.
+    ResolutionRow(usize),
+    // A scale-table row.
+    ScaleRow(usize),
+    // A preset-menu row.
+    PresetRow(usize),
+    // A popup footer button.
+    Popup(PopupAction),
 }
 
 // How long one blink phase stays on screen.

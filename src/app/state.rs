@@ -45,6 +45,9 @@ pub struct App {
     pub hover_frame: u32,
     // When the current hover began, for scheduling the shimmer.
     pub hover_since: Option<Instant>,
+    // When the current shimmer phase began (separate from the dwell clock so
+    // the 80ms tick cannot reset the tooltip dwell).
+    pub hover_anim_since: Option<Instant>,
     // The last pointer cell, used to place the tooltip.
     pub hover_point: (u16, u16),
     // The tooltip to draw this frame, computed in `draw`.
@@ -194,7 +197,7 @@ impl App {
     // the event loop blocks until real input (zero idle cost).
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
         let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
-        let hover = match (self.hover, self.hover_since) {
+        let hover = match (self.hover, self.hover_anim_since) {
             (Some(_), Some(since)) => {
                 Some(HOVER_TOGGLE.saturating_sub(now.saturating_duration_since(since)))
             }
@@ -230,10 +233,12 @@ impl App {
         }
 
         if self.hover.is_some()
-            && let Some(since) = self.hover_since
+            && let Some(since) = self.hover_anim_since
             && now.saturating_duration_since(since) >= HOVER_TOGGLE
         {
-            self.hover_since = Some(now);
+            // Only the shimmer clock advances; the dwell clock (hover_since)
+            // keeps running so the tooltip can still appear at 3s.
+            self.hover_anim_since = Some(now);
             self.hover_frame = self.hover_frame.wrapping_add(1);
         }
     }
@@ -251,6 +256,7 @@ impl App {
         }
         self.hover = target;
         self.hover_since = Some(now);
+        self.hover_anim_since = Some(now);
         self.hover_frame = 0;
     }
 
@@ -1769,6 +1775,32 @@ mod tests {
             "the new element's dwell starts over"
         );
         assert!(app.tooltip_at(t0 + Duration::from_secs(6)).is_some());
+    }
+
+    // Regression: the shimmer tick used to advance the same clock as the dwell,
+    // so a resting pointer never reached the 3s threshold and tooltips were
+    // dead in the running app. Drive the real loop sequence.
+    #[test]
+    fn the_shimmer_tick_does_not_reset_the_tooltip_dwell() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+
+        // Simulate the event loop: poll times out at the shimmer deadline and
+        // the animation advances, over and over, for three seconds.
+        for step in 1..=40u64 {
+            app.advance_animation_at(t0 + Duration::from_millis(80 * step));
+        }
+
+        assert!(app.hover_tick() > 0, "the shimmer advanced");
+        assert!(
+            app.tooltip_at(t0 + Duration::from_millis(3200)).is_some(),
+            "the dwell must still mature while the shimmer ticks"
+        );
+        assert!(
+            app.tooltip_at(t0 + Duration::from_millis(3000)).is_some(),
+            "the tooltip is due right at the 3s mark"
+        );
     }
 
     // --- validate on apply + Space auto-fix -----------------------------

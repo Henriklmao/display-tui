@@ -316,6 +316,16 @@ fn preset_rect(area: Rect) -> Rect {
 }
 impl PresetMenu {
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.render_with(area, buf, None, 0);
+    }
+
+    pub fn render_with(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        hover: Option<crate::app::state::HoverTarget>,
+        hover_tick: u32,
+    ) {
         let popup_area = preset_rect(area);
         Clear.render(popup_area, buf);
 
@@ -363,6 +373,9 @@ impl PresetMenu {
                         // Highlight the currently active preset in bold.
                         if is_active {
                             line = line.bold();
+                        }
+                        if hover == Some(crate::app::state::HoverTarget::PresetRow(i)) {
+                            line = line.style(crate::ui::styles::hover_style(hover_tick));
                         }
                         lines.push(line);
                     }

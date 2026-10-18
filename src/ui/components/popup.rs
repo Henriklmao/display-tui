@@ -298,6 +298,17 @@ impl Popup {
 
     // Draws the popup and returns the geometry used, for hit-testing.
     pub fn render(&self, area: Rect, buf: &mut Buffer) -> PopupFrame {
+        self.render_with(area, buf, None, 0)
+    }
+
+    // Draws the popup with hover styling for the button under the pointer.
+    pub fn render_with(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        hover: Option<crate::app::state::HoverTarget>,
+        hover_tick: u32,
+    ) -> PopupFrame {
         let layout = self.layout(area);
         let frame = layout.frame;
         if layout.is_empty() {
@@ -341,7 +352,14 @@ impl Popup {
         }
 
         for button in layout.buttons.iter().flatten() {
-            Paragraph::new(Line::from(self.label(button.action)).gray())
+            let hovered = hover == Some(crate::app::state::HoverTarget::Popup(button.action));
+            let style = if hovered {
+                // Inverted, bold and colour-shifted: an obvious "click me".
+                crate::ui::styles::hover_style(hover_tick).reversed()
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            Paragraph::new(Line::from(self.label(button.action)).style(style))
                 .alignment(Alignment::Left)
                 .render(button.rect, buf);
         }
@@ -557,8 +575,40 @@ mod tests {
     }
 
     #[test]
-    fn popup_survives_areas_that_are_smaller_than_itself() {
-        for (width, height) in [
+    fn a_hovered_button_is_reversed_and_the_others_are_not() {
+        use crate::app::state::HoverTarget;
+        use ratatui::style::Modifier;
+
+        let area = Rect::new(0, 0, 100, 30);
+        let p = popup(true, true, &["boom"]);
+        let mut buf = Buffer::empty(area);
+        let layout = p.render_with(
+            area,
+            &mut buf,
+            Some(HoverTarget::Popup(PopupAction::Close)),
+            0,
+        );
+
+        let close = layout.button(PopupAction::Close).expect("close");
+        assert!(
+            buf[(close.x, close.y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "the hovered button is highlighted"
+        );
+        let force = layout.button(PopupAction::Force).expect("force");
+        assert!(
+            !buf[(force.x, force.y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "the other button stays plain"
+        );
+    }
+
+    #[test]
+    fn popup_survives_areas_that_are_smaller_than_itself() {        for (width, height) in [
             (0u16, 0u16),
             (1, 1),
             (4, 2),

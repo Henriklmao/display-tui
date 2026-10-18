@@ -32,6 +32,22 @@ pub fn header_style() -> Style {
     Style::new().bold().fg(COLOR_SUCCESS).reversed()
 }
 
+// The alternating accent of the currently hovered element. Two steps per
+// shimmer cycle so the colour visibly runs through the text without needing a
+// per-grapheme sweep.
+pub fn hover_accent(tick: u32) -> Color {
+    if tick.is_multiple_of(2) {
+        Color::LightCyan
+    } else {
+        Color::LightGreen
+    }
+}
+
+// Style for a hovered interactive element.
+pub fn hover_style(tick: u32) -> Style {
+    Style::new().fg(hover_accent(tick)).bold()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +113,19 @@ mod tests {
         assert_eq!(border_style(), border_style());
         assert_eq!(highlight_style(), highlight_style());
         assert_eq!(header_style(), header_style());
+    }
+
+    #[test]
+    fn the_hover_accent_shimmers_between_two_steps() {
+        assert_ne!(hover_accent(0), hover_accent(1));
+        assert_eq!(hover_accent(0), hover_accent(2), "the cycle repeats");
+        assert_ne!(hover_accent(0), Color::Reset);
+    }
+
+    #[test]
+    fn hover_style_is_bold_in_the_accent_colour() {
+        let style = hover_style(0);
+        assert_eq!(style.fg, Some(hover_accent(0)));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
     }
 }

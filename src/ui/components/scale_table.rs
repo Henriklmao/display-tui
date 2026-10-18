@@ -11,19 +11,27 @@ use ratatui::{
 };
 
 use crate::App;
+use crate::app::state::HoverTarget;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
+use crate::ui::styles;
 use crate::utils::{ScaleValue, TUIMode, change_mode};
 use ratatui::layout::Constraint;
 
 #[derive(Debug)]
 pub struct Scale {
     pub state: TableState,
+    // The element currently under the pointer, for the hover shimmer.
+    pub hover: Option<HoverTarget>,
+    // The hover shimmer step.
+    pub hover_tick: u32,
 }
 
 impl Scale {
     pub fn new(selected: usize) -> Self {
         Scale {
             state: TableState::default().with_selected(selected),
+            hover: None,
+            hover_tick: 0,
         }
     }
 
@@ -81,7 +89,15 @@ impl Scale {
     fn scale_to_rows(&self) -> Vec<Row<'static>> {
         ScaleValue::table()
             .iter()
-            .map(|scale| Row::new(vec![Cell::from(scale.name)]))
+            .enumerate()
+            .map(|(index, scale)| {
+                let row = Row::new(vec![Cell::from(scale.name)]);
+                if self.hover == Some(HoverTarget::ScaleRow(index)) {
+                    row.style(styles::hover_style(self.hover_tick))
+                } else {
+                    row
+                }
+            })
             .collect()
     }
 }
@@ -116,6 +132,8 @@ mod tests {
     fn render_scale() {
         let mut scales = Scale {
             state: TableState::default(),
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 11));
 

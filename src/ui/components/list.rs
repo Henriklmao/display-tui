@@ -14,8 +14,10 @@ use ratatui::{
 };
 
 use crate::App;
+use crate::app::state::HoverTarget;
 use crate::rotation::Rotation;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
+use crate::ui::styles;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{CautionFlags, caution_flags};
 
@@ -114,6 +116,10 @@ pub struct MonitorList<'a> {
     pub is_previewing: bool,
     // Whether a mouse move is waiting to be applied.
     pub moved_pending: bool,
+    // The element currently under the pointer, for the hover shimmer.
+    pub hover: Option<HoverTarget>,
+    // The hover shimmer step.
+    pub hover_tick: u32,
 }
 
 impl<'a> MonitorList<'a> {
@@ -125,6 +131,8 @@ impl<'a> MonitorList<'a> {
             monitors,
             is_previewing: false,
             moved_pending: false,
+            hover: None,
+            hover_tick: 0,
         }
     }
 
@@ -328,10 +336,17 @@ impl<'a> MonitorList<'a> {
                 // (icon colour, red workspace number) still win because cells
                 // are painted over the row style, and the reversed selection
                 // patch only swaps fg/bg without clobbering them.
+                let mut style = Style::default();
                 if caution.flags(index) {
-                    row.style(Style::default().bg(Color::Yellow).fg(Color::Black))
-                } else {
+                    style = style.bg(Color::Yellow).fg(Color::Black);
+                }
+                if self.hover == Some(HoverTarget::ListRow(index)) {
+                    style = style.fg(styles::hover_accent(self.hover_tick)).bold();
+                }
+                if style == Style::default() {
                     row
+                } else {
+                    row.style(style)
                 }
             })
             .collect()
@@ -522,6 +537,8 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: pending,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -544,6 +561,8 @@ mod tests {
             monitors: &test_monitors(),
             is_previewing: false,
             moved_pending: false,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
 
@@ -635,6 +654,8 @@ mod tests {
             monitors,
             is_previewing: false,
             moved_pending: false,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -717,6 +738,8 @@ mod tests {
             monitors: &monitors,
             is_previewing: true,
             moved_pending: false,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 130, 8));
         list.render(buf.area, &mut buf);
@@ -815,6 +838,8 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(wide);
         list.render(wide, &mut buf);
@@ -831,6 +856,8 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(wide);
         sub.render(wide, &mut buf);
@@ -855,6 +882,8 @@ mod tests {
                 monitors: &monitors,
                 is_previewing: false,
                 moved_pending: true,
+                hover: None,
+                hover_tick: 0,
             };
             let mut buf = Buffer::empty(area);
             list.render(area, &mut buf);
@@ -989,6 +1018,8 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
+            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -1262,6 +1293,31 @@ mod tests {
             buf[(x, y)].style().bg,
             Some(Color::Yellow),
             "the caution background must disappear live"
+        );
+    }
+
+    #[test]
+    fn a_hovered_row_shimmers_in_the_accent_colour() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+        let mut list = MonitorList {
+            state: TableState::default().with_selected(Some(2)),
+            selected_row: Some(2),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: false,
+            hover: Some(crate::app::state::HoverTarget::ListRow(1)),
+            hover_tick: 0,
+        };
+        let area = Rect::new(0, 0, 130, 9);
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+
+        let (x, y) = find_text(&buf, "Beta").expect("Beta row");
+        assert_eq!(
+            buf[(x, y)].style().fg,
+            Some(crate::ui::styles::hover_accent(0)),
+            "the hovered row carries the shimmer accent"
         );
     }
 }

@@ -43,6 +43,10 @@ pub struct App {
     pub blink: Option<BlinkState>,
     // The interactive element currently under the pointer, if any.
     pub hover: Option<HoverTarget>,
+    // The current hover shimmer step, advanced while an element is hovered.
+    pub hover_frame: u32,
+    // When the current hover began, for scheduling the shimmer.
+    pub hover_since: Option<Instant>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -102,6 +106,9 @@ pub const BLINK_TOGGLE: Duration = Duration::from_millis(500);
 
 // Number of on/off toggles in one validation blink (eight = four flashes).
 pub const BLINK_TOGGLES: u32 = 8;
+
+// How long one hover shimmer step lasts.
+pub const HOVER_TOGGLE: Duration = Duration::from_millis(80);
 
 // A finite validation blink. The phase is a counter, not wall-clock derived,
 // so rendering and tests are deterministic; `since` only drives scheduling.
@@ -184,7 +191,19 @@ impl App {
     // Time until the next animation deadline. `None` means nothing animates, so
     // the event loop blocks until real input (zero idle cost).
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
-        self.blink.as_ref().map(|blink| blink.remaining(now))
+        let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
+        let hover = match (self.hover, self.hover_since) {
+            (Some(_), Some(since)) => {
+                Some(HOVER_TOGGLE.saturating_sub(now.saturating_duration_since(since)))
+            }
+            _ => None,
+        };
+        match (blink, hover) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
     }
 
     fn next_deadline(&self) -> Option<Duration> {
@@ -194,19 +213,42 @@ impl App {
     // Advances every armed timer by one step if its deadline has passed. Only
     // called when `poll` timed out, so real input always takes priority.
     pub(crate) fn advance_animation_at(&mut self, now: Instant) {
-        let Some(blink) = self.blink.as_mut() else {
-            return;
-        };
-        if now.saturating_duration_since(blink.since) < BLINK_TOGGLE {
-            return;
-        }
-        blink.since = now;
-        blink.toggles_left = blink.toggles_left.saturating_sub(1);
-        blink.lit = !blink.lit;
-        if blink.toggles_left == 0 {
+        let mut disarm = false;
+        if let Some(blink) = self.blink.as_mut()
+            && now.saturating_duration_since(blink.since) >= BLINK_TOGGLE
+        {
+            blink.since = now;
+            blink.toggles_left = blink.toggles_left.saturating_sub(1);
+            blink.lit = !blink.lit;
             // The blink has run its course; the red highlights stay armed.
+            disarm = blink.toggles_left == 0;
+        }
+        if disarm {
             self.blink = None;
         }
+
+        if self.hover.is_some()
+            && let Some(since) = self.hover_since
+            && now.saturating_duration_since(since) >= HOVER_TOGGLE
+        {
+            self.hover_since = Some(now);
+            self.hover_frame = self.hover_frame.wrapping_add(1);
+        }
+    }
+
+    // Records the hovered element, restarting the shimmer only on a change.
+    pub(crate) fn set_hover(&mut self, target: Option<HoverTarget>, now: Instant) {
+        if self.hover == target {
+            return;
+        }
+        self.hover = target;
+        self.hover_since = Some(now);
+        self.hover_frame = 0;
+    }
+
+    // The current hover shimmer step, for the components to style with.
+    pub(crate) fn hover_tick(&self) -> u32 {
+        self.hover_frame
     }
 
     // Resolves the presets directory, honouring the injectable override.
@@ -1611,6 +1653,39 @@ mod tests {
         assert!(app.highlights.is_none());
         assert!(!app.highlight_visible());
         assert_eq!(app.next_deadline_at(Instant::now()), None);
+    }
+
+    #[test]
+    fn hover_arms_the_shimmer_and_advances_it_on_the_deadline() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::ListRow(0)), t0);
+
+        assert_eq!(app.next_deadline_at(t0), Some(HOVER_TOGGLE));
+
+        app.advance_animation_at(t0 + Duration::from_millis(79));
+        assert_eq!(app.hover_tick(), 0, "too early to shimmer");
+
+        app.advance_animation_at(t0 + Duration::from_millis(80));
+        assert_eq!(app.hover_tick(), 1, "the shimmer advanced");
+
+        app.set_hover(None, t0 + Duration::from_millis(100));
+        assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(100)), None);
+        assert_eq!(app.hover_tick(), 0, "hover-out resets the shimmer");
+    }
+
+    #[test]
+    fn the_nearer_of_hover_and_blink_deadlines_wins() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.arm_blink(t0);
+        app.set_hover(Some(HoverTarget::Map(0)), t0 + Duration::from_millis(450));
+
+        // 50ms of blink remain, 80ms of hover.
+        assert_eq!(
+            app.next_deadline_at(t0 + Duration::from_millis(450)),
+            Some(Duration::from_millis(50))
+        );
     }
 
     // --- validate on apply + Space auto-fix -----------------------------

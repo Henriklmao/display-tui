@@ -38,16 +38,14 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     // press so the drag cannot stay armed behind an overlay.
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.drag = None;
-        app.hover = None;
+        app.set_hover(None, now);
     }
 
     // Hover is resolved for every state (including open overlays) and always
     // before the modal branches return.
     if matches!(event.kind, MouseEventKind::Moved) {
         let target = resolve_hover(app, layout, point(event));
-        if app.hover != target {
-            app.hover = target;
-        }
+        app.set_hover(target, now);
         return;
     }
 
@@ -86,7 +84,7 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         event.kind,
         MouseEventKind::Down(_) | MouseEventKind::Drag(_)
     ) {
-        app.hover = None;
+        app.set_hover(None, now);
     }
 
     match event.kind {

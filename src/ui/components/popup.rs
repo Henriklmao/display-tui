@@ -239,7 +239,7 @@ impl Popup {
             .max(footer_width)
             .saturating_add(2 * HORIZONTAL_PADDING + 2);
         let width = desired_width.min(max_width).max(min_width);
-        let inner_width = width.saturating_sub(2 * HORIZONTAL_PADDING + 2).max(1);
+        let inner_width = width.saturating_sub(2 * HORIZONTAL_PADDING).max(1);
 
         // Height: wrapped content + wrapped footer + borders and padding.
         let content_height: u16 = self
@@ -258,7 +258,9 @@ impl Popup {
         let desired_height = content_height
             .saturating_add(footer_height)
             .saturating_add(3); // one blank separator line + two borders
-        let height = desired_height.min(max_height).max(3.min(area.height));
+        // Clamp to the 90% cap; on a terminal shorter than the cap the frame
+        // simply fills what is available instead of overflowing.
+        let height = desired_height.min(max_height).min(area.height).max(1);
 
         let frame = fitted_rect(area, width, height);
         let content_area = frame.inner(Margin::new(HORIZONTAL_PADDING, 1));
@@ -283,7 +285,14 @@ impl Popup {
                 if index >= buttons.len() {
                     break;
                 }
-                let button_width = label.chars().count() as u16;
+                // Never let a button run past the frame: a label wider than the
+                // inner width is truncated by the renderer, but its clickable
+                // rect must stay inside.
+                let available = content_area.right().saturating_sub(x);
+                let button_width = (label.chars().count() as u16).min(available);
+                if button_width == 0 {
+                    break;
+                }
                 buttons[index] = Some(PopupButton {
                     action: *action,
                     rect: Rect::new(x, y, button_width, 1),
@@ -575,6 +584,33 @@ mod tests {
             "buttons must not overlap"
         );
         assert!(text(&buf).contains("force"));
+
+        // Every button must stay inside the frame even when a label is wider
+        // than the content area.
+        for button in layout.buttons.iter().flatten() {
+            assert!(
+                button.rect.x >= layout.frame.x
+                    && button.rect.right() <= layout.frame.right()
+                    && button.rect.y >= layout.frame.y
+                    && button.rect.bottom() <= layout.frame.bottom(),
+                "button {:?} escapes {:?}",
+                button.rect,
+                layout.frame
+            );
+        }
+    }
+
+    #[test]
+    fn the_frame_never_exceeds_the_screen_on_short_terminals() {
+        for (width, height) in [(22u16, 20u16), (20, 5), (20, 4), (20, 3), (10, 3)] {
+            let area = Rect::new(0, 0, width, height);
+            let (_, layout) = render(&popup(true, true, &["boom"]), area);
+            assert!(
+                layout.frame.height <= area.height && layout.frame.width <= area.width,
+                "{:?} escapes {area:?}",
+                layout.frame
+            );
+        }
     }
 
     #[test]

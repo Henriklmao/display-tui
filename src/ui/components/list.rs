@@ -17,6 +17,7 @@ use crate::App;
 use crate::rotation::Rotation;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
 use crate::utils::TUIMode;
+use crate::validation::diagnostics::{CautionFlags, caution_flags};
 
 // Highlight marker shown in front of the selected row.
 //
@@ -257,10 +258,12 @@ impl<'a> MonitorList<'a> {
     fn monitors_to_rows(
         &self,
         workspace_counts: &std::collections::HashMap<u8, usize>,
+        caution: &CautionFlags,
     ) -> Vec<Row<'static>> {
         self.monitors
             .iter()
-            .map(|monitor| {
+            .enumerate()
+            .map(|(index, monitor)| {
                 let name = monitor.name.clone();
                 let description = monitor
                     .description
@@ -287,14 +290,16 @@ impl<'a> MonitorList<'a> {
                     Some(ws) => {
                         let ws_str = ws.to_string();
                         if is_duplicate_ws {
-                            Cell::default().content(Line::from(ws_str.red()))
+                            // `Cell::default()` carries a zero column span and
+                            // would never be painted; build it from the content.
+                            Cell::from(Line::from(ws_str.red()))
                         } else {
                             Cell::from(ws_str)
                         }
                     }
                     None => Cell::from("-"),
                 };
-                Row::new(vec![
+                let row = Row::new(vec![
                     Cell::from(if enabled == "true" {
                         "".to_string()
                     } else {
@@ -312,7 +317,18 @@ impl<'a> MonitorList<'a> {
                     Cell::from(scale),
                     Cell::from(rotation),
                     workspace_cell,
-                ])
+                ]);
+
+                // A live caution background on any offending monitor, derived
+                // from the preview state at render time. The per-cell styles
+                // (icon colour, red workspace number) still win because cells
+                // are painted over the row style, and the reversed selection
+                // patch only swaps fg/bg without clobbering them.
+                if caution.flags(index) {
+                    row.style(Style::default().bg(Color::Yellow).fg(Color::Black))
+                } else {
+                    row
+                }
             })
             .collect()
     }
@@ -333,6 +349,9 @@ impl<'a> MonitorList<'a> {
         );
         let workspace_counts = workspace_counts(self.monitors);
         let has_duplicate_workspace = has_duplicate_workspace(self.monitors);
+        // Derived from the live preview every frame, so every drag pixel, snap,
+        // toggle and preset preview updates the caution background instantly.
+        let caution = caution_flags(self.monitors);
 
         let is_mini_mode = area.width < 115;
         // Footer hints as (drop rank, spans), drawn in the order given: when the
@@ -447,7 +466,7 @@ impl<'a> MonitorList<'a> {
 
         let widths = COLUMN_WIDTHS;
 
-        let table = Table::new(self.monitors_to_rows(&workspace_counts), widths)
+        let table = Table::new(self.monitors_to_rows(&workspace_counts, &caution), widths)
             .column_spacing(COLUMN_SPACING)
             .header(
                 Row::new(vec![
@@ -465,7 +484,7 @@ impl<'a> MonitorList<'a> {
                 .green()
                 .reversed(),
             )
-            .row_highlight_style(Style::new().yellow())
+            .row_highlight_style(Style::new().reversed().bold())
             .cell_highlight_style(Style::new().blue())
             .highlight_symbol(HIGHLIGHT_SYMBOL);
 
@@ -1098,5 +1117,147 @@ mod tests {
 
         assert_eq!(a.selected_monitor, 0);
         assert_eq!(a.mode, TUIMode::View, "sub-modes need a monitor");
+    }
+
+    // --- live caution background ----------------------------------------
+
+    use crate::monitor::{Position, Resolution};
+
+    // An enabled 1920x1080 monitor at (x, 0) with the given name.
+    fn placed(name: &str, x: i32) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            enabled: true,
+            position: Some(Position { x, y: 0 }),
+            scale: Some(1.0),
+            modes: vec![Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_overlapping_row_carries_a_yellow_caution_background() {
+        // B pokes into A: both are offending partners and both are flagged.
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 2, area);
+
+        for name in ["Alpha", "Beta"] {
+            let (x, y) = find_text(&buf, name).expect("monitor row");
+            assert_eq!(
+                buf[(x, y)].style().bg,
+                Some(Color::Yellow),
+                "{name} must carry the caution background"
+            );
+            assert_eq!(buf[(x, y)].style().fg, Some(Color::Black));
+        }
+    }
+
+    #[test]
+    fn a_clean_row_has_no_caution_background() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+
+        let (x, y) = find_text(&buf, "Alpha").expect("monitor row");
+        assert_ne!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "a valid layout must not be cautioned"
+        );
+    }
+
+    #[test]
+    fn a_detached_row_is_cautioned_but_its_anchor_is_not() {
+        let monitors = vec![placed("Alpha", 0), placed("Far", 50_000)];
+        let area = Rect::new(0, 0, 130, 10);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+
+        let (fx, fy) = find_text(&buf, "Far").expect("detached row");
+        assert_eq!(buf[(fx, fy)].style().bg, Some(Color::Yellow));
+
+        let (ax, ay) = find_text(&buf, "Alpha").expect("anchor row");
+        assert_ne!(
+            buf[(ax, ay)].style().bg,
+            Some(Color::Yellow),
+            "only the offender is flagged, never the anchor"
+        );
+    }
+
+    // Regression: ratatui patches the highlight style over the whole selected
+    // row after the cells are painted, so a fg-only highlight used to clobber
+    // the red workspace number and hide it behind yellow-on-yellow.
+    #[test]
+    fn the_red_workspace_number_survives_on_selected_and_unselected_rows() {
+        let monitors = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+
+        for selected in [0, 1] {
+            let buf = render_list_to(&monitors, TUIMode::View, selected, area);
+            let (x, y) = find_text(&buf, "3").expect("workspace cell");
+            assert_eq!(
+                buf[(x, y)].style().fg,
+                Some(Color::Red),
+                "duplicate workspace must stay red on row {selected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_selected_caution_row_keeps_readable_contrast() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+        let (_, row) = find_text(&buf, "Alpha").expect("monitor row");
+        let inner = Block::bordered().inner(area);
+
+        for x in inner.left()..inner.right() {
+            let style = buf[(x, row)].style();
+            if let (Some(fg), Some(bg)) = (style.fg, style.bg) {
+                assert_ne!(
+                    fg, bg,
+                    "cell ({x}, {row}) would be invisible when reversed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_a_monitor_clear_un_flags_its_row_without_any_apply() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+
+        let flagged = render_list_to(&monitors, TUIMode::View, 2, area);
+        let (x, y) = find_text(&flagged, "Beta").expect("Beta row");
+        assert_eq!(flagged[(x, y)].style().bg, Some(Color::Yellow));
+
+        // Move Beta clear of Alpha: re-rendering alone must clear the caution,
+        // with no popup, apply or write in between.
+        let mut cleared = monitors;
+        cleared[1].position = Some(Position { x: 1920, y: 0 });
+        let buf = render_list_to(&cleared, TUIMode::View, 2, area);
+        let (x, y) = find_text(&buf, "Beta").expect("Beta row");
+        assert_ne!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "the caution background must disappear live"
+        );
     }
 }

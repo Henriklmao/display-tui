@@ -359,7 +359,7 @@ impl<'a> MonitorList<'a> {
 
                 TUIMode::Move => {
                     instructions_items.push(" Fastmove ".white());
-                    instructions_items.push("<H/J/K/L ".blue().bold());
+                    instructions_items.push("<H/J/K/L> ".blue().bold());
                     instructions_items.push(" Snapmove ".white());
                     instructions_items.push("<h/j/k/l> ".blue().bold());
                 }

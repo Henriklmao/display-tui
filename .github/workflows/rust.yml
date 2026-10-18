@@ -90,5 +90,9 @@ jobs:
       uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
       with:
         files: "dist/display-tui-*-x86_64-linux-gnu"
+        # download-artifact@v8 has no if-no-artifact-found input and the release
+        # action ignores unmatched globs by default, so a re-run without
+        # artifacts would publish a binary-less release and still pass.
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

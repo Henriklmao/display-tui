@@ -292,27 +292,23 @@ impl<'a> MonitorList<'a> {
         if self.moved_pending && self.mode == TUIMode::View {
             // A pending mouse move is a confirm state: only Apply or
             // Cancel/Revert are offered, so the usual actions stay hidden until
-            // the move is resolved. The right-click alternative is only
-            // advertised while the whole line fits the footer (44 inner columns
-            // at a 46-column terminal), so narrow terminals keep "<Esc/q>"
-            // instead of clipping it; the help modal names "Cancel/Revert all".
-            let full_hint = [
-                " Apply ",
-                "<Enter/Space> ",
-                " Right-click ",
-                " Cancel all ",
-                "<Esc/q> ",
-            ]
-            .iter()
-            .map(|item| item.len())
-            .sum::<usize>();
-            instructions_items.push(" Apply ".white());
-            instructions_items.push("<Enter/Space> ".blue().bold());
-            if full_hint <= area.width.saturating_sub(2) as usize {
-                instructions_items.push(" Right-click ".white());
+            // the move is resolved.
+            instructions_items = vec![
+                " Apply ".white(),
+                "<Enter/Space> ".blue().bold(),
+                " Right-click ".white(),
+                " Cancel all ".white(),
+                "<Esc/q> ".blue().bold(),
+            ];
+            // The mouse alternative (index 2) is the first thing to go when the
+            // line no longer fits the footer: narrow terminals keep both keys
+            // instead of a clipped "<Esc/q>". The help modal names right-click
+            // and "Cancel/Revert all" in full.
+            if Line::from(instructions_items.clone()).width()
+                > area.width.saturating_sub(2) as usize
+            {
+                instructions_items.remove(2);
             }
-            instructions_items.push(" Cancel all ".white());
-            instructions_items.push("<Esc/q> ".blue().bold());
         } else if is_mini_mode {
             instructions_items.push(" Save ".white());
             instructions_items.push("<w> ".blue().bold());

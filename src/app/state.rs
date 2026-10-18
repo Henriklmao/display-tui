@@ -13,6 +13,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent}
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
 use std::io;
+use std::time::{Duration, Instant};
 
 // Main application state.
 #[derive(Default)]
@@ -35,6 +36,8 @@ pub struct App {
     // World-space highlights (overlap edges, detached borders, connectors)
     // armed by the layout check and cleared on cancel/success.
     pub highlights: Option<crate::validation::diagnostics::LayoutHighlights>,
+    // The running validation blink, if the highlights are animating.
+    pub blink: Option<BlinkState>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -70,6 +73,39 @@ pub struct DragState {
     pub was_pending: bool,
 }
 
+// How long one blink phase stays on screen.
+pub const BLINK_TOGGLE: Duration = Duration::from_millis(500);
+
+// Number of on/off toggles in one validation blink (eight = four flashes).
+pub const BLINK_TOGGLES: u32 = 8;
+
+// A finite validation blink. The phase is a counter, not wall-clock derived,
+// so rendering and tests are deterministic; `since` only drives scheduling.
+pub struct BlinkState {
+    // Remaining toggles before the blink settles red and disarms.
+    pub toggles_left: u32,
+    // Whether the highlights are painted hot right now.
+    pub lit: bool,
+    // When the current phase began.
+    pub since: Instant,
+}
+
+impl BlinkState {
+    // Starts a blink in the lit phase at `now`.
+    pub fn start(now: Instant) -> Self {
+        BlinkState {
+            toggles_left: BLINK_TOGGLES,
+            lit: true,
+            since: now,
+        }
+    }
+
+    // Time until the next phase toggle.
+    pub fn remaining(&self, now: Instant) -> Duration {
+        BLINK_TOGGLE.saturating_sub(now.saturating_duration_since(self.since))
+    }
+}
+
 // Popup message displayed to the user.
 pub struct Popup {
     pub title: String,
@@ -101,10 +137,50 @@ impl App {
         !self.move_origins.is_empty()
     }
 
-    // Whether the armed map highlights are currently painted hot. Blink toggles
-    // this over time; an un-armed layout never draws anything.
-    pub(crate) fn highlight_visible(&self) -> bool {
-        self.highlights.is_some()
+    // Whether the armed map highlights are currently painted hot. The blink
+    // counter gates this; an un-armed layout never draws anything, and once the
+    // blink has settled it stays red until the popup is dismissed.
+    pub fn highlight_visible(&self) -> bool {
+        self.highlights.is_some() && self.blink.as_ref().is_none_or(|blink| blink.lit)
+    }
+
+    // Starts a fresh validation blink at `now`, keeping any armed highlights.
+    pub fn arm_blink(&mut self, now: Instant) {
+        self.blink = Some(BlinkState::start(now));
+    }
+
+    // Stops any running blink and drops the highlights.
+    pub fn clear_highlights(&mut self) {
+        self.blink = None;
+        self.highlights = None;
+    }
+
+    // Time until the next animation deadline. `None` means nothing animates, so
+    // the event loop blocks until real input (zero idle cost).
+    pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
+        self.blink.as_ref().map(|blink| blink.remaining(now))
+    }
+
+    fn next_deadline(&self) -> Option<Duration> {
+        self.next_deadline_at(Instant::now())
+    }
+
+    // Advances every armed timer by one step if its deadline has passed. Only
+    // called when `poll` timed out, so real input always takes priority.
+    pub(crate) fn advance_animation_at(&mut self, now: Instant) {
+        let Some(blink) = self.blink.as_mut() else {
+            return;
+        };
+        if now.saturating_duration_since(blink.since) < BLINK_TOGGLE {
+            return;
+        }
+        blink.since = now;
+        blink.toggles_left = blink.toggles_left.saturating_sub(1);
+        blink.lit = !blink.lit;
+        if blink.toggles_left == 0 {
+            // The blink has run its course; the red highlights stay armed.
+            self.blink = None;
+        }
     }
 
     // Resolves the presets directory, honouring the injectable override.
@@ -163,7 +239,19 @@ impl App {
 
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
+            // Deadline-driven: a pending animation arms `poll`, real input
+            // returns immediately and always wins. With nothing animating this
+            // falls back to the old blocking read (zero idle cost).
+            match self.next_deadline() {
+                Some(timeout) => {
+                    if event::poll(timeout)? {
+                        self.handle_events()?;
+                    } else {
+                        self.advance_animation_at(Instant::now());
+                    }
+                }
+                None => self.handle_events()?,
+            }
         }
         Ok(())
     }
@@ -1276,5 +1364,102 @@ mod tests {
         // Sanity: the delegate is what actually runs.
         app.monitors[1].position = Some(Position { x: 0, y: 0 });
         assert!(app.validate().is_err());
+    }
+
+    // --- animation scheduler --------------------------------------------
+
+    #[test]
+    fn nothing_animates_without_an_armed_blink() {
+        let app = App::new(None);
+        assert_eq!(app.next_deadline_at(Instant::now()), None);
+    }
+
+    #[test]
+    fn the_next_deadline_shrinks_as_the_phase_elapses() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.arm_blink(t0);
+
+        assert_eq!(app.next_deadline_at(t0), Some(BLINK_TOGGLE));
+        assert_eq!(
+            app.next_deadline_at(t0 + Duration::from_millis(200)),
+            Some(Duration::from_millis(300))
+        );
+        assert_eq!(
+            app.next_deadline_at(t0 + Duration::from_secs(5)),
+            Some(Duration::ZERO),
+            "an overdue deadline polls immediately"
+        );
+    }
+
+    #[test]
+    fn the_blink_toggles_only_once_a_full_phase_has_passed() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.arm_blink(t0);
+        assert!(
+            app.blink.as_ref().unwrap().lit,
+            "the blink starts in the lit phase"
+        );
+
+        app.advance_animation_at(t0 + Duration::from_millis(499));
+        assert!(app.blink.as_ref().unwrap().lit, "too early to toggle");
+
+        app.advance_animation_at(t0 + Duration::from_millis(500));
+        assert!(!app.blink.as_ref().unwrap().lit, "the phase toggled");
+        assert_eq!(app.blink.as_ref().unwrap().toggles_left, BLINK_TOGGLES - 1);
+    }
+
+    #[test]
+    fn the_blink_auto_disarms_after_eight_toggles_and_settles_lit() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.highlights = Some(crate::validation::diagnostics::LayoutHighlights::default());
+        app.arm_blink(t0);
+
+        let mut lit_phases = 1; // starts lit
+        for step in 1..=BLINK_TOGGLES {
+            let was_lit = app.blink.as_ref().unwrap().lit;
+            app.advance_animation_at(t0 + Duration::from_millis(500 * step as u64));
+            if !was_lit {
+                lit_phases += 1;
+            }
+        }
+
+        assert_eq!(lit_phases, 5, "the initial phase plus four flashes");
+        assert!(app.blink.is_none(), "the blink disarmed itself");
+        assert!(
+            app.highlight_visible(),
+            "highlights stay solid red after the blink"
+        );
+    }
+
+    #[test]
+    fn an_armed_blink_does_not_block_keys() {
+        let dir = TempDir::new("app-blink-keys");
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        app.arm_blink(Instant::now());
+
+        // The key path runs while the blink is pending, exactly as it would
+        // between two poll timeouts.
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.move_origins.is_empty(), "Esc is still handled");
+        assert_eq!(app.monitors[0].position, Some(Position { x: 100, y: 100 }));
+    }
+
+    #[test]
+    fn clearing_the_highlights_stops_the_blink() {
+        let mut app = App::new(None);
+        app.highlights = Some(crate::validation::diagnostics::LayoutHighlights::default());
+        app.arm_blink(Instant::now());
+
+        app.clear_highlights();
+
+        assert!(app.blink.is_none());
+        assert!(app.highlights.is_none());
+        assert!(!app.highlight_visible());
+        assert_eq!(app.next_deadline_at(Instant::now()), None);
     }
 }

@@ -43,7 +43,7 @@ pub struct App {
     pub hover: Option<HoverTarget>,
     // The current hover shimmer step, advanced while an element is hovered.
     pub hover_frame: u32,
-    // When the current hover began, for scheduling the shimmer.
+    // When the current hover began: the tooltip dwell clock.
     pub hover_since: Option<Instant>,
     // When the current shimmer phase began (separate from the dwell clock so
     // the 80ms tick cannot reset the tooltip dwell).

@@ -274,13 +274,18 @@ impl Popup {
         let mut buttons = [None; 3];
         let mut index = 0;
         for (row, row_buttons) in footer_rows.iter().enumerate() {
+            let y = footer_top.saturating_add(row as u16);
+            // On a terminal too short for the footer, drop rows that would land
+            // outside the frame instead of drawing them over the border.
+            if y >= content_area.bottom() {
+                break;
+            }
             let row_width: u16 = row_buttons
                 .iter()
                 .map(|(label, _)| label.chars().count() as u16)
                 .sum::<u16>()
                 .saturating_add(row_buttons.len().saturating_sub(1) as u16);
             let mut x = content_area.x + content_area.width.saturating_sub(row_width) / 2;
-            let y = footer_top.saturating_add(row as u16);
             for (label, action) in row_buttons {
                 if index >= buttons.len() {
                     break;
@@ -601,15 +606,31 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_never_exceeds_the_screen_on_short_terminals() {
+    fn the_frame_never_exceeds_the_screen_or_its_cap_on_short_terminals() {
         for (width, height) in [(22u16, 20u16), (20, 5), (20, 4), (20, 3), (10, 3)] {
             let area = Rect::new(0, 0, width, height);
             let (_, layout) = render(&popup(true, true, &["boom"]), area);
+
+            let cap = (area.height * POPUP_MAX_HEIGHT_PERCENT / 100).max(1);
             assert!(
-                layout.frame.height <= area.height && layout.frame.width <= area.width,
-                "{:?} escapes {area:?}",
+                layout.frame.height <= cap && layout.frame.height <= area.height,
+                "{:?} exceeds the cap {cap} or the area {area:?}",
                 layout.frame
             );
+            assert!(layout.frame.width <= area.width);
+
+            // Footer buttons must stay inside the (now shorter) frame.
+            for button in layout.buttons.iter().flatten() {
+                assert!(
+                    button.rect.x >= layout.frame.x
+                        && button.rect.right() <= layout.frame.right()
+                        && button.rect.y >= layout.frame.y
+                        && button.rect.bottom() <= layout.frame.bottom(),
+                    "button {:?} escapes {:?}",
+                    button.rect,
+                    layout.frame
+                );
+            }
         }
     }
 

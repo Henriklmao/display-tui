@@ -1,5 +1,6 @@
 //! Monitor configuration validation module.
 
+pub mod diagnostics;
 pub mod errors;
 pub mod rules;
 

@@ -16,7 +16,7 @@ use ratatui::{
 use std::time::Duration;
 
 // How long the pointer must rest before the tooltip appears.
-pub const TOOLTIP_DELAY: Duration = Duration::from_secs(3);
+pub const TOOLTIP_DELAY: Duration = Duration::from_secs(2);
 
 // How long each fade-in step lasts.
 pub const TOOLTIP_FADE: Duration = Duration::from_millis(100);
@@ -37,12 +37,11 @@ pub struct TooltipState {
 // The one-line description for an interactive element.
 pub fn text_for(target: HoverTarget) -> &'static str {
     match target {
-        HoverTarget::Map(_) => "Drag to move the monitor",
+        HoverTarget::Map(_) => "Drag to move, click to select",
         HoverTarget::ApplyButton(_) => "Click to apply the moved monitor",
-        HoverTarget::ListRow(_) => "Click to select this monitor",
-        HoverTarget::ResolutionRow(_) | HoverTarget::ScaleRow(_) => {
-            "Click selects, double-click applies"
-        }
+        HoverTarget::ListRow(_) => "Click selects; icon toggles enabled",
+        HoverTarget::ResolutionRow(_) => "Click selects, double-click applies",
+        HoverTarget::ScaleRow(_) => "Click selects, double-click applies",
         HoverTarget::PresetRow(_) => "Click previews, double-click applies",
         HoverTarget::Popup(action) => match action {
             PopupAction::Close => "Close without applying",

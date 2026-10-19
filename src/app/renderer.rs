@@ -9,10 +9,10 @@ impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let is_previewing = self.show_preset_menu.is_some();
 
+        let hover = self.hover;
+
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
-
-        let hover = self.hover;
 
         // Every monitor with an unapplied move gets an Apply button; sort for a
         // deterministic draw order (the map does not care about the set order).
@@ -81,7 +81,7 @@ impl Widget for &App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::tests::{test_monitors, text_of};
+    use crate::test_utils::tests::{find_cell, find_text, test_monitors, text_of};
     use crate::ui::components::PresetMenu;
     use ratatui::style::Color;
     use ratatui::widgets::Widget;
@@ -261,6 +261,104 @@ mod tests {
             // Must not panic even though the tables index a selected monitor.
             let _ = render_app(&a, Rect::new(0, 0, 120, 40));
         }
+    }
+
+    // The Resolution/Scale side table must show — and act on — the hovered
+    // monitor, matching the display list and map.
+    #[test]
+    fn the_resolution_table_follows_the_hovered_monitor() {
+        use crate::app::state::HoverTarget;
+        use crate::monitor::Resolution;
+        use std::time::Instant;
+
+        let mut a = App::new(None);
+        a.mode = TUIMode::Resolution;
+        let mut first = powered_monitor("Alpha", 0);
+        first.modes.truncate(1); // only 1920x1080
+        let mut second = powered_monitor("Beta", 1920);
+        second.modes.push(Resolution {
+            width: 2560,
+            height: 1440,
+            refresh: 60.0,
+            preferred: false,
+            current: false,
+        });
+        a.monitors = vec![first, second];
+        a.selected_monitor = 0;
+
+        let area = Rect::new(0, 0, 200, 40);
+        let before = text_of(&render_app(&a, area));
+        assert!(
+            !before.contains("2560x1440"),
+            "the stored selection's table has no such mode"
+        );
+
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), Instant::now(), true);
+        let after = text_of(&render_app(&a, area));
+        assert!(
+            after.contains("2560x1440"),
+            "the table shows the hovered monitor's modes: {after}"
+        );
+    }
+
+    #[test]
+    fn hovering_a_monitor_selects_it_visually_without_persisting() {
+        use crate::app::state::HoverTarget;
+        use std::time::Instant;
+
+        let mut a = App::new(None);
+        a.monitors = vec![powered_monitor("Alpha", 0), powered_monitor("Beta", 1920)];
+        a.selected_monitor = 0;
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), Instant::now(), true);
+        let area = Rect::new(0, 0, 120, 40);
+
+        let buf = render_app(&a, area);
+        let layout = crate::ui::layouts::screen_layout(area, TUIMode::View);
+        let (_, marker_row) = find_cell(&buf, "\u{f04b}").expect("selection marker");
+        assert_eq!(
+            marker_row,
+            layout.list.y + 4,
+            "the list marker follows the hovered (second) monitor"
+        );
+
+        let (bx, by) = find_text(&buf, "Beta").expect("Beta map label");
+        assert_eq!(
+            buf[(bx, by)].style().fg,
+            Some(Color::Yellow),
+            "the hovered monitor is marked yellow on the map"
+        );
+        let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha map label");
+        assert_eq!(
+            buf[(ax, ay)].style().fg,
+            Some(Color::Blue),
+            "the previously selected monitor loses the yellow highlight"
+        );
+        assert_eq!(
+            a.selected_monitor, 1,
+            "the hover temporarily selects the monitor"
+        );
+
+        // Leaving the map reverts to the stored selection.
+        a.set_hover(None, (10, 10), Instant::now(), false);
+        assert_eq!(
+            a.selected_monitor, 0,
+            "hover must not persist the selection"
+        );
+        let buf = render_app(&a, area);
+        let (_, marker_row) = find_cell(&buf, "\u{f04b}").expect("selection marker");
+        assert_eq!(
+            marker_row,
+            layout.list.y + 3,
+            "the list reverts to the stored selection on hover-out"
+        );
+    }
+
+    // An enabled monitor of 1920x1080 at (x, 0).
+    fn powered_monitor(name: &str, x: i32) -> crate::monitor::Monitor {
+        let mut monitor = test_monitors()[0].clone();
+        monitor.name = name.to_string();
+        monitor.position = Some(crate::monitor::Position { x, y: 0 });
+        monitor
     }
 
     #[test]

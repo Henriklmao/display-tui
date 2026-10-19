@@ -38,14 +38,15 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     // press so the drag cannot stay armed behind an overlay.
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.drag = None;
-        app.set_hover(None, point(event), now);
+        app.set_hover(None, point(event), now, false);
     }
 
     // Hover is resolved for every state (including open overlays) and always
     // before the modal branches return.
     if matches!(event.kind, MouseEventKind::Moved) {
         let target = resolve_hover(app, layout, point(event));
-        app.set_hover(target, point(event), now);
+        let in_map = inside(layout.canvas, point(event));
+        app.set_hover(target, point(event), now, in_map);
         return;
     }
 
@@ -87,7 +88,7 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         event.kind,
         MouseEventKind::Down(_) | MouseEventKind::Drag(_)
     ) {
-        app.set_hover(None, point(event), now);
+        app.set_hover(None, point(event), now, false);
     }
 
     match event.kind {
@@ -693,7 +694,13 @@ mod tests {
             Some(Position { x: 10, y: 0 }),
             "the button applied the fix"
         );
-        assert!(a.show_popup.is_none(), "the clean layout closed the popup");
+        // The fake fix moved the only monitor off the origin, so the layout is
+        // still invalid and the popup now offers the global origin fix.
+        let popup = a.show_popup.as_ref().expect("the origin error remains");
+        assert!(matches!(
+            popup.fix,
+            Some(crate::validation::diagnostics::AutoFix::ToOrigin { .. })
+        ));
     }
 
     #[test]
@@ -909,6 +916,30 @@ mod tests {
         moved(&mut a, col, row);
         up(&mut a, col, row);
         assert_eq!(a.hover, None, "a release clears the hover");
+    }
+
+    // A click on the hovered monitor commits the temporary hover selection, so
+    // leaving the map afterwards keeps it.
+    #[test]
+    fn clicking_a_hovered_monitor_commits_the_hover_selection() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+
+        moved(&mut a, col, row);
+        assert_eq!(a.selected_monitor, 1, "hover selects the monitor");
+
+        down(&mut a, col, row);
+        up(&mut a, col, row);
+        assert_eq!(a.selected_monitor, 1, "the click keeps the selection");
+
+        // Moving off the map must not revert to the pre-hover selection.
+        let list = a.layout.unwrap().list;
+        moved(&mut a, list.x + 2, list.y + 3);
+        assert_eq!(
+            a.selected_monitor, 1,
+            "the committed click is not undone by hover-out"
+        );
     }
 
     #[test]
@@ -1997,7 +2028,7 @@ mod tests {
     }
 
     #[test]
-    fn non_left_buttons_and_movement_are_ignored() {
+    fn non_left_buttons_do_not_select_or_drag() {
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, true)];
         let mut a = app(TUIMode::View, monitors);
         let (col, row) = cell_for_monitor(&a, 1);
@@ -2006,11 +2037,15 @@ mod tests {
             &mut a,
             mouse(MouseEventKind::Down(MouseButton::Right), col, row),
         );
-        handle_mouse(&mut a, mouse(MouseEventKind::Moved, col, row));
         handle_mouse(&mut a, mouse(MouseEventKind::ScrollLeft, col, row));
         handle_mouse(&mut a, mouse(MouseEventKind::ScrollRight, col, row));
 
-        assert_eq!(a.selected_monitor, 0);
+        assert_eq!(a.selected_monitor, 0, "non-left buttons do not select");
         assert!(a.drag.is_none());
+
+        // Bare movement is hover only: it selects temporarily, never drags.
+        handle_mouse(&mut a, mouse(MouseEventKind::Moved, col, row));
+        assert_eq!(a.selected_monitor, 1, "hover selects the monitor");
+        assert!(a.drag.is_none(), "hover never starts a drag");
     }
 }

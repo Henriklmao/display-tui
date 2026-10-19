@@ -109,24 +109,31 @@ pub struct DetachInfo {
 }
 
 impl DetachInfo {
-    // The two axis-aligned segments of the L-shaped connector, drawn from the
-    // centre of the facing edge to the centre of the anchor's facing edge.
+    // The two axis-aligned segments of the L-shaped connector, drawn between
+    // the centre of the out-of-bounds monitor's nearest edge and the centre of
+    // the anchor's nearest (facing) edge.
     pub fn connector(&self, monitors: &[Monitor]) -> Vec<EdgeSegment> {
         let m = monitors[self.monitor].get_geometry();
         let a = monitors[self.anchor].get_geometry();
-        let (p, q) = match self.direction {
-            Direction::Right => ((m.0 + m.2, m.1 + m.3 / 2.0), (a.0, a.1 + a.3 / 2.0)),
-            Direction::Left => ((m.0, m.1 + m.3 / 2.0), (a.0 + a.2, a.1 + a.3 / 2.0)),
-            Direction::Down => ((m.0 + m.2 / 2.0, m.1 + m.3), (a.0 + a.2 / 2.0, a.1)),
-            Direction::Up => ((m.0 + m.2 / 2.0, m.1), (a.0 + a.2 / 2.0, a.1 + a.3)),
+        let source = match self.direction {
+            Direction::Right => (m.0 + m.2, m.1 + m.3 / 2.0),
+            Direction::Left => (m.0, m.1 + m.3 / 2.0),
+            Direction::Down => (m.0 + m.2 / 2.0, m.1 + m.3),
+            Direction::Up => (m.0 + m.2 / 2.0, m.1),
+        };
+        let target = match self.direction {
+            Direction::Right => (a.0, a.1 + a.3 / 2.0),
+            Direction::Left => (a.0 + a.2, a.1 + a.3 / 2.0),
+            Direction::Down => (a.0 + a.2 / 2.0, a.1),
+            Direction::Up => (a.0 + a.2 / 2.0, a.1 + a.3),
         };
 
         let mut segments = Vec::new();
-        if (p.0 - q.0).abs() > f64::EPSILON {
-            segments.push(EdgeSegment::horizontal(p.1, p.0, q.0));
+        if (source.0 - target.0).abs() > f64::EPSILON {
+            segments.push(EdgeSegment::horizontal(source.1, source.0, target.0));
         }
-        if (p.1 - q.1).abs() > f64::EPSILON {
-            segments.push(EdgeSegment::vertical(q.0, p.1, q.1));
+        if (source.1 - target.1).abs() > f64::EPSILON {
+            segments.push(EdgeSegment::vertical(target.0, source.1, target.1));
         }
         segments
     }
@@ -139,6 +146,8 @@ pub enum AutoFix {
     Separate { monitor: usize, dx: i32, dy: i32 },
     // Translate a detached monitor flush onto its anchor edge.
     Abut { monitor: usize, dx: i32, dy: i32 },
+    // Translate every monitor so `monitor` starts at the origin.
+    ToOrigin { monitor: usize, dx: i32, dy: i32 },
 }
 
 // Monitors that should be flagged with a caution background in the list.
@@ -430,7 +439,16 @@ fn build_detach(monitors: &[Monitor], monitor: usize, anchor: usize, gap: f64) -
     let dx = axis_gap(m.0, m.0 + m.2, a.0, a.0 + a.2);
     let dy = axis_gap(m.1, m.1 + m.3, a.1, a.1 + a.3);
 
-    let (direction, contact_span) = if dx >= dy {
+    // Attach along the nearest edge: the axis the rectangles are separated on,
+    // and when they are separated on both, the one with the smaller gap.
+    let horizontal = match (dx > 0.0, dy > 0.0) {
+        (true, false) => true,
+        (false, true) => false,
+        (true, true) => dx <= dy,
+        (false, false) => dx >= dy, // touching/overlapping: not detached
+    };
+
+    let (direction, contact_span) = if horizontal {
         let direction = if a.0 >= m.0 {
             Direction::Right
         } else {
@@ -606,16 +624,97 @@ pub fn plan_auto_fix(monitors: &[Monitor], moved: Option<usize>) -> Option<AutoF
         return None;
     }
 
-    let info = detach_infos(monitors).into_iter().next()?;
-    let (dx, dy) = abut_delta(monitors, &info);
-    if dials_back(monitors, &shifted(monitors, info.monitor, dx, dy)) {
-        return Some(AutoFix::Abut {
-            monitor: info.monitor,
-            dx,
-            dy,
-        });
+    if let Some(info) = detach_infos(monitors).into_iter().next() {
+        let (dx, dy) = abut_delta(monitors, &info);
+        if dials_back(monitors, &shifted(monitors, info.monitor, dx, dy)) {
+            return Some(AutoFix::Abut {
+                monitor: info.monitor,
+                dx,
+                dy,
+            });
+        }
+        // No single abut resolves the detachment, but anchoring the layout may
+        // still be a valid one-step fix.
+        return origin_fix(monitors);
     }
-    None
+
+    origin_fix(monitors)
+}
+
+// Whether the monitor has a usable rectangle and its top-left at the origin.
+fn starts_at_origin(monitors: &[Monitor], index: usize) -> bool {
+    if !is_placed(&monitors[index]) {
+        return false;
+    }
+    monitors[index]
+        .position
+        .as_ref()
+        .is_some_and(|position| position.x == 0 && position.y == 0)
+}
+
+// The monitor whose top-left becomes the origin when the whole layout shifts.
+//
+// With two placed monitors the leftmost wins; with more, the monitor closest to
+// the centroid of all monitor centres, so the layout stays visually centred.
+fn choose_origin_monitor(monitors: &[Monitor], placed: &[usize]) -> usize {
+    if placed.len() == 2 {
+        // A placed monitor always has a position (zero geometry otherwise).
+        let key = |index: usize| {
+            let position = monitors[index]
+                .position
+                .as_ref()
+                .expect("placed monitors have a position");
+            (position.x, position.y, index)
+        };
+        return if key(placed[0]) <= key(placed[1]) {
+            placed[0]
+        } else {
+            placed[1]
+        };
+    }
+
+    let centre = |index: usize| {
+        let (x, y, w, h) = monitors[index].get_geometry();
+        (x + w / 2.0, y + h / 2.0)
+    };
+    let count = placed.len() as f64;
+    let (sum_x, sum_y) = placed.iter().fold((0.0, 0.0), |(sx, sy), &index| {
+        let (x, y) = centre(index);
+        (sx + x, sy + y)
+    });
+    let (cx, cy) = (sum_x / count, sum_y / count);
+
+    let mut best = placed[0];
+    let mut best_distance = f64::MAX;
+    for &index in placed {
+        let (x, y) = centre(index);
+        let distance = (x - cx).powi(2) + (y - cy).powi(2);
+        if distance < best_distance {
+            best_distance = distance;
+            best = index;
+        }
+    }
+    best
+}
+
+// The global translation that anchors the layout at the origin, if needed.
+fn origin_fix(monitors: &[Monitor]) -> Option<AutoFix> {
+    let placed = placed_indices(monitors);
+    if placed.is_empty()
+        || placed
+            .iter()
+            .any(|&index| starts_at_origin(monitors, index))
+    {
+        return None;
+    }
+
+    let monitor = choose_origin_monitor(monitors, &placed);
+    let position = monitors[monitor].position.as_ref()?;
+    Some(AutoFix::ToOrigin {
+        monitor,
+        dx: -position.x,
+        dy: -position.y,
+    })
 }
 
 // Border segments and connectors to overlay on the map for the current
@@ -940,12 +1039,13 @@ mod tests {
                 "segment is not axis-aligned: {segment:?}"
             );
         }
-        // Starts on C's facing (left) edge, ends on A's facing (right) edge.
+        // Starts at the centre of C's left (nearest) edge, ends at the middle
+        // of A's facing (right) edge.
         let first = connector.first().unwrap();
         assert_eq!(
             first.fixed,
             -300.0 + 1080.0 / 2.0,
-            "starts at the centre of C's left edge"
+            "starts at C's vertical centre"
         );
         let (_, q) = connector.last().unwrap().endpoints();
         assert_eq!(q.0, 1920.0, "ends on A's right edge");
@@ -953,16 +1053,19 @@ mod tests {
     }
 
     // The connector (the "arrow" pointing a detached monitor at its anchor)
-    // must start at the middle of the detached monitor's facing edge and end at
-    // the middle of the anchor's facing edge, in every direction.
+    // runs from the centre of the out-of-bounds monitor's nearest edge to the
+    // centre of the anchor's nearest (facing) edge, in every direction.
     #[test]
-    fn the_connector_always_joins_the_two_facing_midpoints() {
+    fn the_connector_joins_the_two_nearest_edge_midpoints() {
         // (detached position, expected direction)
         let cases = [
             ((5000, 0), Direction::Left),   // anchor left of the monitor
             ((-5000, 0), Direction::Right), // anchor right of the monitor
             ((0, 5000), Direction::Up),     // anchor above the monitor
             ((0, -5000), Direction::Down),  // anchor below the monitor
+            // Diagonal: the vertical gap (2000-1080=920) is smaller than the
+            // horizontal one (5000-1920=3080), so the top edge is nearest.
+            ((5000, 2000), Direction::Up),
         ];
 
         for ((x, y), expected) in cases {
@@ -993,20 +1096,61 @@ mod tests {
             let (ax, ay, aw, ah) = monitors[0].get_geometry();
             let (cx, cy, cw, ch) = monitors[1].get_geometry();
 
-            let (expected_start, expected_end) = match expected {
-                Direction::Right => ((cx + cw, cy + ch / 2.0), (ax, ay + ah / 2.0)),
-                Direction::Left => ((cx, cy + ch / 2.0), (ax + aw, ay + ah / 2.0)),
-                Direction::Down => ((cx + cw / 2.0, cy + ch), (ax + aw / 2.0, ay)),
-                Direction::Up => ((cx + cw / 2.0, cy), (ax + aw / 2.0, ay + ah)),
+            let expected_start = match expected {
+                Direction::Right => (cx + cw, cy + ch / 2.0),
+                Direction::Left => (cx, cy + ch / 2.0),
+                Direction::Down => (cx + cw / 2.0, cy + ch),
+                Direction::Up => (cx + cw / 2.0, cy),
+            };
+            let expected_end = match expected {
+                Direction::Right => (ax, ay + ah / 2.0),
+                Direction::Left => (ax + aw, ay + ah / 2.0),
+                Direction::Down => (ax + aw / 2.0, ay),
+                Direction::Up => (ax + aw / 2.0, ay + ah),
             };
             let mut expected = vec![expected_start, expected_end];
             expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
             assert_eq!(
                 ends, expected,
-                "{expected:?}: the connector must join the two facing midpoints"
+                "{expected:?}: the connector must join the nearest edge midpoints"
             );
         }
+    }
+
+    // The nearest edge wins even when the rectangles are separated on both
+    // axes: the smaller gap decides the attachment side.
+    #[test]
+    fn the_detach_direction_follows_the_smallest_gap() {
+        let monitors = vec![monitor("A", 0, 0), monitor("C", 5000, 2000)];
+        let info = detach_infos(&monitors).into_iter().next().unwrap();
+        assert_eq!(
+            info.direction,
+            Direction::Up,
+            "the top edge (gap 920) is nearer than the left edge (gap 3080)"
+        );
+    }
+
+    // The reported example: monitor 1 at (0,0) 1920x1200, monitor 2 at
+    // (2223,540) 1920x1200 runs from monitor 2's left edge centre to monitor
+    // 1's right edge centre.
+    #[test]
+    fn the_connector_matches_the_reported_example() {
+        let monitors = vec![
+            sized(monitor("1", 0, 0), 1920, 1200),
+            sized(monitor("2", 2223, 540), 1920, 1200),
+        ];
+        let info = detach_infos(&monitors).into_iter().next().unwrap();
+        assert_eq!(info.direction, Direction::Left);
+
+        assert_eq!(
+            info.connector(&monitors),
+            vec![
+                EdgeSegment::horizontal(1140.0, 1920.0, 2223.0),
+                EdgeSegment::vertical(1920.0, 600.0, 1140.0),
+            ],
+            "from (2223, 1140) to (1920, 600)"
+        );
     }
 
     #[test]
@@ -1207,6 +1351,86 @@ mod tests {
     fn an_isolated_monitor_has_no_fix() {
         assert_eq!(plan_auto_fix(&[monitor("A", 0, 0)], None), None);
         assert_eq!(plan_auto_fix(&[], None), None);
+    }
+
+    // --- origin auto fix -------------------------------------------------
+
+    #[test]
+    fn a_contiguous_layout_off_the_origin_gets_anchored() {
+        // Two touching monitors, neither at the origin: the leftmost is chosen.
+        let monitors = vec![
+            sized(monitor("A", 1000, 0), 1920, 1080),
+            sized(monitor("B", 2920, 0), 1920, 1080),
+        ];
+
+        let fix = plan_auto_fix(&monitors, None).expect("an origin fix must exist");
+
+        assert_eq!(
+            fix,
+            AutoFix::ToOrigin {
+                monitor: 0,
+                dx: -1000,
+                dy: 0
+            }
+        );
+
+        let mut after = monitors.clone();
+        for monitor in &mut after {
+            if let Some(position) = monitor.position.as_mut() {
+                position.x -= 1000;
+            }
+        }
+        assert!(
+            after
+                .iter()
+                .any(|m| m.position == Some(crate::monitor::Position { x: 0, y: 0 })),
+            "the chosen monitor now starts at the origin"
+        );
+    }
+
+    #[test]
+    fn three_monitors_anchor_the_centre_most_one() {
+        // Three touching monitors: the middle one is closest to the centroid.
+        let monitors = vec![
+            sized(monitor("A", 1000, 0), 1920, 1080),
+            sized(monitor("B", 2920, 0), 1920, 1080),
+            sized(monitor("C", 4840, 0), 1920, 1080),
+        ];
+
+        assert_eq!(
+            plan_auto_fix(&monitors, None),
+            Some(AutoFix::ToOrigin {
+                monitor: 1,
+                dx: -2920,
+                dy: 0
+            })
+        );
+    }
+
+    #[test]
+    fn a_layout_already_at_the_origin_has_no_origin_fix() {
+        let monitors = vec![
+            sized(monitor("A", 0, 0), 1920, 1080),
+            sized(monitor("B", 1920, 0), 1920, 1080),
+        ];
+        assert_eq!(plan_auto_fix(&monitors, None), None);
+    }
+
+    #[test]
+    fn an_unresolvable_abut_still_offers_the_origin_fix() {
+        // A+B touch, C+D touch only each other: abutting C onto D does not
+        // join the components, so the planner falls back to the origin fix.
+        let monitors = vec![
+            sized(monitor("A", 1000, 0), 100, 100),
+            sized(monitor("B", 1100, 0), 100, 100),
+            sized(monitor("C", 5000, 0), 100, 100),
+            sized(monitor("D", 7000, 0), 100, 100),
+        ];
+
+        assert!(matches!(
+            plan_auto_fix(&monitors, None),
+            Some(AutoFix::ToOrigin { .. })
+        ));
     }
 
     // --- layout highlights ----------------------------------------------

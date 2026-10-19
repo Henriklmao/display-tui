@@ -695,22 +695,28 @@ mod tests {
     fn apply_preset_overwrites_every_tracked_field() {
         let dir = temp_dir("apply");
 
+        // Keep the layout anchored at the origin: disable DP-1 and move HDMI-A-1
+        // to (0,0), while DP-1 still carries every other tracked field.
         let mut source = valid_layout();
-        source[0].position = Some(Position { x: 5, y: 6 });
         source[0].scale = Some(0.5);
         source[0].workspace = Some(4);
         source[0].transform = Some("90".to_string());
-        source[1].enabled = false;
+        source[0].enabled = false;
+        source[1].position = Some(Position { x: 0, y: 0 });
         save_preset_in(&dir, "p", &source).unwrap();
 
         let mut live = valid_layout();
         apply_preset_in(&dir, "p", &mut live).unwrap();
 
-        assert_eq!(live[0].position, Some(Position { x: 5, y: 6 }));
         assert_eq!(live[0].scale, Some(0.5));
         assert_eq!(live[0].workspace, Some(4));
         assert_eq!(live[0].transform.as_deref(), Some("90"));
-        assert!(!live[1].enabled, "preset may disable a monitor");
+        assert!(!live[0].enabled, "preset may disable a monitor");
+        assert_eq!(
+            live[1].position,
+            Some(Position { x: 0, y: 0 }),
+            "the preset position overwrites the live one"
+        );
     }
 
     #[test]

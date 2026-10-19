@@ -41,6 +41,11 @@ pub struct App {
     pub blink: Option<BlinkState>,
     // The interactive element currently under the pointer, if any.
     pub hover: Option<HoverTarget>,
+    // The selection to restore when a map hover ends, plus the monitor the
+    // hover selected: (committed selection, hovered monitor). If the selection
+    // moves elsewhere while hovering (keyboard), that becomes the committed
+    // selection instead.
+    pub hover_restore: Option<(usize, usize)>,
     // When the current hover began: the tooltip dwell clock.
     pub hover_since: Option<Instant>,
     // The last pointer cell, used to place the tooltip.
@@ -161,6 +166,58 @@ impl App {
             .unwrap_or_else(crate::config::get_state_path)
     }
 
+    // Records the hovered element. Hovering a map monitor temporarily moves the
+    // selection so the list, side table and keyboard actions all follow the
+    // pointer; the previous selection is restored when the pointer leaves the
+    // map (`in_map` is whether it is still over the canvas), and a click
+    // commits the hovered monitor through the normal click path.
+    pub(crate) fn set_hover(
+        &mut self,
+        target: Option<HoverTarget>,
+        point: (u16, u16),
+        now: Instant,
+        in_map: bool,
+    ) {
+        self.hover_point = point;
+        let changed = self.hover != target;
+        if changed {
+            self.hover = target;
+            self.hover_since = Some(now);
+        }
+        // Sync on a target change, and whenever the pointer is outside the map
+        // so that leaving the map with no hovered element still restores the
+        // previous selection.
+        if changed || !in_map {
+            self.sync_hover_selection(in_map);
+        }
+    }
+
+    // Moves the selection to the hovered monitor, or restores the stored one.
+    fn sync_hover_selection(&mut self, in_map: bool) {
+        match self.hover {
+            Some(HoverTarget::Map(index)) if index < self.monitors.len() => {
+                // A selection moved elsewhere while hovering (e.g. with j/k) is
+                // the new committed selection, not the value to restore.
+                let committed = match self.hover_restore {
+                    Some((previous, hovered)) if self.selected_monitor == hovered => previous,
+                    _ => self.selected_monitor,
+                };
+                self.hover_restore = Some((committed, index));
+                self.selected_monitor = index;
+            }
+            // Still over the canvas but not on a monitor: keep the temporary
+            // selection until the pointer actually leaves the map.
+            None if in_map => {}
+            _ => {
+                if let Some((previous, hovered)) = self.hover_restore.take()
+                    && self.selected_monitor == hovered
+                {
+                    self.selected_monitor = previous;
+                }
+            }
+        }
+    }
+
     // Whether any monitor has an unapplied move. Drives the confirm state and
     // the on-map Apply buttons; derived from `move_origins` so it cannot drift.
     pub(crate) fn has_pending_move(&self) -> bool {
@@ -187,9 +244,38 @@ impl App {
 
     // Time until the next animation deadline. `None` means nothing animates, so
     // the event loop blocks until real input (zero idle cost). Only validation
-    // errors animate; hover is a steady glow.
+    // errors animate; hover is a steady glow, but the tooltip dwell still needs
+    // a wake-up so it appears without any further input.
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
-        self.blink.as_ref().map(|blink| blink.remaining(now))
+        let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
+        match (blink, self.tooltip_deadline_at(now)) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    }
+
+    // Time until the next tooltip change: the dwell elapsing or the next
+    // fade-in step. `None` once the tooltip is fully visible.
+    fn tooltip_deadline_at(&self, now: Instant) -> Option<Duration> {
+        use crate::ui::tooltip::{TOOLTIP_DELAY, TOOLTIP_FADE};
+
+        let _ = self.hover?;
+        let since = self.hover_since?;
+        let elapsed = now.saturating_duration_since(since);
+        if elapsed < TOOLTIP_DELAY {
+            return Some(TOOLTIP_DELAY - elapsed);
+        }
+
+        let into = elapsed - TOOLTIP_DELAY;
+        let fade_ms = TOOLTIP_FADE.as_millis() as u64;
+        let step = into.as_millis() as u64 / fade_ms;
+        if step >= 3 {
+            return None;
+        }
+        let phase = into.as_millis() as u64 % fade_ms;
+        Some(TOOLTIP_FADE - Duration::from_millis(phase))
     }
 
     fn next_deadline(&self) -> Option<Duration> {
@@ -212,22 +298,6 @@ impl App {
         if disarm {
             self.blink = None;
         }
-    }
-
-    // Records the hovered element, restarting the tooltip dwell on a change.
-    // Hover itself does not animate, so there is no timer to arm here.
-    pub(crate) fn set_hover(
-        &mut self,
-        target: Option<HoverTarget>,
-        point: (u16, u16),
-        now: Instant,
-    ) {
-        self.hover_point = point;
-        if self.hover == target {
-            return;
-        }
-        self.hover = target;
-        self.hover_since = Some(now);
     }
 
     // The tooltip for the current hover, once the pointer has rested long
@@ -1012,8 +1082,15 @@ impl App {
             Err(errors) => errors,
         };
 
-        self.highlights = Some(layout_highlights(&self.monitors));
-        self.arm_blink(Instant::now());
+        let highlights = layout_highlights(&self.monitors);
+        if highlights.is_empty() {
+            // Errors without map geometry (e.g. a missing origin) have nothing
+            // to blink; only the popup is needed.
+            self.clear_highlights();
+        } else {
+            self.highlights = Some(highlights);
+            self.arm_blink(Instant::now());
+        }
 
         let fix = plan_auto_fix(&self.monitors, moved);
         let mut lines = errors;
@@ -1038,19 +1115,41 @@ impl App {
     // Applies one auto-fix to the working layout, persists the state (never the
     // Hyprland config) and refreshes the popup with whatever problems remain.
     fn apply_auto_fix(&mut self, fix: AutoFix) {
-        let (index, dx, dy) = match fix {
+        let moved = match fix {
             AutoFix::Separate { monitor, dx, dy } | AutoFix::Abut { monitor, dx, dy } => {
-                (monitor, dx, dy)
+                if let Some(position) = self
+                    .monitors
+                    .get_mut(monitor)
+                    .and_then(|monitor| monitor.position.as_mut())
+                {
+                    position.x += dx;
+                    position.y += dy;
+                }
+                Some(monitor)
+            }
+            AutoFix::ToOrigin { dx, dy, .. } => {
+                // Anchor the whole layout: every monitor moves together, so the
+                // relative geometry (and any remaining problems) is unchanged.
+                for monitor in &mut self.monitors {
+                    if let Some(position) = monitor.position.as_mut() {
+                        position.x += dx;
+                        position.y += dy;
+                    }
+                    if let Some(saved) = monitor.saved_position.as_mut() {
+                        saved.x += dx;
+                        saved.y += dy;
+                    }
+                }
+                // Pending moves are revert targets in absolute coordinates;
+                // they must move with the layout or Cancel would teleport a
+                // monitor back to its pre-translation spot.
+                for origin in self.move_origins.values_mut() {
+                    origin.0 += dx;
+                    origin.1 += dy;
+                }
+                None
             }
         };
-        if let Some(position) = self
-            .monitors
-            .get_mut(index)
-            .and_then(|monitor| monitor.position.as_mut())
-        {
-            position.x += dx;
-            position.y += dy;
-        }
         self.clear_active_preset_if_changed();
 
         if let Err(e) = save_monitor_state_in(&self.state_path(), &self.monitors) {
@@ -1059,7 +1158,7 @@ impl App {
 
         // One fix per press: re-validate and either refresh the popup with the
         // next problem or close it once the layout is clean.
-        self.check_layout_for(Some(index));
+        self.check_layout_for(moved);
     }
 
     // Dispatches a popup action. The key handler and the mouse buttons share
@@ -1643,6 +1742,98 @@ mod tests {
     }
 
     #[test]
+    fn hovering_a_monitor_temporarily_selects_it() {
+        let t0 = Instant::now();
+        let mut a = app_with(vec![
+            monitor(),
+            Monitor {
+                name: "DP-2".to_string(),
+                ..monitor()
+            },
+        ]);
+        a.selected_monitor = 0;
+
+        // Hovering a map monitor moves the selection.
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), t0, true);
+        assert_eq!(a.selected_monitor, 1, "the hovered monitor is selected");
+
+        // Moving within the map but off the monitors keeps the temporary
+        // selection until the pointer leaves the map area.
+        a.set_hover(None, (10, 10), t0 + Duration::from_millis(10), true);
+        assert_eq!(a.selected_monitor, 1, "still inside the map");
+
+        // Leaving the map restores the previous selection.
+        a.set_hover(None, (10, 10), t0 + Duration::from_millis(20), false);
+        assert_eq!(a.selected_monitor, 0, "hover-out reverts");
+
+        // Non-map hover targets never override the selection.
+        a.set_hover(Some(HoverTarget::ListRow(1)), (10, 10), t0, false);
+        assert_eq!(a.selected_monitor, 0);
+    }
+
+    // A keyboard selection made while the pointer rests on the map must not be
+    // undone when the pointer leaves.
+    #[test]
+    fn a_keyboard_selection_while_hovering_is_not_undone() {
+        let t0 = Instant::now();
+        let mut a = app_with(vec![
+            monitor(),
+            Monitor {
+                name: "DP-2".to_string(),
+                ..monitor()
+            },
+            Monitor {
+                name: "DP-3".to_string(),
+                ..monitor()
+            },
+        ]);
+        a.selected_monitor = 0;
+
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), t0, true);
+        assert_eq!(a.selected_monitor, 1);
+
+        // j/k selects the third monitor while the pointer still hovers the map.
+        a.selected_monitor = 2;
+        a.set_hover(None, (10, 10), t0 + Duration::from_millis(10), false);
+
+        assert_eq!(
+            a.selected_monitor, 2,
+            "the keyboard selection wins over the hover restore"
+        );
+    }
+
+    // Hovering a different monitor after a keyboard selection keeps the
+    // keyboard selection as the restore target.
+    #[test]
+    fn a_keyboard_selection_becomes_the_restore_target() {
+        let t0 = Instant::now();
+        let mut a = app_with(vec![
+            monitor(),
+            Monitor {
+                name: "DP-2".to_string(),
+                ..monitor()
+            },
+            Monitor {
+                name: "DP-3".to_string(),
+                ..monitor()
+            },
+        ]);
+        a.selected_monitor = 0;
+
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), t0, true);
+        a.selected_monitor = 2; // keyboard
+        a.set_hover(Some(HoverTarget::Map(0)), (10, 10), t0, true);
+        assert_eq!(a.selected_monitor, 0, "the newly hovered monitor is shown");
+
+        a.set_hover(None, (10, 10), t0 + Duration::from_millis(10), false);
+
+        assert_eq!(
+            a.selected_monitor, 2,
+            "hover-out restores the keyboard selection, not the pre-hover one"
+        );
+    }
+
+    #[test]
     fn clearing_the_highlights_stops_the_blink() {
         let mut app = App::new(None);
         app.highlights = Some(crate::validation::diagnostics::LayoutHighlights::default());
@@ -1659,31 +1850,67 @@ mod tests {
     // Hover is a steady glow: it must never arm an animation timer. Only
     // validation errors (the blink) may animate.
     #[test]
-    fn hover_never_arms_an_animation() {
+    fn hover_does_not_arm_the_blink_only_the_tooltip_dwell() {
+        use crate::ui::tooltip::TOOLTIP_DELAY;
+
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::ListRow(0)), (10, 10), t0);
+        app.set_hover(Some(HoverTarget::ListRow(0)), (10, 10), t0, false);
 
+        assert!(app.blink.is_none(), "hover must not start the blink");
         assert_eq!(
             app.next_deadline_at(t0),
-            None,
-            "hovering must not start a timer"
+            Some(TOOLTIP_DELAY),
+            "the only wake-up is the tooltip dwell"
         );
-        app.advance_animation_at(t0 + Duration::from_millis(80));
-        assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(80)), None);
 
-        // Hover-out keeps it idle too.
-        app.set_hover(None, (10, 10), t0 + Duration::from_millis(100));
+        app.advance_animation_at(t0 + Duration::from_millis(80));
+        assert_eq!(
+            app.next_deadline_at(t0 + Duration::from_millis(80)),
+            Some(TOOLTIP_DELAY - Duration::from_millis(80))
+        );
+
+        // Hover-out keeps it idle.
+        app.set_hover(None, (10, 10), t0 + Duration::from_millis(100), false);
         assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(100)), None);
+    }
+
+    // The tooltip must appear without further input: the loop wakes at the
+    // dwell deadline, then once per fade step, and finally idles.
+    #[test]
+    fn the_tooltip_deadline_wakes_the_loop_and_then_settles() {
+        use crate::ui::tooltip::{TOOLTIP_DELAY, TOOLTIP_FADE};
+
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
+
+        assert_eq!(app.next_deadline_at(t0), Some(TOOLTIP_DELAY));
+        assert!(app.tooltip_at(t0 + TOOLTIP_DELAY).is_some());
+        assert_eq!(
+            app.next_deadline_at(t0 + TOOLTIP_DELAY),
+            Some(TOOLTIP_FADE),
+            "the first fade step is scheduled"
+        );
+        assert_eq!(
+            app.next_deadline_at(t0 + TOOLTIP_DELAY + TOOLTIP_FADE),
+            Some(TOOLTIP_FADE)
+        );
+        assert_eq!(
+            app.next_deadline_at(t0 + TOOLTIP_DELAY + TOOLTIP_FADE * 3),
+            None,
+            "a fully faded tooltip needs no more wake-ups"
+        );
     }
 
     #[test]
     fn a_hovered_layout_without_errors_does_not_animate() {
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
 
-        // A clean layout: no blink is armed, so the loop blocks on input.
+        // A clean layout: no blink is armed. Once the tooltip has fully faded
+        // in, the loop blocks on input again.
         assert_eq!(app.next_deadline_at(t0 + Duration::from_secs(10)), None);
         assert!(!app.highlight_visible());
     }
@@ -1697,6 +1924,7 @@ mod tests {
             Some(HoverTarget::Map(0)),
             (10, 5),
             t0 + Duration::from_millis(450),
+            true,
         );
 
         // Only the blink drives the deadline; hover adds nothing.
@@ -1710,22 +1938,22 @@ mod tests {
     fn the_tooltip_appears_only_after_the_dwell_and_fades_in() {
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(2999)).is_none(),
-            "nothing before the 3s dwell"
+            app.tooltip_at(t0 + Duration::from_millis(1999)).is_none(),
+            "nothing before the 2s dwell"
         );
 
         let state = app
-            .tooltip_at(t0 + Duration::from_millis(3000))
+            .tooltip_at(t0 + Duration::from_millis(2000))
             .expect("tooltip");
-        assert_eq!(state.text, "Drag to move the monitor");
+        assert_eq!(state.text, "Drag to move, click to select");
         assert_eq!(state.step, 0, "first fade step");
         assert_eq!(state.anchor, (10, 5));
 
         assert_eq!(
-            app.tooltip_at(t0 + Duration::from_millis(3250))
+            app.tooltip_at(t0 + Duration::from_millis(2250))
                 .unwrap()
                 .step,
             2
@@ -1741,15 +1969,16 @@ mod tests {
     fn changing_the_hover_target_restarts_the_dwell() {
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
         app.set_hover(
             Some(HoverTarget::Map(1)),
             (20, 5),
             t0 + Duration::from_secs(3),
+            true,
         );
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(3100)).is_none(),
+            app.tooltip_at(t0 + Duration::from_millis(2100)).is_none(),
             "the new element's dwell starts over"
         );
         assert!(app.tooltip_at(t0 + Duration::from_secs(6)).is_some());
@@ -1761,7 +1990,7 @@ mod tests {
     fn the_tooltip_dwell_survives_animation_ticks() {
         let t0 = Instant::now();
         let mut app = App::new(None);
-        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
 
         // Run the loop for three seconds, including a validation blink.
         app.highlights = Some(crate::validation::diagnostics::LayoutHighlights::default());
@@ -1771,10 +2000,10 @@ mod tests {
         }
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(3000)).is_some(),
-            "the tooltip is due right at the 3s mark"
+            app.tooltip_at(t0 + Duration::from_millis(2000)).is_some(),
+            "the tooltip is due right at the 2s mark"
         );
-        assert!(app.tooltip_at(t0 + Duration::from_millis(3200)).is_some());
+        assert!(app.tooltip_at(t0 + Duration::from_millis(2200)).is_some());
     }
 
     // --- validate on apply + Space auto-fix -----------------------------
@@ -1900,6 +2129,101 @@ mod tests {
         );
         assert!(app.show_popup.is_none(), "the layout is clean");
         assert!(app.highlights.is_none());
+    }
+
+    // A contiguous layout with no monitor at (0,0) is an error; Space anchors
+    // the whole layout on the chosen monitor.
+    #[test]
+    fn the_auto_fix_anchors_a_layout_that_is_off_the_origin() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 1000, 0, 1920, 1080),
+                sized_monitor("B", 2920, 0, 1920, 1080),
+            ],
+            "fix-origin",
+        );
+        assert!(!app.check_layout());
+
+        let popup = app.show_popup.as_ref().expect("origin popup");
+        assert!(
+            popup.lines.iter().any(|line| line.contains("origin")),
+            "got {:?}",
+            popup.lines
+        );
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 0, y: 0 }),
+            "the leftmost monitor anchors the layout"
+        );
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 0 }),
+            "every monitor moves together"
+        );
+        assert!(app.show_popup.is_none(), "the layout is clean");
+    }
+
+    // A disabled monitor keeps its saved position across an origin shift, so
+    // re-enabling it later does not teleport it.
+    #[test]
+    fn the_origin_fix_translates_saved_positions() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 1000, 0, 1920, 1080),
+                sized_monitor("B", 2920, 0, 1920, 1080),
+            ],
+            "fix-origin-saved",
+        );
+        app.monitors[0].enabled = false;
+        app.monitors[0].saved_position = Some(Position { x: 1000, y: 0 });
+        app.monitors[1].saved_position = Some(Position { x: 2920, y: 0 });
+
+        assert!(!app.check_layout());
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[0].saved_position,
+            Some(Position { x: -1920, y: 0 })
+        );
+        assert_eq!(
+            app.monitors[1].saved_position,
+            Some(Position { x: 0, y: 0 })
+        );
+    }
+
+    // A pending move's revert target is in absolute coordinates, so the origin
+    // fix must translate it too; otherwise Cancel teleports a monitor.
+    #[test]
+    fn the_origin_fix_translates_pending_move_origins() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 1000, 0, 1920, 1080),
+                sized_monitor("B", 2920, 0, 1920, 1080),
+            ],
+            "fix-origin-pending",
+        );
+        // A peculiar pending move that also leaves the origin unresolved.
+        app.note_move(1, (4000, 500));
+
+        assert!(!app.check_layout());
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.move_origins.get(&1),
+            Some(&(3000, 500)),
+            "the revert target moved with the layout"
+        );
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 3000, y: 500 }),
+            "Cancel restores the origin-relative position, not the old one"
+        );
     }
 
     #[test]

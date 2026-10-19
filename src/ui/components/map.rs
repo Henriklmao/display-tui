@@ -213,10 +213,11 @@ impl<'a> Widget for Map<'a> {
     }
 }
 impl<'a> Map<'a> {
-    // The colour of a monitor: the hover accent when hovered, else its base.
+    // The colour of a monitor: a hovered monitor is marked yellow (the same
+    // cue as the selection), otherwise it keeps its base colour.
     fn monitor_color(&self, index: usize, base: Color) -> Color {
         if self.hover == Some(HoverTarget::Map(index)) {
-            styles::hover_accent()
+            Color::Yellow
         } else {
             base
         }
@@ -1428,7 +1429,7 @@ mod tests {
     // --- hover glow ------------------------------------------------------
 
     #[test]
-    fn a_hovered_monitor_glows_in_the_accent_colour() {
+    fn a_hovered_monitor_is_marked_yellow() {
         let monitors = vec![monitor("Alpha", 0, 0), monitor("Beta", 1920, 0)];
         let area = Rect::new(0, 0, 100, 30);
 
@@ -1449,8 +1450,8 @@ mod tests {
         let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
         assert_eq!(
             buf[(bx, by)].style().fg,
-            Some(styles::hover_accent()),
-            "the hovered monitor must glow"
+            Some(Color::Yellow),
+            "the hovered monitor is marked yellow"
         );
         let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
         assert_eq!(

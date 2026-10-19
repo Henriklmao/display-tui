@@ -140,10 +140,44 @@ pub fn validate_preset_name(name: &str) -> Result<(), Vec<ValidationError>> {
     }
 }
 
+// Validates that at least one enabled, placed monitor starts at the origin.
+//
+// The layout is translated as a whole by the auto fix, so this does not depend
+// on which monitor is chosen: any monitor with its top-left at (0, 0) satisfies
+// the rule.
+pub fn validate_origin(monitors: &[Monitor]) -> Result<(), Vec<ValidationError>> {
+    let placed: Vec<&Monitor> = monitors
+        .iter()
+        .filter(|monitor| {
+            if !monitor.enabled {
+                return false;
+            }
+            let (_, _, w, h) = monitor.get_geometry();
+            w > 0.0 && h > 0.0
+        })
+        .collect();
+
+    if placed.is_empty() {
+        return Ok(());
+    }
+
+    if placed.iter().any(|monitor| {
+        monitor
+            .position
+            .as_ref()
+            .is_some_and(|position| position.x == 0 && position.y == 0)
+    }) {
+        Ok(())
+    } else {
+        Err(vec![ValidationError::NoOriginMonitor])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_contiguous, validate_no_overlap, validate_preset_name, validate_workspaces_unique,
+        validate_contiguous, validate_no_overlap, validate_origin, validate_preset_name,
+        validate_workspaces_unique,
     };
     use crate::monitor::{Monitor, Position, Resolution};
     use crate::validation::errors::ValidationError;
@@ -446,5 +480,60 @@ mod tests {
         ];
 
         assert_eq!(validate_contiguous(&monitors), Ok(()));
+    }
+
+    // --- origin rule ----------------------------------------------------
+
+    #[test]
+    fn a_monitor_at_the_origin_satisfies_the_rule() {
+        let monitors = vec![
+            box_at("A", 0, 0, 1920, 1080),
+            box_at("B", 1920, 0, 1920, 1080),
+        ];
+        assert_eq!(validate_origin(&monitors), Ok(()));
+    }
+
+    #[test]
+    fn a_layout_without_an_origin_monitor_is_rejected() {
+        let monitors = vec![
+            box_at("A", 100, 0, 1920, 1080),
+            box_at("B", 2020, 0, 1920, 1080),
+        ];
+
+        let errors = validate_origin(&monitors).unwrap_err();
+
+        assert_eq!(errors, vec![ValidationError::NoOriginMonitor]);
+    }
+
+    #[test]
+    fn the_origin_may_be_supplied_by_any_monitor() {
+        let monitors = vec![
+            box_at("A", -1920, 0, 1920, 1080),
+            box_at("B", 0, 0, 1920, 1080),
+        ];
+        assert_eq!(validate_origin(&monitors), Ok(()));
+    }
+
+    #[test]
+    fn disabled_and_unplaced_monitors_do_not_satisfy_the_origin_rule() {
+        let mut unplaced = box_at("B", 0, 0, 1920, 1080);
+        unplaced.position = None;
+
+        let monitors = vec![
+            box_at("A", 100, 0, 1920, 1080),
+            disabled(box_at("B", 0, 0, 1920, 1080)),
+            unplaced,
+        ];
+
+        assert!(validate_origin(&monitors).is_err());
+    }
+
+    #[test]
+    fn an_empty_or_all_disabled_layout_has_no_origin_error() {
+        assert_eq!(validate_origin(&[]), Ok(()));
+        assert_eq!(
+            validate_origin(&[disabled(box_at("A", 100, 0, 1920, 1080))]),
+            Ok(())
+        );
     }
 }

@@ -41,13 +41,8 @@ pub struct App {
     pub blink: Option<BlinkState>,
     // The interactive element currently under the pointer, if any.
     pub hover: Option<HoverTarget>,
-    // The current hover shimmer step, advanced while an element is hovered.
-    pub hover_frame: u32,
     // When the current hover began: the tooltip dwell clock.
     pub hover_since: Option<Instant>,
-    // When the current shimmer phase began (separate from the dwell clock so
-    // the 80ms tick cannot reset the tooltip dwell).
-    pub hover_anim_since: Option<Instant>,
     // The last pointer cell, used to place the tooltip.
     pub hover_point: (u16, u16),
     // The tooltip to draw this frame, computed in `draw`.
@@ -111,9 +106,6 @@ pub const BLINK_TOGGLE: Duration = Duration::from_millis(500);
 
 // Number of on/off toggles in one validation blink (eight = four flashes).
 pub const BLINK_TOGGLES: u32 = 8;
-
-// How long one hover shimmer step lasts.
-pub const HOVER_TOGGLE: Duration = Duration::from_millis(80);
 
 // A finite validation blink. The phase is a counter, not wall-clock derived,
 // so rendering and tests are deterministic; `since` only drives scheduling.
@@ -194,21 +186,10 @@ impl App {
     }
 
     // Time until the next animation deadline. `None` means nothing animates, so
-    // the event loop blocks until real input (zero idle cost).
+    // the event loop blocks until real input (zero idle cost). Only validation
+    // errors animate; hover is a steady glow.
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
-        let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
-        let hover = match (self.hover, self.hover_anim_since) {
-            (Some(_), Some(since)) => {
-                Some(HOVER_TOGGLE.saturating_sub(now.saturating_duration_since(since)))
-            }
-            _ => None,
-        };
-        match (blink, hover) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
-        }
+        self.blink.as_ref().map(|blink| blink.remaining(now))
     }
 
     fn next_deadline(&self) -> Option<Duration> {
@@ -231,19 +212,10 @@ impl App {
         if disarm {
             self.blink = None;
         }
-
-        if self.hover.is_some()
-            && let Some(since) = self.hover_anim_since
-            && now.saturating_duration_since(since) >= HOVER_TOGGLE
-        {
-            // Only the shimmer clock advances; the dwell clock (hover_since)
-            // keeps running so the tooltip can still appear at 3s.
-            self.hover_anim_since = Some(now);
-            self.hover_frame = self.hover_frame.wrapping_add(1);
-        }
     }
 
-    // Records the hovered element, restarting the shimmer only on a change.
+    // Records the hovered element, restarting the tooltip dwell on a change.
+    // Hover itself does not animate, so there is no timer to arm here.
     pub(crate) fn set_hover(
         &mut self,
         target: Option<HoverTarget>,
@@ -256,13 +228,6 @@ impl App {
         }
         self.hover = target;
         self.hover_since = Some(now);
-        self.hover_anim_since = Some(now);
-        self.hover_frame = 0;
-    }
-
-    // The current hover shimmer step, for the components to style with.
-    pub(crate) fn hover_tick(&self) -> u32 {
-        self.hover_frame
     }
 
     // The tooltip for the current hover, once the pointer has rested long
@@ -1691,27 +1656,40 @@ mod tests {
         assert_eq!(app.next_deadline_at(Instant::now()), None);
     }
 
+    // Hover is a steady glow: it must never arm an animation timer. Only
+    // validation errors (the blink) may animate.
     #[test]
-    fn hover_arms_the_shimmer_and_advances_it_on_the_deadline() {
+    fn hover_never_arms_an_animation() {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.set_hover(Some(HoverTarget::ListRow(0)), (10, 10), t0);
 
-        assert_eq!(app.next_deadline_at(t0), Some(HOVER_TOGGLE));
-
-        app.advance_animation_at(t0 + Duration::from_millis(79));
-        assert_eq!(app.hover_tick(), 0, "too early to shimmer");
-
+        assert_eq!(
+            app.next_deadline_at(t0),
+            None,
+            "hovering must not start a timer"
+        );
         app.advance_animation_at(t0 + Duration::from_millis(80));
-        assert_eq!(app.hover_tick(), 1, "the shimmer advanced");
+        assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(80)), None);
 
+        // Hover-out keeps it idle too.
         app.set_hover(None, (10, 10), t0 + Duration::from_millis(100));
         assert_eq!(app.next_deadline_at(t0 + Duration::from_millis(100)), None);
-        assert_eq!(app.hover_tick(), 0, "hover-out resets the shimmer");
     }
 
     #[test]
-    fn the_nearer_of_hover_and_blink_deadlines_wins() {
+    fn a_hovered_layout_without_errors_does_not_animate() {
+        let t0 = Instant::now();
+        let mut app = App::new(None);
+        app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
+
+        // A clean layout: no blink is armed, so the loop blocks on input.
+        assert_eq!(app.next_deadline_at(t0 + Duration::from_secs(10)), None);
+        assert!(!app.highlight_visible());
+    }
+
+    #[test]
+    fn hover_does_not_shorten_the_blink_deadline() {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.arm_blink(t0);
@@ -1721,7 +1699,7 @@ mod tests {
             t0 + Duration::from_millis(450),
         );
 
-        // 50ms of blink remain, 80ms of hover.
+        // Only the blink drives the deadline; hover adds nothing.
         assert_eq!(
             app.next_deadline_at(t0 + Duration::from_millis(450)),
             Some(Duration::from_millis(50))
@@ -1777,30 +1755,26 @@ mod tests {
         assert!(app.tooltip_at(t0 + Duration::from_secs(6)).is_some());
     }
 
-    // Regression: the shimmer tick used to advance the same clock as the dwell,
-    // so a resting pointer never reached the 3s threshold and tooltips were
-    // dead in the running app. Drive the real loop sequence.
+    // The dwell clock must not be disturbed by anything that happens while the
+    // pointer rests, so a hovered element still reaches its 3s tooltip.
     #[test]
-    fn the_shimmer_tick_does_not_reset_the_tooltip_dwell() {
+    fn the_tooltip_dwell_survives_animation_ticks() {
         let t0 = Instant::now();
         let mut app = App::new(None);
         app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0);
 
-        // Simulate the event loop: poll times out at the shimmer deadline and
-        // the animation advances, over and over, for three seconds.
+        // Run the loop for three seconds, including a validation blink.
+        app.highlights = Some(crate::validation::diagnostics::LayoutHighlights::default());
+        app.arm_blink(t0);
         for step in 1..=40u64 {
             app.advance_animation_at(t0 + Duration::from_millis(80 * step));
         }
 
-        assert!(app.hover_tick() > 0, "the shimmer advanced");
-        assert!(
-            app.tooltip_at(t0 + Duration::from_millis(3200)).is_some(),
-            "the dwell must still mature while the shimmer ticks"
-        );
         assert!(
             app.tooltip_at(t0 + Duration::from_millis(3000)).is_some(),
             "the tooltip is due right at the 3s mark"
         );
+        assert!(app.tooltip_at(t0 + Duration::from_millis(3200)).is_some());
     }
 
     // --- validate on apply + Space auto-fix -----------------------------

@@ -32,20 +32,16 @@ pub fn header_style() -> Style {
     Style::new().bold().fg(COLOR_SUCCESS).reversed()
 }
 
-// The alternating accent of the currently hovered element. Two steps per
-// shimmer cycle so the colour visibly runs through the text without needing a
-// per-grapheme sweep.
-pub fn hover_accent(tick: u32) -> Color {
-    if tick.is_multiple_of(2) {
-        Color::LightCyan
-    } else {
-        Color::LightGreen
-    }
+// The accent of the currently hovered element. Deliberately a single steady
+// colour: hover must read as a glow, never as a blink. Blinking is reserved for
+// validation errors (overlap, detached monitors).
+pub fn hover_accent() -> Color {
+    Color::LightCyan
 }
 
 // Style for a hovered interactive element.
-pub fn hover_style(tick: u32) -> Style {
-    Style::new().fg(hover_accent(tick)).bold()
+pub fn hover_style() -> Style {
+    Style::new().fg(hover_accent()).bold()
 }
 
 #[cfg(test)]
@@ -116,16 +112,17 @@ mod tests {
     }
 
     #[test]
-    fn the_hover_accent_shimmers_between_two_steps() {
-        assert_ne!(hover_accent(0), hover_accent(1));
-        assert_eq!(hover_accent(0), hover_accent(2), "the cycle repeats");
-        assert_ne!(hover_accent(0), Color::Reset);
+    fn the_hover_accent_is_a_single_steady_colour() {
+        // Regression: hover used to alternate between two colours every 80ms,
+        // which made hovered elements blink constantly.
+        assert_eq!(hover_accent(), hover_accent());
+        assert_ne!(hover_accent(), Color::Reset);
     }
 
     #[test]
     fn hover_style_is_bold_in_the_accent_colour() {
-        let style = hover_style(0);
-        assert_eq!(style.fg, Some(hover_accent(0)));
+        let style = hover_style();
+        assert_eq!(style.fg, Some(hover_accent()));
         assert!(style.add_modifier.contains(Modifier::BOLD));
     }
 }

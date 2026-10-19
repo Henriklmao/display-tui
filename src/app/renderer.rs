@@ -13,7 +13,6 @@ impl Widget for &App {
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
 
         let hover = self.hover;
-        let hover_tick = self.hover_tick();
 
         // Every monitor with an unapplied move gets an Apply button; sort for a
         // deterministic draw order (the map does not care about the set order).
@@ -30,12 +29,10 @@ impl Widget for &App {
             highlights: self.highlights.as_ref(),
             highlight_phase: self.highlight_visible(),
             hover,
-            hover_tick,
         };
         monitor_list.is_previewing = is_previewing;
         monitor_list.moved_pending = self.has_pending_move();
         monitor_list.hover = hover;
-        monitor_list.hover_tick = hover_tick;
 
         let layout = self
             .layout
@@ -49,14 +46,12 @@ impl Widget for &App {
                         let mut resolutions =
                             Resolutions::new(selected, Some(self.selected_resolution));
                         resolutions.hover = hover;
-                        resolutions.hover_tick = hover_tick;
                         resolutions.render(side, buf);
                     }
                 }
                 TUIMode::Scale => {
                     let mut scale = Scale::new(self.selected_scale);
                     scale.hover = hover;
-                    scale.hover_tick = hover_tick;
                     scale.render(side, buf);
                 }
                 _ => {}
@@ -65,7 +60,7 @@ impl Widget for &App {
         monitor_list.render(layout.list, buf);
 
         if let Some(ref preset_menu) = self.show_preset_menu {
-            preset_menu.render_with(area, buf, hover, hover_tick);
+            preset_menu.render_with(area, buf, hover);
         }
 
         if self.show_help {
@@ -73,7 +68,7 @@ impl Widget for &App {
         }
 
         if let Some(ref popup) = self.show_popup {
-            popup.render_with(area, buf, hover, hover_tick);
+            popup.render_with(area, buf, hover);
         }
 
         // Topmost layer: the hover tooltip.

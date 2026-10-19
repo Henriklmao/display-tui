@@ -47,8 +47,6 @@ pub struct Map<'a> {
     pub highlight_phase: bool,
     // The element currently under the pointer, for the hover glow.
     pub hover: Option<HoverTarget>,
-    // The hover shimmer step.
-    pub hover_tick: u32,
 }
 
 // Draws one world-space highlight segment, mirroring y with the guide rule so
@@ -175,7 +173,7 @@ impl<'a> Widget for Map<'a> {
             {
                 let hovered = self.hover == Some(HoverTarget::ApplyButton(index));
                 let color = if hovered {
-                    styles::hover_accent(self.hover_tick)
+                    styles::hover_accent()
                 } else {
                     Color::Green
                 };
@@ -192,7 +190,7 @@ impl<'a> Map<'a> {
     // The colour of a monitor: the hover accent when hovered, else its base.
     fn monitor_color(&self, index: usize, base: Color) -> Color {
         if self.hover == Some(HoverTarget::Map(index)) {
-            styles::hover_accent(self.hover_tick)
+            styles::hover_accent()
         } else {
             base
         }
@@ -443,7 +441,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
 
@@ -533,7 +530,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -562,7 +558,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -583,7 +578,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -608,7 +602,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -626,7 +619,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -815,7 +807,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -840,7 +831,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -869,7 +859,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -903,7 +892,6 @@ mod tests {
                 highlights: None,
                 highlight_phase: true,
                 hover: None,
-                hover_tick: 0,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -1049,7 +1037,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1093,7 +1080,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         plain.render(buf.area, &mut buf);
         assert!(!text_of(&buf).contains("Apply"), "no button without a move");
@@ -1109,7 +1095,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         moved.render(buf.area, &mut buf);
         assert!(text_of(&buf).contains("Apply"), "the button is drawn");
@@ -1136,7 +1121,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1163,7 +1147,6 @@ mod tests {
                 highlights: None,
                 highlight_phase: true,
                 hover: None,
-                hover_tick: 0,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -1191,7 +1174,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1224,7 +1206,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1288,7 +1269,6 @@ mod tests {
             highlights: Some(highlights),
             highlight_phase: true,
             hover: None,
-            hover_tick: 0,
         }
     }
 
@@ -1389,14 +1369,13 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: Some(HoverTarget::Map(1)),
-            hover_tick: 0,
         }
         .render(area, &mut buf);
 
         let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
         assert_eq!(
             buf[(bx, by)].style().fg,
-            Some(styles::hover_accent(0)),
+            Some(styles::hover_accent()),
             "the hovered monitor must glow"
         );
         let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
@@ -1408,7 +1387,9 @@ mod tests {
     }
 
     #[test]
-    fn the_hover_glow_advances_with_the_tick() {
+    fn the_hover_glow_is_steady_and_never_blinks() {
+        // Regression: the glow used to alternate between two accent colours on
+        // an 80ms tick, which made hovered monitors blink constantly.
         let monitors = vec![monitor("Alpha", 0, 0)];
         let area = Rect::new(0, 0, 100, 30);
 
@@ -1423,7 +1404,6 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: Some(HoverTarget::Map(0)),
-            hover_tick: 0,
         }
         .render(area, &mut first);
         let mut second = Buffer::empty(area);
@@ -1437,15 +1417,14 @@ mod tests {
             highlights: None,
             highlight_phase: true,
             hover: Some(HoverTarget::Map(0)),
-            hover_tick: 1,
         }
         .render(area, &mut second);
 
         let (x, y) = find_text(&first, "Alpha").expect("label");
-        assert_ne!(
+        assert_eq!(
             first[(x, y)].style().fg,
             second[(x, y)].style().fg,
-            "the glow must shimmer between ticks"
+            "the glow must not change between frames"
         );
     }
 }

@@ -312,7 +312,7 @@ impl Popup {
 
     // Draws the popup and returns the geometry used, for hit-testing.
     pub fn render(&self, area: Rect, buf: &mut Buffer) -> PopupFrame {
-        self.render_with(area, buf, None, 0)
+        self.render_with(area, buf, None)
     }
 
     // Draws the popup with hover styling for the button under the pointer.
@@ -321,7 +321,6 @@ impl Popup {
         area: Rect,
         buf: &mut Buffer,
         hover: Option<crate::app::state::HoverTarget>,
-        hover_tick: u32,
     ) -> PopupFrame {
         let layout = self.layout(area);
         let frame = layout.frame;
@@ -369,7 +368,7 @@ impl Popup {
             let hovered = hover == Some(crate::app::state::HoverTarget::Popup(button.action));
             let style = if hovered {
                 // Inverted, bold and colour-shifted: an obvious "click me".
-                crate::ui::styles::hover_style(hover_tick).reversed()
+                crate::ui::styles::hover_style().reversed()
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -642,12 +641,7 @@ mod tests {
         let area = Rect::new(0, 0, 100, 30);
         let p = popup(true, true, &["boom"]);
         let mut buf = Buffer::empty(area);
-        let layout = p.render_with(
-            area,
-            &mut buf,
-            Some(HoverTarget::Popup(PopupAction::Close)),
-            0,
-        );
+        let layout = p.render_with(area, &mut buf, Some(HoverTarget::Popup(PopupAction::Close)));
 
         let close = layout.button(PopupAction::Close).expect("close");
         assert!(

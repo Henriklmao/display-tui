@@ -22,10 +22,8 @@ use ratatui::layout::Constraint;
 pub struct Resolutions<'a> {
     pub state: TableState,
     pub monitor: &'a Monitor,
-    // The element currently under the pointer, for the hover shimmer.
+    // The element currently under the pointer, for the hover glow.
     pub hover: Option<HoverTarget>,
-    // The hover shimmer step.
-    pub hover_tick: u32,
 }
 
 impl<'a> Resolutions<'a> {
@@ -34,7 +32,6 @@ impl<'a> Resolutions<'a> {
             state: TableState::default().with_selected(selected),
             monitor,
             hover: None,
-            hover_tick: 0,
         }
     }
 
@@ -121,7 +118,7 @@ impl<'a> Resolutions<'a> {
                     })),
                 ]);
                 if self.hover == Some(HoverTarget::ResolutionRow(index)) {
-                    row.style(styles::hover_style(self.hover_tick))
+                    row.style(styles::hover_style())
                 } else {
                     row
                 }
@@ -180,7 +177,6 @@ mod tests {
             state: TableState::default(),
             monitor: &test_monitors()[0],
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 65, 7));
 

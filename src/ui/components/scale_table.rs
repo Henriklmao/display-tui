@@ -20,10 +20,8 @@ use ratatui::layout::Constraint;
 #[derive(Debug)]
 pub struct Scale {
     pub state: TableState,
-    // The element currently under the pointer, for the hover shimmer.
+    // The element currently under the pointer, for the hover glow.
     pub hover: Option<HoverTarget>,
-    // The hover shimmer step.
-    pub hover_tick: u32,
 }
 
 impl Scale {
@@ -31,7 +29,6 @@ impl Scale {
         Scale {
             state: TableState::default().with_selected(selected),
             hover: None,
-            hover_tick: 0,
         }
     }
 
@@ -93,7 +90,7 @@ impl Scale {
             .map(|(index, scale)| {
                 let row = Row::new(vec![Cell::from(scale.name)]);
                 if self.hover == Some(HoverTarget::ScaleRow(index)) {
-                    row.style(styles::hover_style(self.hover_tick))
+                    row.style(styles::hover_style())
                 } else {
                     row
                 }
@@ -133,7 +130,6 @@ mod tests {
         let mut scales = Scale {
             state: TableState::default(),
             hover: None,
-            hover_tick: 0,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 11));
 

@@ -348,8 +348,15 @@ impl<'a> MonitorList<'a> {
                 // from the preview state at render time. The per-cell styles
                 // (icon colour, red workspace number) still win because cells
                 // are painted over the row style.
+                //
+                // The selected row is deliberately exempt: ratatui patches the
+                // selection style (reversed) over the whole row afterwards, so
+                // a caution background would turn into a black block and make a
+                // warned row look different from a clean selected row. The red
+                // workspace number still marks the problem on the selected row.
+                let selected = self.state.selected() == Some(index);
                 let mut style = Style::default();
-                if caution.flags(index) {
+                if caution.flags(index) && !selected {
                     style = style.bg(Color::Yellow).fg(Color::Black);
                 }
                 if self.hover == Some(HoverTarget::ListRow(index)) {
@@ -1270,9 +1277,90 @@ mod tests {
         for x in inner.left()..inner.right() {
             let style = buf[(x, row)].style();
             if let (Some(fg), Some(bg)) = (style.fg, style.bg) {
+                // Reset/Reset is the terminal's own default pair, which is
+                // always contrasting; only explicit colours can collide.
+                if fg == Color::Reset && bg == Color::Reset {
+                    continue;
+                }
                 assert_ne!(fg, bg, "cell ({x}, {row}) would be invisible when reversed");
             }
         }
+    }
+
+    // The selected row must look the same whether or not it carries a warning:
+    // the reversed selection patch turns a yellow caution background into a
+    // solid block, so a warned selected row looked nothing like a clean one.
+    #[test]
+    fn a_selected_warned_row_looks_like_any_other_selected_row() {
+        let clean = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(1);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(2);
+                m
+            },
+        ];
+        // Same layout, but both monitors share a workspace (duplicate warning).
+        let warned = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+
+        let clean_buf = render_list_to(&clean, TUIMode::View, 0, area);
+        let warned_buf = render_list_to(&warned, TUIMode::View, 0, area);
+
+        let (cx, cy) = find_text(&clean_buf, "Alpha").expect("clean row");
+        let (wx, wy) = find_text(&warned_buf, "Alpha").expect("warned row");
+        assert_eq!(cy, wy, "both render on the first data row");
+        assert_eq!(
+            clean_buf[(cx, cy)].style(),
+            warned_buf[(wx, wy)].style(),
+            "the selected warned row must have the same background/style"
+        );
+        assert_ne!(
+            warned_buf[(wx, wy)].style().bg,
+            Some(Color::Yellow),
+            "the selection must not add a caution background"
+        );
+    }
+
+    #[test]
+    fn an_unselected_warned_row_keeps_its_caution_background() {
+        let warned = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+        // Select the second row; the first (warned) row stays unselected.
+        let buf = render_list_to(&warned, TUIMode::View, 1, area);
+
+        let (x, y) = find_text(&buf, "Alpha").expect("warned row");
+        assert_eq!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "an unselected warned row still carries the caution background"
+        );
     }
 
     #[test]

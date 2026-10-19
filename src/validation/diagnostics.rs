@@ -502,15 +502,35 @@ fn separation_delta(monitors: &[Monitor], chosen: usize, other: usize) -> (i32, 
     }
 }
 
-// Move that makes a detached monitor flush onto its anchor's facing edge.
+// Move that makes a detached monitor flush onto its anchor's facing edge and
+// centred on it: the middle of the monitor's facing edge meets the middle of
+// the anchor's facing edge (matching the arrow/connector endpoint).
 fn abut_delta(monitors: &[Monitor], info: &DetachInfo) -> (i32, i32) {
     let m = monitors[info.monitor].get_geometry();
     let a = monitors[info.anchor].get_geometry();
     match info.direction {
-        Direction::Right => (round_toward_zero(a.0 - (m.0 + m.2)), 0),
-        Direction::Left => (round_toward_zero((a.0 + a.2) - m.0), 0),
-        Direction::Down => (0, round_toward_zero(a.1 - (m.1 + m.3))),
-        Direction::Up => (0, round_toward_zero((a.1 + a.3) - m.1)),
+        Direction::Right => {
+            // Flush against the anchor's left edge, centres aligned on y.
+            let dx = a.0 - (m.0 + m.2);
+            let dy = (a.1 + a.3 / 2.0) - (m.1 + m.3 / 2.0);
+            (round_toward_zero(dx), dy.round() as i32)
+        }
+        Direction::Left => {
+            let dx = (a.0 + a.2) - m.0;
+            let dy = (a.1 + a.3 / 2.0) - (m.1 + m.3 / 2.0);
+            (round_toward_zero(dx), dy.round() as i32)
+        }
+        Direction::Down => {
+            // Flush against the anchor's top edge, centres aligned on x.
+            let dy = a.1 - (m.1 + m.3);
+            let dx = (a.0 + a.2 / 2.0) - (m.0 + m.2 / 2.0);
+            (dx.round() as i32, round_toward_zero(dy))
+        }
+        Direction::Up => {
+            let dy = (a.1 + a.3) - m.1;
+            let dx = (a.0 + a.2 / 2.0) - (m.0 + m.2 / 2.0);
+            (dx.round() as i32, round_toward_zero(dy))
+        }
     }
 }
 
@@ -736,11 +756,6 @@ mod tests {
         m
     }
 
-    fn pos(m: &Monitor) -> (i32, i32) {
-        let p = m.position.clone().unwrap();
-        (p.x, p.y)
-    }
-
     fn segments_for(monitors: &[Monitor], index: usize) -> Vec<EdgeSegment> {
         let regions = overlap_regions(monitors);
         regions
@@ -937,6 +952,63 @@ mod tests {
         assert_eq!(q.1, 0.0 + 1080.0 / 2.0, "at A's vertical centre");
     }
 
+    // The connector (the "arrow" pointing a detached monitor at its anchor)
+    // must start at the middle of the detached monitor's facing edge and end at
+    // the middle of the anchor's facing edge, in every direction.
+    #[test]
+    fn the_connector_always_joins_the_two_facing_midpoints() {
+        // (detached position, expected direction)
+        let cases = [
+            ((5000, 0), Direction::Left),   // anchor left of the monitor
+            ((-5000, 0), Direction::Right), // anchor right of the monitor
+            ((0, 5000), Direction::Up),     // anchor above the monitor
+            ((0, -5000), Direction::Down),  // anchor below the monitor
+        ];
+
+        for ((x, y), expected) in cases {
+            let monitors = vec![monitor("A", 0, 0), monitor("C", x, y)];
+            let info = detach_infos(&monitors).into_iter().next().unwrap();
+            assert_eq!(info.direction, expected, "case ({x}, {y})");
+
+            let connector = info.connector(&monitors);
+            // Segments are normalised (start <= end), so the path direction is
+            // lost; the two degree-1 endpoints are the path ends.
+            let mut counts: Vec<((f64, f64), usize)> = Vec::new();
+            for segment in &connector {
+                let (p, q) = segment.endpoints();
+                for point in [p, q] {
+                    match counts.iter_mut().find(|(existing, _)| *existing == point) {
+                        Some((_, count)) => *count += 1,
+                        None => counts.push((point, 1)),
+                    }
+                }
+            }
+            let mut ends: Vec<(f64, f64)> = counts
+                .into_iter()
+                .filter(|(_, count)| *count == 1)
+                .map(|(point, _)| point)
+                .collect();
+            ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let (ax, ay, aw, ah) = monitors[0].get_geometry();
+            let (cx, cy, cw, ch) = monitors[1].get_geometry();
+
+            let (expected_start, expected_end) = match expected {
+                Direction::Right => ((cx + cw, cy + ch / 2.0), (ax, ay + ah / 2.0)),
+                Direction::Left => ((cx, cy + ch / 2.0), (ax + aw, ay + ah / 2.0)),
+                Direction::Down => ((cx + cw / 2.0, cy + ch), (ax + aw / 2.0, ay)),
+                Direction::Up => ((cx + cw / 2.0, cy), (ax + aw / 2.0, ay + ah)),
+            };
+            let mut expected = vec![expected_start, expected_end];
+            expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            assert_eq!(
+                ends, expected,
+                "{expected:?}: the connector must join the two facing midpoints"
+            );
+        }
+    }
+
     #[test]
     fn caution_flags_union_every_pair_of_a_three_way_overlap() {
         let monitors = vec![
@@ -1041,29 +1113,9 @@ mod tests {
     }
 
     #[test]
-    fn an_abut_fix_flushes_a_detached_monitor_onto_its_anchor() {
-        // C sits 5000px to the right of A's right edge.
-        let monitors = vec![monitor("A", 0, 0), monitor("C", 5000, 0)];
-
-        let fix = plan_auto_fix(&monitors, None).expect("a fix must exist");
-
-        assert_eq!(
-            fix,
-            AutoFix::Abut {
-                monitor: 1,
-                dx: 1920 - 5000,
-                dy: 0
-            }
-        );
-
-        // Applying it makes the pair contiguous.
-        let after = shifted(&monitors, 1, -3080, 0);
-        assert!(disconnected_monitors(&after).is_empty());
-        assert_eq!(pos(&after[1]), (1920, 0));
-    }
-
-    #[test]
-    fn an_abut_fix_preserves_the_perpendicular_alignment() {
+    fn an_abut_fix_centres_the_detached_monitor_on_the_anchor_edge() {
+        // C sits 5000px right of A's right edge but 400px lower: the fix must
+        // both flush it and centre it vertically on A.
         let monitors = vec![monitor("A", 0, 0), monitor("C", 5000, 400)];
 
         let fix = plan_auto_fix(&monitors, None).expect("a fix must exist");
@@ -1073,9 +1125,36 @@ mod tests {
             AutoFix::Abut {
                 monitor: 1,
                 dx: 1920 - 5000,
-                dy: 0
+                // A centre y = 540, C centre y = 940.
+                dy: -400
             },
-            "only the facing axis moves"
+            "both axes move so the facing midpoints meet"
+        );
+
+        // The facing midpoints coincide after the move.
+        let after = shifted(&monitors, 1, 1920 - 5000, -400);
+        let (ax, ay, aw, ah) = after[0].get_geometry();
+        let (cx, cy, _, ch) = after[1].get_geometry();
+        assert_eq!(cx, ax + aw, "flush against A's right edge");
+        assert_eq!(cy + ch / 2.0, ay + ah / 2.0, "the vertical midpoints match");
+    }
+
+    #[test]
+    fn an_abut_fix_centres_a_vertically_detached_monitor_too() {
+        // D is below A but shifted right by 300px.
+        let monitors = vec![monitor("A", 0, 0), monitor("D", 300, 5000)];
+
+        let fix = plan_auto_fix(&monitors, None).expect("a fix must exist");
+
+        assert_eq!(
+            fix,
+            AutoFix::Abut {
+                monitor: 1,
+                // A centre x = 960, D centre x = 1260.
+                dx: -300,
+                dy: 1080 - 5000
+            },
+            "the horizontal centres are matched while abutting below"
         );
     }
 

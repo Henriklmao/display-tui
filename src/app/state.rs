@@ -1877,6 +1877,31 @@ mod tests {
         assert!(app.highlights.is_none());
     }
 
+    // The auto fix must centre the detached monitor on its anchor's facing
+    // edge, not merely flush it: both axes move.
+    #[test]
+    fn the_auto_fix_centres_the_detached_monitor_on_the_anchor_edge() {
+        let (mut app, _dir) = app_with_state(
+            vec![
+                sized_monitor("A", 0, 0, 1920, 1080),
+                // To the right of A and 400px lower, so the centres differ.
+                sized_monitor("C", 5000, 400, 1920, 1080),
+            ],
+            "fix-centre",
+        );
+        assert!(!app.check_layout());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 0 }),
+            "flush against A's right edge and vertically centred on it"
+        );
+        assert!(app.show_popup.is_none(), "the layout is clean");
+        assert!(app.highlights.is_none());
+    }
+
     #[test]
     fn no_auto_fix_is_reported_when_every_move_would_create_a_new_overlap() {
         let (mut app, _dir) = app_with_state(

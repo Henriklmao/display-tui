@@ -62,16 +62,35 @@ pub fn snap_horizontal(monitors: &mut [Monitor], selected: usize, direction: i32
 // World-space alignment guides an active snap locked onto.
 //
 // `x`/`y` hold the world coordinate of the aligned vertical/horizontal line
-// when a snap happened, so the map can draw a guide.
+// when a snap happened, so the map can draw a guide. `center_x`/`center_y` are
+// set when the snap aligned two monitor *centres*: the guide then spans both
+// monitors so the centre-to-centre relationship is visible at a glance.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SnapGuides {
     pub x: Option<f64>,
     pub y: Option<f64>,
+    pub center_x: Option<CenterGuide>,
+    pub center_y: Option<CenterGuide>,
+}
+
+// A centre-to-centre alignment: the shared world coordinate and the two
+// monitor extents that should be spanned by the guide.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CenterGuide {
+    // The aligned centre coordinate on the guide's axis.
+    pub at: f64,
+    // The span of the moved monitor along the other axis.
+    pub moved: (f64, f64),
+    // The span of the neighbour it aligned with along the other axis.
+    pub other: (f64, f64),
 }
 
 // Snaps the selected monitor to the nearest neighbouring edge or centre on
 // each axis independently, but only when it is within `threshold` world
 // pixels. Used for live snapping while dragging with the mouse.
+//
+// Centre-to-centre snaps are reported separately in `center_x`/`center_y` so
+// the map can draw a guide that spans both monitors.
 pub fn snap_to_alignment(monitors: &mut [Monitor], selected: usize, threshold: f64) -> SnapGuides {
     if selected >= monitors.len() || monitors[selected].position.is_none() {
         return SnapGuides::default();
@@ -106,34 +125,90 @@ pub fn snap_to_alignment(monitors: &mut [Monitor], selected: usize, threshold: f
     let mut guides = SnapGuides::default();
 
     let x_sources = [sx, sx + sw, sx + sw / 2.0];
-    if let Some((delta, guide)) = nearest_alignment(&x_sources, &x_targets, threshold) {
+    if let Some((delta, guide, source)) = nearest_alignment(&x_sources, &x_targets, threshold) {
         move_horizontal(&mut monitors[selected], delta.round() as i32);
         guides.x = Some(guide);
+        // Source 2 is the monitor's centre; a centre target there means the
+        // two monitors are now centre-aligned on x.
+        if source == 2
+            && let Some(other) = centre_span(monitors, selected, guide, Axis::X)
+        {
+            let (_, my, _, mh) = monitors[selected].get_geometry();
+            guides.center_x = Some(CenterGuide {
+                at: guide,
+                moved: (my, my + mh),
+                other,
+            });
+        }
     }
 
     let y_sources = [sy, sy + sh, sy + sh / 2.0];
-    if let Some((delta, guide)) = nearest_alignment(&y_sources, &y_targets, threshold) {
+    if let Some((delta, guide, source)) = nearest_alignment(&y_sources, &y_targets, threshold) {
         move_vertical(&mut monitors[selected], delta.round() as i32);
         guides.y = Some(guide);
+        if source == 2
+            && let Some(other) = centre_span(monitors, selected, guide, Axis::Y)
+        {
+            let (mx, _, mw, _) = monitors[selected].get_geometry();
+            guides.center_y = Some(CenterGuide {
+                at: guide,
+                moved: (mx, mx + mw),
+                other,
+            });
+        }
     }
 
     guides
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Axis {
+    X,
+    Y,
+}
+
+// The perpendicular span of the first enabled monitor whose centre lies on
+// `coordinate` along `axis`.
+fn centre_span(
+    monitors: &[Monitor],
+    selected: usize,
+    coordinate: f64,
+    axis: Axis,
+) -> Option<(f64, f64)> {
+    monitors.iter().enumerate().find_map(|(i, m)| {
+        if i == selected || !m.enabled {
+            return None;
+        }
+        let (x, y, w, h) = m.get_geometry();
+        if w == 0.0 && h == 0.0 {
+            return None;
+        }
+        let (centre, span) = match axis {
+            Axis::X => (x + w / 2.0, (y, y + h)),
+            Axis::Y => (y + h / 2.0, (x, x + w)),
+        };
+        ((centre - coordinate).abs() < f64::EPSILON).then_some(span)
+    })
+}
+
 // Finds the smallest alignment move between any source edge and any target
-// edge that is within `threshold`, returning `(delta, target)`.
-fn nearest_alignment(sources: &[f64], targets: &[f64], threshold: f64) -> Option<(f64, f64)> {
-    let mut best: Option<(f64, f64, f64)> = None; // (distance, delta, guide)
-    for &source in sources {
+// edge that is within `threshold`, returning `(delta, target, source_index)`.
+fn nearest_alignment(
+    sources: &[f64],
+    targets: &[f64],
+    threshold: f64,
+) -> Option<(f64, f64, usize)> {
+    let mut best: Option<(f64, f64, f64, usize)> = None; // (distance, delta, guide, source)
+    for (index, &source) in sources.iter().enumerate() {
         for &target in targets {
             let delta = target - source;
             let distance = delta.abs();
-            if distance <= threshold && best.is_none_or(|(b, _, _)| distance < b) {
-                best = Some((distance, delta, target));
+            if distance <= threshold && best.is_none_or(|(b, _, _, _)| distance < b) {
+                best = Some((distance, delta, target, index));
             }
         }
     }
-    best.map(|(_, delta, guide)| (delta, guide))
+    best.map(|(_, delta, guide, index)| (delta, guide, index))
 }
 
 #[cfg(test)]
@@ -302,7 +377,7 @@ mod tests {
 
     // --- live drag snapping ---------------------------------------------
 
-    use super::{SnapGuides, snap_to_alignment};
+    use super::{CenterGuide, SnapGuides, snap_to_alignment};
 
     #[test]
     fn alignment_snaps_to_a_nearby_edge_on_each_axis() {
@@ -317,8 +392,76 @@ mod tests {
             guides,
             SnapGuides {
                 x: Some(1920.0),
-                y: Some(0.0)
+                y: Some(0.0),
+                ..Default::default()
             }
+        );
+    }
+
+    // Centre-to-centre snapping must be reported so the map can draw a guide
+    // that spans both monitors.
+    #[test]
+    fn alignment_reports_a_centre_to_centre_x_guide() {
+        // A is 100 wide at x=0 (centre 50). B is 40 wide at x=28, so its centre
+        // is 48: 2px short of A's centre, within the threshold.
+        let mut a = monitor("A", 0, 0);
+        a.modes[0].width = 100;
+        a.modes[0].height = 100;
+        let mut b = monitor("B", 28, 400);
+        b.modes[0].width = 40;
+        b.modes[0].height = 100;
+
+        let mut monitors = vec![a, b];
+        let guides = snap_to_alignment(&mut monitors, 1, 20.0);
+
+        // B's centre moved onto A's centre (50), and no edge won the snap.
+        assert_eq!(x_of(&monitors[1]), 30);
+        assert_eq!(
+            guides.center_x,
+            Some(CenterGuide {
+                at: 50.0,
+                moved: (400.0, 500.0),
+                other: (0.0, 100.0),
+            })
+        );
+        assert_eq!(guides.center_y, None);
+    }
+
+    #[test]
+    fn alignment_reports_a_centre_to_centre_y_guide() {
+        // A is 100 tall at y=0 (centre 50). B is 40 tall at y=28 (centre 48).
+        let mut a = monitor("A", 0, 0);
+        a.modes[0].width = 100;
+        a.modes[0].height = 100;
+        let mut b = monitor("B", 400, 28);
+        b.modes[0].width = 100;
+        b.modes[0].height = 40;
+
+        let mut monitors = vec![a, b];
+        let guides = snap_to_alignment(&mut monitors, 1, 20.0);
+
+        assert_eq!(y_of(&monitors[1]), 30);
+        assert_eq!(
+            guides.center_y,
+            Some(CenterGuide {
+                at: 50.0,
+                moved: (400.0, 500.0),
+                other: (0.0, 100.0),
+            })
+        );
+    }
+
+    #[test]
+    fn an_edge_snap_does_not_report_a_centre_guide() {
+        // B's left edge lands on A's right edge: an edge alignment, not centre.
+        let mut monitors = vec![monitor("A", 0, 0), monitor("B", 1912, 5)];
+
+        let guides = snap_to_alignment(&mut monitors, 1, 20.0);
+
+        assert!(guides.x.is_some());
+        assert_eq!(
+            guides.center_x, None,
+            "an edge snap must not claim a centre alignment"
         );
     }
 
@@ -363,7 +506,8 @@ mod tests {
             guides,
             SnapGuides {
                 x: Some(0.0),
-                y: Some(0.0)
+                y: Some(0.0),
+                ..Default::default()
             }
         );
     }

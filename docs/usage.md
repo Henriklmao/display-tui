@@ -29,12 +29,12 @@ The interface is fully keyboard driven, but the mouse can drive the same actions
 
 - **Select**: click a display row, a resolution/scale row, or a monitor on the map.
 - **Enable/disable**: clicking a display row selects it; click its checkbox again (once it is selected) to enable/disable it.
-- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides. An **Apply** button then appears in the centre of every moved monitor — click it, **right-click**, or press `Enter`/`Space` to persist the move. While a move is unconfirmed the other actions are hidden: `Enter`/`Space` (or a button or a right-click) apply every pending move, and `Esc`/`q` cancel them by putting the monitors back.
+- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides (a centre-to-centre snap draws a guide spanning both monitors). An **Apply** button then appears in the centre of every moved monitor — click it, **right-click**, or press `Enter`/`Space` to persist the move. While a move is unconfirmed the other actions are hidden: `Enter`/`Space` (or a button or a right-click) apply every pending move, and `Esc`/`q` cancel them by putting the monitors back.
 - **Double-click**: double-click a resolution, scale or preset row to apply it immediately.
 - **Scroll**: use the wheel over a list to step through it (displays, resolutions, scales or presets).
 - **Presets**: click a preset to preview it, double-click to apply it, and click outside the menu to close it.
 
-When saving, the app will automatically validate your layout. If any displays are separated too far, have overlapping regions, or if there are duplicate workspace assignments, a warning pop-up will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
+When saving, the app will automatically validate your layout. If any displays are separated too far, have overlapping regions, or if there are duplicate workspace assignments, a warning pop-up will appear. You can hit `f` to force save anyway, or `Esc` to go back and fix the issues. Validation also runs as soon as you apply a move, resolution, scale or rotation: the offending edges blink red and, when a single move can resolve a problem, `Space` (or the popup's **auto fix** button) moves the monitor so its facing edge midpoint meets the other monitor's, one fix per press.
 
 ## Presets
 

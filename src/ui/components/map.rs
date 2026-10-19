@@ -151,6 +151,32 @@ impl<'a> Widget for Map<'a> {
                             color: Color::Magenta,
                         });
                     }
+                    // Centre-to-centre alignments get a guide that spans both
+                    // monitors, so the shared centre is visible at a glance.
+                    if let Some(guide) = guides.center_x {
+                        let mirror = |y: f64| bottom + top - y;
+                        let start = guide.moved.0.min(guide.other.0);
+                        let end = guide.moved.1.max(guide.other.1);
+                        ctx.draw(&CanvasLine {
+                            x1: guide.at,
+                            y1: mirror(start),
+                            x2: guide.at,
+                            y2: mirror(end),
+                            color: Color::Magenta,
+                        });
+                    }
+                    if let Some(guide) = guides.center_y {
+                        let mirror = |y: f64| bottom + top - y;
+                        let start = guide.moved.0.min(guide.other.0);
+                        let end = guide.moved.1.max(guide.other.1);
+                        ctx.draw(&CanvasLine {
+                            x1: start,
+                            y1: mirror(guide.at),
+                            x2: end,
+                            y2: mirror(guide.at),
+                            color: Color::Magenta,
+                        });
+                    }
                 }
                 // Overlap and detachment highlights, on top of every monitor
                 // rectangle (and the guides) but under the Apply buttons.
@@ -1168,6 +1194,7 @@ mod tests {
             guides: Some(SnapGuides {
                 x: None,
                 y: Some(0.0),
+                ..Default::default()
             }),
             canvas: None,
             pending: &[],
@@ -1200,6 +1227,7 @@ mod tests {
             guides: Some(SnapGuides {
                 x: Some(0.0),
                 y: None,
+                ..Default::default()
             }),
             canvas: None,
             pending: &[],
@@ -1218,6 +1246,52 @@ mod tests {
         assert!(
             col < area.width / 2,
             "vertical guide on the wrong side: col {col}"
+        );
+    }
+
+    // A centre-to-centre snap draws a guide that spans both monitors instead of
+    // the full canvas height.
+    #[test]
+    fn a_centre_to_centre_guide_spans_only_the_two_monitors() {
+        // Two stacked monitors, aligned on x, well away from the top/bottom.
+        let monitors = vec![monitor("A", 0, 2000), monitor("B", 0, 4000)];
+        let area = Rect::new(0, 0, 100, 30);
+        let map = Map {
+            selected: 1,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: Some(SnapGuides {
+                x: None,
+                y: None,
+                center_x: Some(crate::actions::movement::CenterGuide {
+                    at: 960.0,
+                    moved: (4000.0, 5080.0),
+                    other: (2000.0, 3080.0),
+                }),
+                center_y: None,
+            }),
+            canvas: None,
+            pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        let rows: Vec<u16> = (area.top()..area.bottom())
+            .filter(|&y| {
+                (area.left()..area.right()).any(|x| buf[(x, y)].style().fg == Some(Color::Magenta))
+            })
+            .collect();
+
+        assert!(!rows.is_empty(), "the centre guide must be drawn");
+        // It is clipped to the two monitors, not the whole canvas.
+        let first = *rows.first().unwrap();
+        let last = *rows.last().unwrap();
+        assert!(
+            first > area.top() && last < area.bottom().saturating_sub(1),
+            "the guide must not span the whole canvas: {rows:?}"
         );
     }
 

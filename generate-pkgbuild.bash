@@ -44,6 +44,7 @@ url="${URL}"
 license=('GPL-3.0-or-later')
 depends=('glibc' 'gcc-libs')
 provides=('display-tui')
+conflicts=('display-tui-bin' 'display-tui-git')
 makedepends=('cargo')
 options=('!lto')
 source=("${SRCVER}.tar.gz::${URL}/archive/refs/tags/v${SRCVER}.tar.gz")

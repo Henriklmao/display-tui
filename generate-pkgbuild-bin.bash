@@ -64,7 +64,7 @@ url="${URL}"
 license=('GPL-3.0-or-later')
 depends=('glibc' 'gcc-libs')
 provides=('display-tui')
-conflicts=('display-tui')
+conflicts=('display-tui' 'display-tui-git')
 options=('!strip' '!lto')
 source=(
   "${BIN_NAME}::${BIN_URL}"

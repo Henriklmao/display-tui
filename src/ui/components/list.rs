@@ -194,6 +194,28 @@ impl<'a> MonitorList<'a> {
             .collect()
     }
 
+    // The action-bar row the renderer actually reserves. `None` when the list
+    // is too short, so the mouse cannot aim at a row that was not drawn.
+    pub fn footer_rect(area: Rect, monitors: &[Monitor]) -> Option<Rect> {
+        let inner = Block::bordered().inner(area);
+        if inner.height == 0 {
+            return None;
+        }
+        let chunks = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(if has_duplicate_workspace(monitors) {
+                    1
+                } else {
+                    0
+                }),
+                Constraint::Length(1),
+            ])
+            .split(inner);
+        (chunks[2].height > 0).then_some(chunks[2])
+    }
+
     // The table column under a screen column, if any.
     pub fn column_at(area: Rect, x: u16) -> Option<ListColumn> {
         MonitorList::column_rects(area)
@@ -547,7 +569,7 @@ impl<'a> MonitorList<'a> {
             )
             .render(chunks[1], buf);
         }
-        ActionBar::render(area, buf, action_context, self.hover);
+        ActionBar::render_in(chunks[2], buf, action_context, self.hover, area.width);
     }
 }
 
@@ -1093,6 +1115,22 @@ mod tests {
             MonitorList::row_at(area, &monitors, 0, 6),
             None,
             "past the last monitor"
+        );
+    }
+
+    #[test]
+    fn a_too_short_list_reserves_no_footer_row() {
+        let mut monitors = test_monitors();
+        for monitor in &mut monitors {
+            monitor.workspace = Some(3); // forces the duplicate-warning row
+        }
+        assert!(
+            MonitorList::footer_rect(Rect::new(0, 0, 120, 3), &monitors).is_none(),
+            "the warning line wins when there is only one inner row"
+        );
+        assert!(
+            MonitorList::footer_rect(Rect::new(0, 0, 120, 8), &monitors).is_some(),
+            "a normal list reserves its footer"
         );
     }
 

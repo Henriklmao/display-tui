@@ -148,6 +148,12 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         return;
     }
 
+    // Footer clicks are resolved before the hover reset so the hit map matches
+    // the frame that was drawn, including a transient map-hover selection.
+    if is_left_click(event.kind) && footer_click(app, layout, point(event), now) {
+        return;
+    }
+
     // A button gesture takes the pointer off any hovered element; the next
     // motion event repopulates it.
     if matches!(
@@ -208,7 +214,42 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 // The footer buttons for the current frame. Pure, so the click and hover maps
 // always agree with what the renderer drew.
 fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
-    ActionBar::layout(layout.list, ActionBarContext::from_app(app))
+    MonitorList::footer_rect(layout.list, &app.monitors)
+        .map(|footer| {
+            ActionBar::layout_in(
+                footer,
+                ActionBarContext::from_app(app),
+                layout.list.width,
+            )
+        })
+        .unwrap_or_default()
+}
+
+// Handles a left click in the footer before the generic hover reset. Resolving
+// the bar first keeps the hit map aligned with the frame that was drawn, and
+// committing the hover selection makes the button act on the display it was
+// labelled for.
+fn footer_click(
+    app: &mut App,
+    layout: ScreenLayout,
+    point: (u16, u16),
+    now: Instant,
+) -> bool {
+    let bar = action_bar(app, layout);
+    if let Some(action) = bar.button_at(point) {
+        app.last_click = None;
+        // A click is a commit: keep the display the bar was drawn for.
+        app.hover_restore = None;
+        app.perform_action(action);
+        app.set_hover(None, point, now, false);
+        return true;
+    }
+    if bar.contains(point) {
+        app.last_click = None;
+        app.set_hover(None, point, now, false);
+        return true;
+    }
+    false
 }
 
 // Resolves the interactive element under `point`, honouring the same modal
@@ -327,20 +368,6 @@ fn clamp_selection(app: &mut App) {
 }
 
 fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now: Instant) {
-    // Footer buttons work even with no monitors (Save, Quit, Help) and always
-    // win over the rows behind them.
-    let bar = action_bar(app, layout);
-    if let Some(action) = bar.button_at(point) {
-        app.last_click = None;
-        app.perform_action(action);
-        return;
-    }
-    if bar.contains(point) {
-        // Empty space in the footer is not a display row.
-        app.last_click = None;
-        return;
-    }
-
     if app.monitors.is_empty() {
         return;
     }
@@ -1203,6 +1230,36 @@ mod tests {
             crate::ui::tooltip::text_for(HoverTarget::Action(ActionId::Save)),
             ActionId::Save.description()
         );
+    }
+
+    #[test]
+    fn a_footer_click_uses_the_bar_that_was_drawn() {
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 1920, 0, false)];
+        let mut a = app(TUIMode::View, monitors);
+        a.selected_monitor = 1; // committed selection: disabled B
+        let now = Instant::now();
+        // The pointer rests on enabled A; the footer was drawn for A.
+        a.set_hover(Some(HoverTarget::Map(0)), (10, 10), now, true);
+        assert_eq!(a.selected_monitor, 0);
+
+        let layout = a.layout.unwrap();
+        let bar = ActionBar::layout_in(
+            MonitorList::footer_rect(layout.list, &a.monitors).expect("footer"),
+            ActionBarContext::from_app(&a),
+            layout.list.width,
+        );
+        let toggle = bar
+            .buttons
+            .iter()
+            .find(|button| button.action == ActionId::ToggleEnabled)
+            .expect("toggle button");
+        // Click the last cell of the drawn Disable chip. Recomputing the bar
+        // after restoring B would shift it by one cell and miss.
+        down(&mut a, toggle.rect.right() - 1, toggle.rect.y);
+
+        assert!(!a.monitors[0].enabled, "the drawn display is disabled");
+        assert!(!a.monitors[1].enabled, "the committed display is untouched");
+        assert_eq!(a.selected_monitor, 0, "the click commits the hover");
     }
 
     #[test]

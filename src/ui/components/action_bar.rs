@@ -399,7 +399,8 @@ fn fit(items: &mut [ResolvedItem], available: usize) {
 }
 
 impl ActionBar {
-    // Lays the footer out for `area`; the renderer and the mouse use this.
+    // Lays the bar out from the list area. The renderer uses the exact footer
+    // row instead (see `layout_in`), so a warning line cannot be overwritten.
     pub fn layout(area: Rect, context: ActionBarContext) -> Self {
         let inner = Block::bordered().inner(area);
         if inner.width == 0 || inner.height == 0 {
@@ -412,8 +413,16 @@ impl ActionBar {
             width: inner.width,
             height: 1,
         };
+        ActionBar::layout_in(footer, context, area.width)
+    }
 
-        let mini = area.width < MINI_MODE_WIDTH;
+    // Lays the bar out in an explicit footer row.
+    pub fn layout_in(footer: Rect, context: ActionBarContext, list_width: u16) -> Self {
+        if footer.width == 0 || footer.height == 0 {
+            return ActionBar::default();
+        }
+
+        let mini = list_width < MINI_MODE_WIDTH;
         let mut resolved: Vec<ResolvedItem> = items(context, mini)
             .into_iter()
             .map(|item| ResolvedItem {
@@ -486,7 +495,7 @@ impl ActionBar {
         }
     }
 
-    // Draws the bar and highlights the hovered button.
+    // Draws the bar in the list area's last row.
     pub fn render(
         area: Rect,
         buf: &mut Buffer,
@@ -494,21 +503,37 @@ impl ActionBar {
         hover: Option<HoverTarget>,
     ) -> Self {
         let frame = ActionBar::layout(area, context);
-
-        for item in &frame.items {
-            let hovered = item
-                .action
-                .is_some_and(|action| hover == Some(HoverTarget::Action(action)));
-            if hovered {
-                let text = item.hover_label.clone().unwrap_or_default();
-                Paragraph::new(Line::from(text).style(styles::hover_style().reversed()))
-                    .render(item.rect, buf);
-            } else {
-                Paragraph::new(Line::from(item.spans.clone())).render(item.rect, buf);
-            }
-        }
-
+        paint(&frame, buf, hover);
         frame
+    }
+
+    // Draws the bar in an explicit footer row.
+    pub fn render_in(
+        footer: Rect,
+        buf: &mut Buffer,
+        context: ActionBarContext,
+        hover: Option<HoverTarget>,
+        list_width: u16,
+    ) -> Self {
+        let frame = ActionBar::layout_in(footer, context, list_width);
+        paint(&frame, buf, hover);
+        frame
+    }
+}
+
+// Paints every laid-out item, inverting the hovered button.
+fn paint(frame: &ActionBar, buf: &mut Buffer, hover: Option<HoverTarget>) {
+    for item in &frame.items {
+        let hovered = item
+            .action
+            .is_some_and(|action| hover == Some(HoverTarget::Action(action)));
+        if hovered {
+            let text = item.hover_label.clone().unwrap_or_default();
+            Paragraph::new(Line::from(text).style(styles::hover_style().reversed()))
+                .render(item.rect, buf);
+        } else {
+            Paragraph::new(Line::from(item.spans.clone())).render(item.rect, buf);
+        }
     }
 }
 
@@ -545,7 +570,6 @@ mod tests {
             let screen = area(width);
             let mut buf = Buffer::empty(screen);
             let frame = ActionBar::render(screen, &mut buf, context(TUIMode::View, false), None);
-            let text = labels(&frame, &buf);
 
             for button in &frame.buttons {
                 assert!(
@@ -553,11 +577,19 @@ mod tests {
                     "{} has no width at {width}",
                     button.action.label(true)
                 );
-                let label = button.action.label(true);
+                let drawn: String = (button.rect.x..button.rect.right())
+                    .map(|x| buf[(x, button.rect.y)].symbol())
+                    .collect();
                 assert!(
-                    text.contains(label) || text.contains(button.action.key_label(true)),
-                    "{} is not drawn: {text}",
-                    button.action.label(true)
+                    drawn.starts_with('[') && drawn.ends_with(']'),
+                    "{:?} is not a whole chip at {width}: {drawn:?}",
+                    button.action
+                );
+                assert!(
+                    drawn.contains(button.action.key_label(true))
+                        || drawn.contains(button.action.compact_key(true)),
+                    "{:?} does not show its key at {width}: {drawn:?}",
+                    button.action
                 );
             }
         }
@@ -565,29 +597,50 @@ mod tests {
 
     #[test]
     fn buttons_never_overlap_and_stay_inside_the_footer() {
-        for width in [20u16, 40, 60, 80, 100, 114, 115, 120, 130, 160, 240] {
-            let screen = area(width);
-            let frame = ActionBar::layout(screen, context(TUIMode::View, false));
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
+            for pending in [false, true] {
+                for width in [20u16, 40, 60, 80, 100, 114, 115, 120, 130, 160, 240] {
+                    let screen = area(width);
+                    let frame = ActionBar::layout(screen, context(mode, pending));
 
-            for button in &frame.buttons {
-                assert!(
-                    button.rect.x >= frame.area.x
-                        && button.rect.right() <= frame.area.right()
-                        && button.rect.y == frame.area.y
-                        && button.rect.height == 1,
-                    "{button:?} escapes {:?}",
-                    frame.area
-                );
-            }
-            for pair in frame.buttons.windows(2) {
-                assert!(
-                    pair[0].rect.right() <= pair[1].rect.x,
-                    "{:?} overlaps {:?}",
-                    pair[0],
-                    pair[1]
-                );
+                    for button in &frame.buttons {
+                        assert!(
+                            button.rect.x >= frame.area.x
+                                && button.rect.right() <= frame.area.right()
+                                && button.rect.y == frame.area.y
+                                && button.rect.height == 1,
+                            "{mode:?}/{pending} at {width}: {button:?} escapes {:?}",
+                            frame.area
+                        );
+                    }
+                    for pair in frame.buttons.windows(2) {
+                        assert!(
+                            pair[0].rect.right() <= pair[1].rect.x,
+                            "{mode:?}/{pending} at {width}: {:?} overlaps {:?}",
+                            pair[0],
+                            pair[1]
+                        );
+                    }
+                }
             }
         }
+    }
+
+    #[test]
+    fn an_absent_footer_row_draws_nothing() {
+        let frame = ActionBar::layout_in(
+            Rect::new(0, 0, 80, 0),
+            context(TUIMode::View, false),
+            80,
+        );
+
+        assert!(frame.buttons.is_empty());
+        assert!(!frame.contains((0, 0)));
     }
 
     #[test]

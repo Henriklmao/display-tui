@@ -98,16 +98,11 @@ fn list_chunks(inner: Rect, monitors: &[Monitor]) -> Vec<Rect> {
 // offset. Shared by row and cell hit-testing.
 fn row_window(area: Rect, monitors: &[Monitor], selected: usize) -> (u16, u16, usize) {
     let inner = Block::bordered().inner(area);
-    let reserved = if has_duplicate_workspace(monitors) {
-        2
-    } else {
-        1
-    };
-    let table_height = inner.height.saturating_sub(reserved);
+    let table = list_chunks(inner, monitors)[0];
     // The header row plus its bottom margin occupy two lines.
-    let viewport = table_height.saturating_sub(2);
+    let viewport = table.height.saturating_sub(2);
     let offset = scrolled_offset(selected, viewport as usize);
-    (inner.y.saturating_add(2), viewport, offset)
+    (table.y.saturating_add(2), viewport, offset)
 }
 
 // The columns of the display table, in draw order. Shared by rendering and

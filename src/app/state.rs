@@ -413,6 +413,24 @@ impl App {
         })
     }
 
+    // Whether a modal owns the screen. Tooltips must not float above one.
+    fn has_open_overlay(&self) -> bool {
+        self.show_help
+            || self.show_popup.is_some()
+            || self.show_preset_menu.is_some()
+            || self.workspace_picker.is_some()
+    }
+
+    // The tooltip the next frame should draw. Suppressed under any overlay, so
+    // a stale hover cannot surface over a modal opened from the keyboard.
+    fn tooltip_for_draw(&self, now: Instant) -> Option<crate::ui::tooltip::TooltipState> {
+        if self.has_open_overlay() {
+            None
+        } else {
+            self.tooltip_at(now)
+        }
+    }
+
     // Resolves the presets directory, honouring the injectable override.
     pub(crate) fn presets_dir(&self) -> std::path::PathBuf {
         self.presets_dir
@@ -605,7 +623,7 @@ impl App {
         // The tooltip is derived at draw time.
         let now = Instant::now();
         self.drop_unavailable_help_hover();
-        self.tooltip = self.tooltip_at(now);
+        self.tooltip = self.tooltip_for_draw(now);
         frame.render_widget(&*self, area);
     }
 
@@ -2676,6 +2694,66 @@ mod tests {
             "the scale change must validate immediately"
         );
         assert!(app.highlights.is_some());
+    }
+
+    #[test]
+    fn closing_a_popup_with_escape_clears_its_hover() {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.show_popup = Some(Popup {
+            title: " Error ".to_string(),
+            lines: vec!["boom".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        });
+        app.hover = Some(HoverTarget::Popup(PopupAction::Close));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.show_popup.is_none());
+        assert!(
+            app.hover.is_none(),
+            "the popup button hover must be cleared"
+        );
+        assert!(
+            app.tooltip_for_draw(Instant::now()).is_none(),
+            "no tooltip may outlive the popup"
+        );
+    }
+
+    #[test]
+    fn closing_the_preset_menu_with_escape_clears_its_hover() {
+        let mut app = App::new(None);
+        app.preset_backup = Some(vec![]);
+        app.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+        app.hover = Some(HoverTarget::PresetButton(PresetButtonAction::Close));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.show_preset_menu.is_none());
+        assert!(app.hover.is_none(), "the menu button hover must be cleared");
+        assert!(app.tooltip_for_draw(Instant::now()).is_none());
+    }
+
+    #[test]
+    fn a_tooltip_is_suppressed_under_an_open_overlay() {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.hover = Some(HoverTarget::ListRow(0));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+        let now = Instant::now();
+        assert!(app.tooltip_at(now).is_some(), "the hover is ready");
+
+        app.show_help = true;
+
+        assert!(
+            app.tooltip_for_draw(now).is_none(),
+            "an overlay must hide stale hover tooltips"
+        );
     }
 
     #[test]

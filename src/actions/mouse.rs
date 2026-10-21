@@ -23,6 +23,9 @@ pub const SNAP_THRESHOLD: f64 = 24.0;
 // Maximum gap between two clicks for them to count as a double-click.
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
 
+// Rows one wheel notch scrolls the help.
+const WHEEL_ROWS: i32 = 3;
+
 // Routes a mouse event to the component that owns the current view.
 pub fn handle_mouse(app: &mut App, event: MouseEvent) {
     handle_mouse_at(app, event, Instant::now());
@@ -56,12 +59,16 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         let over_help = inside(HelpModal::rect(layout.area), point(event));
         match event.kind {
             // The wheel scrolls the help when the pointer is over the modal.
-            MouseEventKind::ScrollUp if over_help => app.scroll_help(-1),
-            MouseEventKind::ScrollDown if over_help => app.scroll_help(1),
+            MouseEventKind::ScrollUp if over_help => app.scroll_help(-WHEEL_ROWS),
+            MouseEventKind::ScrollDown if over_help => app.scroll_help(WHEEL_ROWS),
             kind if is_left_click(kind) => {
                 // A modal-consumed click must not seed a later double-click.
                 app.last_click = None;
-                app.show_help = false;
+                // The scrollbar lane is a scroll affordance, not a dismiss
+                // button; a click there must not close the help by accident.
+                if !inside(HelpModal::scrollbar_lane(layout.area), point(event)) {
+                    app.close_help();
+                }
             }
             _ => {}
         }
@@ -644,11 +651,41 @@ mod tests {
         assert!(HelpModal::max_scroll(screen) > 0, "must be scrollable");
 
         wheel_down(&mut a, col, row);
-        assert_eq!(a.help_scroll, 1);
+        assert_eq!(a.help_scroll, 3, "one notch scrolls three rows");
         assert!(a.show_help, "the wheel must not dismiss the help");
 
         wheel_up(&mut a, col, row);
         assert_eq!(a.help_scroll, 0);
+    }
+
+    #[test]
+    fn a_click_on_the_help_scrollbar_does_not_dismiss_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let lane = HelpModal::scrollbar_lane(screen);
+        assert_eq!(lane.width, 1, "a bar is drawn at this size");
+
+        down(&mut a, lane.x, lane.y + 1);
+
+        assert!(a.show_help, "the scrollbar lane swallows the click");
+    }
+
+    #[test]
+    fn a_click_on_the_blank_lane_closes_when_no_scrollbar_is_drawn() {
+        let screen = Rect::new(0, 0, 120, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        assert_eq!(
+            HelpModal::scrollbar_lane(screen),
+            Rect::default(),
+            "no lane exists without a scrollbar"
+        );
+
+        let popup = HelpModal::rect(screen);
+        down(&mut a, popup.right() - 2, popup.y + 2);
+
+        assert!(!a.show_help, "the blank lane closes like any other click");
     }
 
     #[test]

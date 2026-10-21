@@ -235,6 +235,7 @@ mod tests {
             HoverTarget::ResolutionRow(0),
             HoverTarget::ScaleRow(0),
             HoverTarget::PresetRow(0),
+            HoverTarget::HelpClose,
             HoverTarget::Popup(PopupAction::Close),
             HoverTarget::Popup(PopupAction::Accept),
             HoverTarget::Popup(PopupAction::Force),

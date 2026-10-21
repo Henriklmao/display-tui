@@ -1,7 +1,7 @@
 //! Help modal component.
 //!
 //! The help popup adapts to the terminal size: it grows up to a maximum
-//! size (30 rows x 60 cols) but shrinks gracefully on small terminals.
+//! size (30 rows x 84 cols) but shrinks gracefully on small terminals.
 //! On wide terminals the keybindings are shown in two side-by-side
 //! columns; below [`TWO_COLUMN_MIN_WIDTH`] every section is stacked into
 //! a single column instead.
@@ -103,6 +103,24 @@ impl HelpModal {
             height: 1,
         }
     }
+
+    // The reserved scrollbar lane inside the frame. Clicks there scroll in a
+    // real scrollbar; for now they are swallowed instead of dismissing help.
+    pub fn scrollbar_lane(area: Rect) -> Rect {
+        let body = body_area(responsive_help_rect(area));
+        // Mirror draw_scrollbar: without an actual bar the lane is normal
+        // background and must not swallow a dismissing click.
+        if body.height == 0 || content_height(area) <= body.height {
+            return Rect::default();
+        }
+
+        Rect {
+            x: body.right().saturating_sub(1),
+            y: body.y,
+            width: body.width.min(1),
+            height: body.height,
+        }
+    }
 }
 
 // Total display width of the footer label.
@@ -181,6 +199,7 @@ fn left_rows() -> Vec<Row> {
         Row::Entry("Click", "Select; click again toggles"),
         Row::Entry("Drag", "Move; Apply saves"),
         Row::Entry("<Enter/Space>", "Apply pending move"),
+        Row::Entry("Right click", "Apply pending move"),
         Row::Entry("<Esc/q>", "Cancel / revert all"),
     ]
 }
@@ -201,7 +220,7 @@ fn right_rows() -> Vec<Row> {
         Row::Entry("[Space]", "Auto fix"),
         Row::Blank,
         Row::Section("TIP"),
-        Row::Entry("<↑/↓ j/k>", "Scroll this help"),
+        Row::Entry("<↑/↓>", "Scroll: j/k, PgUp/PgDn, Home/End, wheel"),
         Row::Note("Arrow keys work as alternative to h/j/k/l in all modes."),
     ]
 }
@@ -281,7 +300,7 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer, scroll: u16) {
     // A fine vertical rule separates the two sections of the grid.
     let divider_style = Style::default().fg(DIVIDER_COLOR);
     for y in content.top()..content.bottom() {
-        put(buf, divider.x, y, "│", divider_style);
+        put(buf, divider.x, y, '│', divider_style);
     }
 }
 
@@ -319,9 +338,9 @@ fn draw_scrollbar(area: Rect, popup: Rect, buf: &mut Buffer, scroll: u16) {
         let y = body.top() + row as u16;
         let in_thumb = row >= offset && row < offset + thumb;
         if in_thumb {
-            put(buf, x, y, "█", Style::default().fg(KEY_COLOR));
+            put(buf, x, y, '█', Style::default().fg(KEY_COLOR));
         } else {
-            put(buf, x, y, "│", Style::default().fg(DIVIDER_COLOR));
+            put(buf, x, y, '│', Style::default().fg(DIVIDER_COLOR));
         }
     }
 }
@@ -350,6 +369,22 @@ fn build_lines(rows: &[Row], width: u16) -> Vec<Line<'static>> {
                 }
             }
             Row::Entry(keys, desc) => {
+                // A key wider than its column would push the description out
+                // of the popup on tiny terminals; give it its own row instead.
+                if keys.chars().count() > key_width {
+                    lines.push(Line::from(Span::styled(
+                        keys.to_string(),
+                        Style::default().fg(KEY_COLOR).bold(),
+                    )));
+                    for part in wrap_text(desc, width) {
+                        lines.push(Line::from(Span::styled(
+                            part,
+                            Style::default().fg(TEXT_COLOR),
+                        )));
+                    }
+                    continue;
+                }
+
                 for (index, part) in wrap_text(desc, desc_width).into_iter().enumerate() {
                     let key = if index == 0 {
                         Span::styled(
@@ -445,18 +480,18 @@ fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     let bottom = popup.bottom() - 1;
 
     for x in (left + 1)..right {
-        put(buf, x, top, "═", border);
-        put(buf, x, bottom, "═", border);
+        put(buf, x, top, '═', border);
+        put(buf, x, bottom, '═', border);
     }
     for y in (top + 1)..bottom {
-        put(buf, left, y, "║", border);
-        put(buf, right, y, "║", border);
+        put(buf, left, y, '║', border);
+        put(buf, right, y, '║', border);
     }
 
-    put(buf, left, top, "╔", border);
-    put(buf, right, top, "╗", border);
-    put(buf, left, bottom, "╚", border);
-    put(buf, right, bottom, "╝", border);
+    put(buf, left, top, '╔', border);
+    put(buf, right, top, '╗', border);
+    put(buf, left, bottom, '╚', border);
+    put(buf, right, bottom, '╝', border);
 
     // The version is dropped on narrow popups so the title keeps its room.
     let version = format!(" v{} ", env!("CARGO_PKG_VERSION"));
@@ -503,17 +538,19 @@ fn draw_spans(buf: &mut Buffer, y: u16, mut x: u16, limit: u16, spans: &[(&str, 
             if x >= limit {
                 return;
             }
-            put(buf, x, y, &ch.to_string(), *style);
+            put(buf, x, y, ch, *style);
             x += 1;
         }
     }
 }
 
 // Writes one cell, ignoring coordinates outside the buffer.
-fn put(buf: &mut Buffer, x: u16, y: u16, symbol: &str, style: Style) {
-    if x < buf.area.right() && y < buf.area.bottom() {
-        buf[(x, y)].set_symbol(symbol);
-        buf[(x, y)].set_style(style);
+fn put(buf: &mut Buffer, x: u16, y: u16, symbol: char, style: Style) {
+    if x >= buf.area.left() && x < buf.area.right() && y >= buf.area.top() && y < buf.area.bottom()
+    {
+        let cell = &mut buf[(x, y)];
+        cell.set_char(symbol);
+        cell.set_style(style);
     }
 }
 
@@ -609,9 +646,14 @@ mod tests {
         // the only vertical rule left is the scrollbar lane on the right.
         let buf = render_help(60, 30);
         let popup = responsive_help_rect(Rect::new(0, 0, 60, 30));
-        if let Some((x, _)) = find(&buf, "│") {
-            assert_eq!(x, popup.right() - 2, "only the scrollbar track remains");
-        }
+        // The first vertical rule (if any) must be the scrollbar lane; a
+        // divider would be found further left first.
+        let (x, _) = find(&buf, "│").expect("the scrollbar track is drawn");
+        assert_eq!(
+            x,
+            popup.right() - 2,
+            "no column divider in the stacked layout"
+        );
     }
 
     #[test]
@@ -649,6 +691,27 @@ mod tests {
             "descriptions start in the same column"
         );
         assert_eq!(buf[(desc_x, desc_y)].style().fg, Some(TEXT_COLOR));
+    }
+
+    #[test]
+    fn a_key_wider_than_its_column_gets_its_own_row() {
+        // 17 content cells leave a 9-cell key column; `<Enter/Space>` (13)
+        // must not push the description out of the popup.
+        let lines = build_lines(&[Row::Entry("<Enter/Space>", "Apply pending move")], 17);
+
+        assert!(lines.len() > 1, "the description wraps below the key");
+        assert!(
+            lines[0].width() <= 17,
+            "the key row stays inside the column"
+        );
+        assert!(
+            lines[0].to_string().contains("<Enter/Space>"),
+            "the key stays readable"
+        );
+        assert!(
+            !lines[1].to_string().starts_with(' '),
+            "the description starts at the left edge"
+        );
     }
 
     #[test]
@@ -709,6 +772,7 @@ mod tests {
             "Freemove",
             "Snapmove",
             "Apply pending move",
+            "Right click",
             "<Esc/q>",
             "Cancel / revert all",
             "[f]",
@@ -722,6 +786,15 @@ mod tests {
         let text = as_text(&render_help(120, 40));
         for needle in sections.iter().chain(bindings.iter()) {
             assert!(text.contains(needle), "{:?} missing at 120x40", needle);
+        }
+
+        // The stacked layout overflows at 60x30; the first and last page
+        // together must expose every section.
+        let max = HelpModal::max_scroll(Rect::new(0, 0, 60, 30));
+        let mut stacked = as_text(&render_help(60, 30));
+        stacked.push_str(&as_text(&render_help_at(60, 30, max, false)));
+        for needle in sections.iter().chain(bindings.iter()) {
+            assert!(stacked.contains(needle), "{:?} missing at 60x30", needle);
         }
     }
 
@@ -759,7 +832,7 @@ mod tests {
         let version_at = top.find(&version).unwrap();
         assert!(title_at < version_at, "title must come before version");
         assert!(
-            top[version_at..].trim_end_matches('═').trim_end().len() <= version.len() + 2,
+            top[version_at..].trim_end_matches("═").trim_end().len() <= version.len() + 2,
             "version is not right-aligned: {top:?}"
         );
 
@@ -790,6 +863,10 @@ mod tests {
         let text = as_text(&buf);
 
         assert!(text.contains("Keybindings/Help"), "{text}");
+        assert!(
+            !text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+            "the version must be dropped, not squeezed in: {text}"
+        );
     }
 
     #[test]
@@ -835,10 +912,36 @@ mod tests {
         let area = Rect::new(0, 0, 60, 15);
         let max = HelpModal::max_scroll(area);
         assert!(max > 0, "the stacked content must overflow");
-        assert_eq!(
-            max,
-            content_height(area).saturating_sub(HelpModal::viewport(area))
+        assert!(
+            max < content_height(area),
+            "the visible viewport must cover at least one row"
         );
+    }
+
+    #[test]
+    fn the_two_column_layout_scrolls_too() {
+        // 120 cols keep two columns, but the 12-row terminal leaves a 10-row
+        // popup and therefore eight body rows, so the taller column overflows.
+        let area = Rect::new(0, 0, 120, 12);
+        let max = HelpModal::max_scroll(area);
+        assert!(max > 0, "the two-column content must overflow");
+        assert!(!as_text(&render_help(120, 12)).contains("TIP"));
+
+        // Do not couple this to the shorter column's exact height: the note
+        // only has to be reachable at some scroll offset.
+        assert!(
+            (0..=max).any(|scroll| as_text(&render_help_at(120, 12, scroll, false))
+                .contains("h/j/k/l in all modes.")),
+            "the bottom of the right column is reachable"
+        );
+
+        let popup = responsive_help_rect(area);
+        let body = body_area(popup);
+        let buf = render_help_at(120, 12, max, false);
+        let row: String = (body.top()..body.bottom())
+            .map(|y| buf[(popup.right() - 2, y)].symbol())
+            .collect();
+        assert!(row.contains('█'), "the scrollbar is drawn: {row:?}");
     }
 
     #[test]

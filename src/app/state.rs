@@ -535,9 +535,11 @@ impl App {
         if self.show_help {
             // The help is scrollable: `j`/`k`, the arrows and PgUp/PgDn move
             // through the content instead of acting on the list behind it.
-            // Closing is reserved for Esc, q and the K toggle.
+            // Closing is reserved for Esc, q/Q and the K toggle.
             match key_event.code {
-                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') => self.show_help = false,
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('K') => {
+                    self.close_help()
+                }
                 KeyCode::Up | KeyCode::Char('k') => self.scroll_help(-1),
                 KeyCode::Down | KeyCode::Char('j') => self.scroll_help(1),
                 KeyCode::PageUp => self.scroll_help(-(self.help_viewport() as i32)),
@@ -844,6 +846,8 @@ impl App {
             KeyCode::Char('K') if self.mode != TUIMode::Move => {
                 self.show_help = true;
                 self.help_scroll = 0;
+                // A list/map tooltip must not linger over the modal.
+                self.clear_hover();
             }
             _ => match self.mode {
                 TUIMode::View => {
@@ -906,6 +910,21 @@ impl App {
     pub(crate) fn scroll_help(&mut self, delta: i32) {
         let max = self.help_max_scroll() as i32;
         self.help_scroll = (self.help_scroll as i32 + delta).clamp(0, max) as u16;
+    }
+
+    // Drops the pointer state so a tooltip from behind the modal (or from the
+    // modal's own close button) cannot reappear after it is dismissed.
+    pub(crate) fn clear_hover(&mut self) {
+        let point = self.hover_point;
+        self.set_hover(None, point, Instant::now(), false);
+        self.hover_since = None;
+        self.tooltip = None;
+    }
+
+    // Closes the help modal and leaves no stale hover behind.
+    pub(crate) fn close_help(&mut self) {
+        self.show_help = false;
+        self.clear_hover();
     }
 
     // Snapshot the current monitor state so it can be restored if the
@@ -1411,7 +1430,12 @@ mod tests {
 
     #[test]
     fn help_still_closes_with_q_escape_or_the_toggle() {
-        for code in [KeyCode::Char('q'), KeyCode::Esc, KeyCode::Char('K')] {
+        for code in [
+            KeyCode::Char('q'),
+            KeyCode::Char('Q'),
+            KeyCode::Esc,
+            KeyCode::Char('K'),
+        ] {
             let mut app = help_app(60, 15);
             app.help_scroll = 3;
 
@@ -1419,6 +1443,73 @@ mod tests {
 
             assert!(!app.show_help, "{code:?} must close the help");
         }
+    }
+
+    #[test]
+    fn closing_the_help_clears_its_close_tooltip() {
+        let mut app = help_app(60, 15);
+        app.hover = Some(HoverTarget::HelpClose);
+        app.hover_point = (20, 10);
+        app.hover_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.hover.is_none(), "the help-close target is dropped");
+        assert!(
+            app.tooltip_at(Instant::now() + std::time::Duration::from_secs(10))
+                .is_none(),
+            "no stale tooltip is recomputed after closing"
+        );
+    }
+
+    #[test]
+    fn opening_the_help_drops_a_tooltip_from_behind_it() {
+        let mut app = help_app(60, 15);
+        app.show_help = false;
+        app.hover = Some(HoverTarget::ListRow(0));
+        app.hover_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+
+        assert!(app.show_help);
+        assert!(app.hover.is_none(), "the list hover is cleared");
+        assert!(
+            app.tooltip_at(Instant::now() + std::time::Duration::from_secs(10))
+                .is_none(),
+            "the list tooltip cannot cover the modal"
+        );
+    }
+
+    #[test]
+    fn opening_and_closing_the_help_restores_a_hovered_selection() {
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        let mut second = monitor();
+        second.name = "DP-2".to_string();
+        second.position = Some(Position { x: 1920, y: 0 });
+        let mut app = App::new(None);
+        app.monitors = vec![monitor(), second];
+        app.layout = Some(crate::ui::layouts::screen_layout(area, TUIMode::View));
+
+        let now = Instant::now();
+        app.set_hover(Some(HoverTarget::Map(1)), (10, 10), now, true);
+        assert_eq!(app.selected_monitor, 1, "hover selects the monitor");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+        assert!(app.show_help);
+        assert_eq!(
+            app.selected_monitor, 0,
+            "opening restores the committed row"
+        );
+        assert!(app.hover.is_none() && app.hover_restore.is_none());
+
+        app.set_hover(Some(HoverTarget::Map(1)), (10, 10), now, true);
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.show_help);
+        assert_eq!(
+            app.selected_monitor, 0,
+            "closing restores the committed row"
+        );
+        assert!(app.hover.is_none() && app.hover_restore.is_none());
     }
 
     #[test]

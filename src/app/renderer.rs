@@ -69,6 +69,7 @@ impl Widget for &App {
                 buf,
                 self.help_scroll,
                 self.hover == Some(HoverTarget::HelpClose),
+                self.hover == Some(HoverTarget::HelpScrollbar),
             );
         }
 

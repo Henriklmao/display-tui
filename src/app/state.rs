@@ -31,6 +31,8 @@ pub struct App {
     pub show_help: bool,
     // First visible content row of the help modal; reset when it opens.
     pub help_scroll: u16,
+    // An in-progress drag of the help scrollbar, if any.
+    pub help_scroll_drag: Option<HelpScrollbarDrag>,
     pub show_popup: Option<Popup>,
     pub show_preset_menu: Option<PresetMenu>,
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
@@ -91,6 +93,13 @@ pub struct DragState {
     pub was_pending: bool,
 }
 
+// An in-progress drag of the help scrollbar: the row offset below the thumb's
+// top edge where the pointer grabbed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpScrollbarDrag {
+    pub grab: u16,
+}
+
 // An interactive element the pointer can rest on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoverTarget {
@@ -110,6 +119,8 @@ pub enum HoverTarget {
     Popup(PopupAction),
     // The close button embedded in the help modal's footer.
     HelpClose,
+    // The draggable scrollbar inside the help modal.
+    HelpScrollbar,
 }
 
 // How long one blink phase stays on screen.
@@ -250,8 +261,8 @@ impl App {
 
     // Time until the next animation deadline. `None` means nothing animates, so
     // the event loop blocks until real input (zero idle cost). Only validation
-    // errors animate; hover is a steady glow, but the tooltip dwell still needs
-    // a wake-up so it appears without any further input.
+    // errors animate; hover is a steady recolour, but the tooltip dwell still
+    // needs a wake-up so it appears without any further input.
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
         let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
         match (blink, self.tooltip_deadline_at(now)) {
@@ -259,6 +270,24 @@ impl App {
             (Some(a), None) => Some(a),
             (None, Some(b)) => Some(b),
             (None, None) => None,
+        }
+    }
+
+    // Whether the current layout still draws a help scrollbar.
+    fn help_scrollbar_available(&self) -> bool {
+        self.layout
+            .is_some_and(|layout| HelpModal::scrollbar_lane(layout.area).width > 0)
+    }
+
+    // A resize can remove the scrollbar under a resting pointer; drop the
+    // hover so a stale tooltip does not survive while there is nothing to hover.
+    fn drop_unavailable_help_hover(&mut self) {
+        if self.show_help
+            && self.hover == Some(HoverTarget::HelpScrollbar)
+            && !self.help_scrollbar_available()
+        {
+            self.hover = None;
+            self.hover_since = None;
         }
     }
 
@@ -509,8 +538,10 @@ impl App {
         let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
         layout.popup = self.show_popup.as_ref().map(|popup| popup.layout(area));
         self.layout = Some(layout);
-        // The tooltip is derived from the dwell time at draw time.
-        self.tooltip = self.tooltip_at(Instant::now());
+        // The tooltip is derived at draw time.
+        let now = Instant::now();
+        self.drop_unavailable_help_hover();
+        self.tooltip = self.tooltip_at(now);
         frame.render_widget(&*self, area);
     }
 
@@ -846,6 +877,7 @@ impl App {
             KeyCode::Char('K') if self.mode != TUIMode::Move => {
                 self.show_help = true;
                 self.help_scroll = 0;
+                self.help_scroll_drag = None;
                 // A list/map tooltip must not linger over the modal.
                 self.clear_hover();
             }
@@ -924,6 +956,7 @@ impl App {
     // Closes the help modal and leaves no stale hover behind.
     pub(crate) fn close_help(&mut self) {
         self.show_help = false;
+        self.help_scroll_drag = None;
         self.clear_hover();
     }
 
@@ -1443,6 +1476,26 @@ mod tests {
 
             assert!(!app.show_help, "{code:?} must close the help");
         }
+    }
+
+    #[test]
+    fn a_stale_scrollbar_hover_is_dropped_when_no_bar_exists() {
+        // 120x40 fits all content: the scrollbar lane is empty.
+        let mut app = help_app(120, 40);
+        let t0 = Instant::now();
+        app.hover = Some(HoverTarget::HelpScrollbar);
+        app.hover_since = Some(t0);
+
+        // Only the tooltip dwell remains armed; hover itself never animates.
+        let deadline = app.next_deadline_at(t0).expect("the tooltip still runs");
+        assert!(
+            deadline >= Duration::from_secs(1),
+            "no short redraw loop without a bar: {deadline:?}"
+        );
+
+        app.drop_unavailable_help_hover();
+        assert!(app.hover.is_none(), "the stale target is dropped");
+        assert!(app.hover_since.is_none());
     }
 
     #[test]

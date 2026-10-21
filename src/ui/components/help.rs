@@ -48,10 +48,20 @@ const TEXT_COLOR: Color = Color::White;
 const MUTED_COLOR: Color = Color::Gray;
 const DIVIDER_COLOR: Color = Color::DarkGray;
 
+// The scrollbar colours: steady, with a plain recolour on hover.
+const SCROLLBAR_IDLE: Color = KEY_COLOR;
+const SCROLLBAR_HOVERED: Color = Color::White;
+
 impl HelpModal {
     // `scroll` is the first visible content row; `close_hovered` highlights the
     // embedded close button while the pointer rests on it.
-    pub fn render(area: Rect, buf: &mut Buffer, scroll: u16, close_hovered: bool) {
+    pub fn render(
+        area: Rect,
+        buf: &mut Buffer,
+        scroll: u16,
+        close_hovered: bool,
+        scrollbar_hovered: bool,
+    ) {
         let popup_area = responsive_help_rect(area);
         let scroll = scroll.min(max_scroll(area));
 
@@ -63,7 +73,7 @@ impl HelpModal {
             render_stacked(popup_area, buf, scroll);
         }
 
-        draw_scrollbar(area, popup_area, buf, scroll);
+        draw_scrollbar(area, popup_area, buf, scroll, scrollbar_hovered);
         // The frame is drawn last so the content never overwrites a border.
         draw_frame(popup_area, buf, close_hovered);
     }
@@ -103,8 +113,7 @@ impl HelpModal {
         }
     }
 
-    // The reserved scrollbar lane inside the frame. Clicks there scroll in a
-    // real scrollbar; for now they are swallowed instead of dismissing help.
+    // The reserved scrollbar lane inside the frame.
     pub fn scrollbar_lane(area: Rect) -> Rect {
         let body = body_area(responsive_help_rect(area));
         // Mirror draw_scrollbar: without an actual bar the lane is normal
@@ -120,6 +129,78 @@ impl HelpModal {
             height: body.height,
         }
     }
+
+    // Maps a click on the scrollbar to a scroll delta. Clicking the track
+    // pages towards the pointer; clicking the thumb itself does nothing.
+    pub fn scrollbar_click(area: Rect, scroll: u16, row: u16) -> Option<i32> {
+        let popup = responsive_help_rect(area);
+        let (body, offset, thumb) = scrollbar_geometry(area, popup, scroll)?;
+        if row < body.top() || row >= body.bottom() {
+            return None;
+        }
+
+        let clicked = (row - body.top()) as usize;
+        if clicked < offset {
+            Some(-(body.height as i32))
+        } else if clicked >= offset + thumb {
+            Some(body.height as i32)
+        } else {
+            Some(0)
+        }
+    }
+
+    // The drawn thumb rect, used to decide whether a press starts a drag.
+    pub fn scrollbar_thumb(area: Rect, scroll: u16) -> Option<Rect> {
+        let popup = responsive_help_rect(area);
+        let (body, offset, thumb) = scrollbar_geometry(area, popup, scroll)?;
+        Some(Rect {
+            x: body.right().saturating_sub(1),
+            y: body.top() + offset as u16,
+            width: body.width.min(1),
+            height: thumb as u16,
+        })
+    }
+
+    // Scroll offset for dragging the thumb to `row`. `grab` is how many rows
+    // below the thumb's top edge the pointer grabbed it, so the thumb follows
+    // without jumping under the cursor.
+    pub fn scrollbar_drag_scroll(area: Rect, row: u16, grab: u16) -> Option<u16> {
+        let popup = responsive_help_rect(area);
+        let (body, _, thumb) = scrollbar_geometry(area, popup, 0)?;
+        let height = body.height as usize;
+        let total = content_height(area) as usize;
+        let max = total - height;
+        let track = height - thumb;
+        if track == 0 {
+            // A thumb that fills the track cannot move; keep the offset.
+            return None;
+        }
+
+        let row = row.clamp(body.top(), body.bottom() - 1);
+        let clicked = (row - body.top()) as usize;
+        let top = clicked.saturating_sub(grab as usize).min(track);
+        Some(((top * max + track / 2) / track) as u16)
+    }
+}
+
+// Body rect, thumb offset and thumb length of the scrollbar, or `None` when
+// the content fits and no bar is drawn.
+fn scrollbar_geometry(area: Rect, popup: Rect, scroll: u16) -> Option<(Rect, usize, usize)> {
+    let body = body_area(popup);
+    let total = content_height(area) as usize;
+    let height = body.height as usize;
+    if height == 0 || total <= height {
+        return None;
+    }
+
+    let thumb = ((height * height).div_ceil(total)).clamp(1, height);
+    let max = total - height;
+    // `render` clamps the offset locally, but a click can arrive with a stale
+    // App::help_scroll after a resize. Clamp here so the hit map always matches
+    // the thumb that was actually drawn.
+    let scroll = (scroll as usize).min(max);
+    let offset = (scroll * (height - thumb) + max / 2) / max;
+    Some((body, offset, thumb))
 }
 
 // Total display width of the footer label.
@@ -320,26 +401,26 @@ fn render_stacked(popup_area: Rect, buf: &mut Buffer, scroll: u16) {
 }
 
 // Draws a proportional scrollbar in the reserved lane on the right edge.
-fn draw_scrollbar(area: Rect, popup: Rect, buf: &mut Buffer, scroll: u16) {
-    let body = body_area(popup);
-    let total = content_height(area) as usize;
-    let height = body.height as usize;
-    if height == 0 || total <= height {
+fn draw_scrollbar(area: Rect, popup: Rect, buf: &mut Buffer, scroll: u16, hovered: bool) {
+    let Some((body, offset, thumb)) = scrollbar_geometry(area, popup, scroll) else {
         return;
-    }
-
-    let thumb = ((height * height).div_ceil(total)).clamp(1, height);
-    let max = total - height;
-    let offset = ((scroll as usize) * (height - thumb) + max / 2) / max;
+    };
+    let height = body.height as usize;
     let x = body.right() - 1;
+    let thumb_color = if hovered {
+        SCROLLBAR_HOVERED
+    } else {
+        SCROLLBAR_IDLE
+    };
+    let track_color = if hovered { Color::Gray } else { DIVIDER_COLOR };
 
     for row in 0..height {
         let y = body.top() + row as u16;
         let in_thumb = row >= offset && row < offset + thumb;
         if in_thumb {
-            put(buf, x, y, '█', Style::default().fg(KEY_COLOR));
+            put(buf, x, y, '█', Style::default().fg(thumb_color));
         } else {
-            put(buf, x, y, '│', Style::default().fg(DIVIDER_COLOR));
+            put(buf, x, y, '│', Style::default().fg(track_color));
         }
     }
 }
@@ -563,10 +644,18 @@ mod tests {
         render_help_at(width, height, 0, close_hovered)
     }
 
+    fn render_help_with_scrollbar_hovered(width: u16, height: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|f| HelpModal::render(f.area(), f.buffer_mut(), 0, false, true))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
     fn render_help_at(width: u16, height: u16, scroll: u16, close_hovered: bool) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
-            .draw(|f| HelpModal::render(f.area(), f.buffer_mut(), scroll, close_hovered))
+            .draw(|f| HelpModal::render(f.area(), f.buffer_mut(), scroll, close_hovered, false))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -1041,6 +1130,111 @@ mod tests {
     }
 
     #[test]
+    fn the_scrollbar_thumb_rect_matches_the_drawn_cells() {
+        let area = Rect::new(0, 0, 60, 15);
+        let popup = responsive_help_rect(area);
+        let body = body_area(popup);
+        let buf = render_help(60, 15);
+        let thumb = HelpModal::scrollbar_thumb(area, 0).expect("thumb");
+
+        for y in body.top()..body.bottom() {
+            let drawn = buf[(popup.right() - 2, y)].symbol() == "█";
+            let expected = y >= thumb.top() && y < thumb.bottom();
+            assert_eq!(drawn, expected, "row {y} thumb mismatch");
+        }
+    }
+
+    #[test]
+    fn dragging_maps_the_thumb_to_the_track_ends() {
+        let area = Rect::new(0, 0, 60, 15);
+        let body = body_area(responsive_help_rect(area));
+        let max = HelpModal::max_scroll(area);
+
+        assert_eq!(
+            HelpModal::scrollbar_drag_scroll(area, body.top(), 0),
+            Some(0)
+        );
+        assert_eq!(
+            HelpModal::scrollbar_drag_scroll(area, body.bottom() - 1, 0),
+            Some(max)
+        );
+
+        let middle = HelpModal::scrollbar_drag_scroll(area, body.top() + body.height / 2, 0)
+            .expect("mid-track drag");
+        assert!(
+            middle > 0 && middle < max,
+            "mid-track maps inside: {middle}"
+        );
+    }
+
+    #[test]
+    fn a_full_height_thumb_cannot_be_dragged() {
+        let mut found = false;
+        for height in 2..=40 {
+            let area = Rect::new(0, 0, 120, height);
+            if HelpModal::max_scroll(area) == 0 {
+                continue;
+            }
+            let body = body_area(responsive_help_rect(area));
+            let Some(thumb) = HelpModal::scrollbar_thumb(area, 0) else {
+                continue;
+            };
+            if thumb.height != body.height {
+                continue;
+            }
+
+            found = true;
+            assert_eq!(
+                HelpModal::scrollbar_drag_scroll(area, body.top(), 0),
+                None,
+                "a thumb with no travel keeps the offset at {height} rows"
+            );
+            assert_eq!(
+                HelpModal::scrollbar_drag_scroll(area, body.bottom() - 1, 0),
+                None
+            );
+        }
+        assert!(
+            found,
+            "some terminal height must produce a full-height thumb"
+        );
+    }
+
+    #[test]
+    fn a_stale_scroll_offset_clamps_the_thumb() {
+        let area = Rect::new(0, 0, 60, 15);
+        let max = HelpModal::max_scroll(area);
+
+        assert_eq!(
+            HelpModal::scrollbar_thumb(area, max + 5),
+            HelpModal::scrollbar_thumb(area, max)
+        );
+    }
+
+    #[test]
+    fn hovering_the_scrollbar_recolours_the_thumb_and_track() {
+        let area = Rect::new(0, 0, 60, 15);
+        let thumb = HelpModal::scrollbar_thumb(area, 0).expect("thumb");
+        let idle = render_help(60, 15);
+        let hovered = render_help_with_scrollbar_hovered(60, 15);
+
+        assert_eq!(idle[(thumb.x, thumb.y)].style().fg, Some(SCROLLBAR_IDLE));
+        assert_eq!(
+            hovered[(thumb.x, thumb.y)].style().fg,
+            Some(SCROLLBAR_HOVERED)
+        );
+        assert_eq!(
+            hovered[(thumb.x, thumb.bottom())].style().fg,
+            Some(Color::Gray),
+            "the track recolours while hovered"
+        );
+        assert_eq!(
+            idle[(thumb.x, thumb.bottom())].style().fg,
+            Some(DIVIDER_COLOR)
+        );
+    }
+
+    #[test]
     fn the_close_button_rect_covers_the_drawn_label() {
         let area = Rect::new(0, 0, 120, 40);
         let buf = render_help(120, 40);
@@ -1136,7 +1330,7 @@ mod tests {
             }
         }
 
-        HelpModal::render(area, &mut buf, 0, false);
+        HelpModal::render(area, &mut buf, 0, false, false);
 
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {

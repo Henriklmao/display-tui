@@ -979,20 +979,43 @@ impl App {
         }
 
         // A displaced monitor (dragging or released) is a confirm state in View:
-        // only Apply and Cancel/Revert act, so nothing else can change or persist
-        // the layout under an unconfirmed move. Enter/Space apply even while the
-        // button is still held; in the sub-modes the move keeps its record but
-        // those keys apply the highlighted value instead.
-        if self.mode == TUIMode::View && self.has_pending_move() {
-            match key_event.code {
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    self.apply_move();
+        // Apply and Cancel/Revert still act, and every movement key keeps
+        // nudging the layout so a mouse drag can be finished with the keyboard.
+        // An armed drag that has not displaced anything yet also takes movement
+        // keys; every other key keeps its normal meaning until the mouse moves
+        // the display. Nothing but the movement keys can change the layout under
+        // an unconfirmed move. Enter/Space apply even while the button is still
+        // held; in the sub-modes the move keeps its record but those keys apply
+        // the highlighted value instead.
+        if self.mode == TUIMode::View && (self.has_pending_move() || self.drag.is_some()) {
+            let origin = self.selected_position();
+            if Map::handle_movement(self, key_event) {
+                // A key that changed nothing (e.g. there is no snap target in
+                // that direction) must not create a phantom pending move or end
+                // a held gesture.
+                if let (Some(origin), Some(moved)) = (origin, self.selected_position())
+                    && moved != origin
+                {
+                    // The keyboard takes over the gesture: a held drag must not
+                    // yank the monitor back to its old grab point on the next
+                    // mouse motion. The pre-nudge position is the revert target;
+                    // monitors already pending keep their original one.
                     self.drag = None;
+                    self.note_move(self.selected_monitor, origin);
                 }
-                KeyCode::Esc | KeyCode::Char('q') => self.cancel_move(),
-                _ => {}
+                return;
             }
-            return;
+            if self.has_pending_move() {
+                match key_event.code {
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        self.apply_move();
+                        self.drag = None;
+                    }
+                    KeyCode::Esc | KeyCode::Char('q') => self.cancel_move(),
+                    _ => {}
+                }
+                return;
+            }
         }
 
         match key_event.code {
@@ -1210,6 +1233,14 @@ impl App {
     // revert target, and every pending monitor shows its own Apply button.
     pub(crate) fn note_move(&mut self, index: usize, origin: (i32, i32)) {
         self.move_origins.entry(index).or_insert(origin);
+    }
+
+    // The current position of the selected monitor, if it has one.
+    fn selected_position(&self) -> Option<(i32, i32)> {
+        self.monitors
+            .get(self.selected_monitor)
+            .and_then(|monitor| monitor.position.as_ref())
+            .map(|position| (position.x, position.y))
     }
 
     // Drops a monitor's move record without touching its position. Used when the
@@ -1784,18 +1815,212 @@ mod tests {
             KeyCode::Char('m'),
             KeyCode::Char('r'),
             KeyCode::Char('o'),
-            KeyCode::Char('K'),
         ] {
             app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
         }
 
         assert_eq!(app.mode, TUIMode::View, "no sub-mode is entered");
-        assert!(!app.show_help, "the help modal is not opened");
         assert!(app.monitors[0].enabled, "the monitor is not disabled");
         assert!(
             app.move_origins.contains_key(&0),
             "the move is still the only pending action"
         );
+    }
+
+    #[test]
+    fn movement_keys_keep_nudging_a_pending_move() {
+        // A mouse drag leaves the layout in the confirm state; the keyboard
+        // must still be able to nudge it before Enter/Esc decide.
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+
+        for (code, modifiers) in [
+            (KeyCode::Char('L'), KeyModifiers::NONE),
+            (KeyCode::Char('J'), KeyModifiers::NONE),
+            (KeyCode::Right, KeyModifiers::SHIFT),
+            (KeyCode::Down, KeyModifiers::SHIFT),
+        ] {
+            app.handle_key_event(KeyEvent::new(code, modifiers));
+        }
+
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 270, y: 160 }),
+            "h/j/k/l and shift+arrows move the pending monitor"
+        );
+        assert_eq!(
+            app.move_origins.get(&0),
+            Some(&(100, 100)),
+            "the original revert target survives the nudge"
+        );
+        assert_eq!(app.mode, TUIMode::View, "the confirm state stays put");
+    }
+
+    #[test]
+    fn a_keyboard_nudge_ends_a_held_drag() {
+        let mut app = app_mid_drag((250, 140), (250, 140), false);
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+
+        assert!(
+            app.drag.is_none(),
+            "the keyboard takes over the mouse gesture"
+        );
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 260, y: 140 }),
+            "the nudge still applies"
+        );
+        assert_eq!(
+            app.move_origins.get(&0),
+            Some(&(250, 140)),
+            "the drag origin stays the revert target"
+        );
+    }
+
+    #[test]
+    fn a_nudge_without_movement_does_not_create_a_pending_move() {
+        // B sits to the right of A, so snapping further right finds no target:
+        // the key is consumed but nothing moves and B must not gain an Apply
+        // button (or steal the single-move auto-fix preference).
+        let mut a = monitor();
+        a.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 1920, y: 0 });
+        b.modes = a.modes.clone();
+        let mut app = app_with(vec![a, b]);
+        app.note_move(0, (10, 10));
+        app.selected_monitor = 1;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 0 }),
+            "there is nothing to snap onto"
+        );
+        assert!(
+            !app.move_origins.contains_key(&1),
+            "an unchanged monitor must not become pending"
+        );
+        assert!(app.move_origins.contains_key(&0));
+    }
+
+    #[test]
+    fn enter_applies_a_keyboard_nudged_move() {
+        let dir = TempDir::new("app-apply-nudge");
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 260, y: 140 }));
+        assert!(app.move_origins.is_empty(), "the nudge was applied");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "Apply persists the nudged layout"
+        );
+    }
+
+    #[test]
+    fn a_movement_key_nudges_an_armed_drag_before_it_moves() {
+        // Pressing the button without dragging yet is not a confirm state, but
+        // a movement key must already steer the display instead of scrolling
+        // the list behind the same gesture.
+        let mut app = app_mid_drag((250, 140), (250, 140), false);
+        app.move_origins.clear();
+        assert!(app.drag.is_some(), "the button is still held");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 260, y: 140 }));
+        assert!(app.drag.is_none(), "the nudge takes over the gesture");
+        assert_eq!(
+            app.move_origins.get(&0),
+            Some(&(250, 140)),
+            "the pre-nudge position is the revert target"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_nudge_keeps_the_active_preset_marker() {
+        let dir = TempDir::new("app-preset-nudge");
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.presets_dir = Some(dir.path().to_path_buf());
+        app.active_preset = Some("desk".to_string());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!app.has_pending_move());
+        assert_eq!(
+            app.active_preset.as_deref(),
+            Some("desk"),
+            "reverting the nudge restores the preset's layout"
+        );
+
+        // Committing the nudge runs the preset check, which drops the marker
+        // (the injected dir holds no such preset).
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.presets_dir = Some(dir.path().to_path_buf());
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        app.active_preset = Some("desk".to_string());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.active_preset.is_none());
+    }
+
+    #[test]
+    fn snapping_movement_is_available_for_a_pending_move() {
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 0, y: 0 }),
+            "the lowercase keys snap to the origin like in Move mode"
+        );
+        assert!(app.move_origins.contains_key(&0));
+    }
+
+    #[test]
+    fn a_nudged_monitor_joins_the_pending_moves_for_cancel() {
+        let mut a = monitor();
+        a.position = Some(Position { x: 10, y: 20 });
+        a.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 900, y: 0 });
+        b.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut app = app_with(vec![a, b]);
+        app.note_move(0, (1, 2));
+        app.selected_monitor = 1;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[1].position, Some(Position { x: 900, y: -10 }));
+        assert_eq!(
+            app.move_origins.get(&1),
+            Some(&(900, 0)),
+            "the nudged monitor records its own pre-nudge position"
+        );
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 1, y: 2 }));
+        assert_eq!(app.monitors[1].position, Some(Position { x: 900, y: 0 }));
+        assert!(app.move_origins.is_empty());
     }
 
     #[test]

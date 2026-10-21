@@ -2089,6 +2089,40 @@ mod tests {
     }
 
     #[test]
+    fn a_released_drag_can_still_be_nudged_with_the_keyboard() {
+        // The drag leaves View in its confirm state; arrows/hjkl must keep
+        // working before the user applies or reverts the move.
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app(TUIMode::View, monitors);
+        let (col, row) = cell_for_monitor(&a, 1);
+        down(&mut a, col, row);
+        drag(&mut a, col + 6, row);
+        up(&mut a, col + 6, row);
+        let dragged = pos(&a.monitors[1]);
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+
+        assert_eq!(
+            pos(&a.monitors[1]),
+            (dragged.0 + 10, dragged.1),
+            "L fast-moves the pending monitor"
+        );
+        assert_eq!(
+            a.move_origins.get(&1),
+            Some(&(3000, 1000)),
+            "the drag's revert target is kept"
+        );
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(
+            pos(&a.monitors[1]),
+            (3000, 1000),
+            "Esc reverts drag and keyboard nudge together"
+        );
+    }
+
+    #[test]
     fn dragging_moves_the_monitor_in_any_mode() {
         for mode in [TUIMode::View, TUIMode::Move, TUIMode::Resolution] {
             let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];

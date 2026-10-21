@@ -25,7 +25,7 @@ Thanks for your work, you are the biggest contributor to this project!
 - preset management: save, load, apply, rename, and delete monitor layout presets with live preview
 - CLI interface for headless preset loading, listing, and quick preset menu access
 - quick-access help modal for keybinds (press `K` in View mode)
-- mouse support: clickable keybind buttons in the footer and preset menu, click to select displays/resolutions/scales/presets, click resolution/scale/rotation/workspace cells to act on them directly, drag monitors with live snapping and an Apply button, right-click a moved monitor or double-click a resolution/scale row to apply, and scroll the focused list
+- mouse support: clickable keybind buttons in the footer and preset menu, click to select displays/resolutions/scales/presets, click resolution/scale/rotation/workspace cells to act on them directly, drag monitors with live snapping and an Apply button (arrow keys or `h`/`j`/`k`/`l` keep nudging the unconfirmed move; `H`/`J`/`K`/`L` fast-move), right-click a moved monitor or double-click a resolution/scale row to apply, and scroll the focused list
 
 ## Requirements
 

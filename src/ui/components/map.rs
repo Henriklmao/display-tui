@@ -78,6 +78,39 @@ fn draw_highlight_segment(
     }
 }
 
+// A movement key resolved to the action it performs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Movement {
+    SnapHorizontal(i32),
+    SnapVertical(i32),
+    FreeHorizontal(i32),
+    FreeVertical(i32),
+}
+
+// Resolves a key to a movement action. Arrow keys snap unless Shift is held;
+// the lowercase letters always snap and the capitals always fast-move.
+fn movement_key(code: KeyCode, shift: bool) -> Option<Movement> {
+    Some(match code {
+        KeyCode::Char('h') => Movement::SnapHorizontal(-1),
+        KeyCode::Char('H') => Movement::FreeHorizontal(-10),
+        KeyCode::Left if shift => Movement::FreeHorizontal(-10),
+        KeyCode::Left => Movement::SnapHorizontal(-1),
+        KeyCode::Char('l') => Movement::SnapHorizontal(1),
+        KeyCode::Char('L') => Movement::FreeHorizontal(10),
+        KeyCode::Right if shift => Movement::FreeHorizontal(10),
+        KeyCode::Right => Movement::SnapHorizontal(1),
+        KeyCode::Char('k') => Movement::SnapVertical(-1),
+        KeyCode::Char('K') => Movement::FreeVertical(-10),
+        KeyCode::Up if shift => Movement::FreeVertical(-10),
+        KeyCode::Up => Movement::SnapVertical(-1),
+        KeyCode::Char('j') => Movement::SnapVertical(1),
+        KeyCode::Char('J') => Movement::FreeVertical(10),
+        KeyCode::Down if shift => Movement::FreeVertical(10),
+        KeyCode::Down => Movement::SnapVertical(1),
+        _ => return None,
+    })
+}
+
 impl<'a> Widget for Map<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let monitor_canvas = self
@@ -224,55 +257,57 @@ impl<'a> Map<'a> {
     }
 
     pub fn handle_events(app: &mut App, key_event: KeyEvent) {
-        let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
-        let selected = app.selected_monitor;
+        if Map::handle_movement(app, key_event) {
+            return;
+        }
+
+        // Esc/Enter/q leave the mode; q no longer quits from Move mode.
         match key_event.code {
-            KeyCode::Char('k') => movement::snap_vertical(&mut app.monitors, selected, -1),
-            KeyCode::Char('K') => movement::move_vertical(&mut app.monitors[selected], -10),
-            KeyCode::Up => {
-                if is_shift {
-                    movement::move_vertical(&mut app.monitors[selected], -10)
-                } else {
-                    movement::snap_vertical(&mut app.monitors, selected, -1)
-                }
-            }
-
-            KeyCode::Char('j') => movement::snap_vertical(&mut app.monitors, selected, 1),
-            KeyCode::Char('J') => movement::move_vertical(&mut app.monitors[selected], 10),
-            KeyCode::Down => {
-                if is_shift {
-                    movement::move_vertical(&mut app.monitors[selected], 10)
-                } else {
-                    movement::snap_vertical(&mut app.monitors, selected, 1)
-                }
-            }
-
-            KeyCode::Char('h') => movement::snap_horizontal(&mut app.monitors, selected, -1),
-            KeyCode::Char('H') => movement::move_horizontal(&mut app.monitors[selected], -10),
-            KeyCode::Left => {
-                if is_shift {
-                    movement::move_horizontal(&mut app.monitors[selected], -10)
-                } else {
-                    movement::snap_horizontal(&mut app.monitors, selected, -1)
-                }
-            }
-
-            KeyCode::Char('l') => movement::snap_horizontal(&mut app.monitors, selected, 1),
-            KeyCode::Char('L') => movement::move_horizontal(&mut app.monitors[selected], 10),
-            KeyCode::Right => {
-                if is_shift {
-                    movement::move_horizontal(&mut app.monitors[selected], 10)
-                } else {
-                    movement::snap_horizontal(&mut app.monitors, selected, 1)
-                }
-            }
-
-            // Esc/Enter/q leave the mode; q no longer quits from Move mode.
             KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('Q') => {
                 crate::utils::change_mode(app, TUIMode::View)
             }
             _ => {}
         }
+    }
+
+    // Moves the selected monitor and reports whether the key was a movement
+    // key. Shared by Move mode and the pending-move confirm state in View, so a
+    // mouse drag can still be nudged with the keyboard while Enter/Esc keep
+    // their apply/revert meaning.
+    pub fn handle_movement(app: &mut App, key_event: KeyEvent) -> bool {
+        let Some(action) = movement_key(
+            key_event.code,
+            key_event.modifiers.contains(KeyModifiers::SHIFT),
+        ) else {
+            return false;
+        };
+
+        let selected = app.selected_monitor;
+        // A movement key without a monitor to move is still consumed, and must
+        // not panic on an empty list or a stale selection.
+        if app.monitors.get(selected).is_none() {
+            return true;
+        }
+
+        match action {
+            Movement::SnapHorizontal(delta) => {
+                movement::snap_horizontal(&mut app.monitors, selected, delta)
+            }
+            Movement::SnapVertical(delta) => {
+                movement::snap_vertical(&mut app.monitors, selected, delta)
+            }
+            Movement::FreeHorizontal(delta) => {
+                if let Some(monitor) = app.monitors.get_mut(selected) {
+                    movement::move_horizontal(monitor, delta);
+                }
+            }
+            Movement::FreeVertical(delta) => {
+                if let Some(monitor) = app.monitors.get_mut(selected) {
+                    movement::move_vertical(monitor, delta);
+                }
+            }
+        }
+        true
     }
 
     // Converts a screen cell inside the canvas into world (monitor) pixels.
@@ -726,6 +761,30 @@ mod tests {
             (1910, 1990),
             "nothing to snap onto below"
         );
+    }
+
+    #[test]
+    fn movement_keys_without_a_monitor_are_consumed_without_panicking() {
+        // A stale selection or an empty list must not index the monitor vec;
+        // movement keys are still consumed so they cannot leak into list
+        // navigation, while unrelated keys keep their meaning.
+        for selected in [0usize, 5] {
+            let mut a = app(Vec::new(), selected);
+            for (code, modifiers, consumed) in [
+                (KeyCode::Char('h'), KeyModifiers::NONE, true),
+                (KeyCode::Char('H'), KeyModifiers::NONE, true),
+                (KeyCode::Left, KeyModifiers::NONE, true),
+                (KeyCode::Right, KeyModifiers::SHIFT, true),
+                (KeyCode::Char('z'), KeyModifiers::NONE, false),
+                (KeyCode::Esc, KeyModifiers::NONE, false),
+            ] {
+                assert_eq!(
+                    Map::handle_movement(&mut a, KeyEvent::new(code, modifiers)),
+                    consumed,
+                    "{code:?} with selected={selected}"
+                );
+            }
+        }
     }
 
     #[test]

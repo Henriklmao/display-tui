@@ -7,14 +7,16 @@ use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{
-    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+    ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetButtonAction, PresetMenu,
+    Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -58,6 +60,8 @@ pub struct App {
     pub hover_point: (u16, u16),
     // The tooltip to draw this frame, computed in `draw`.
     pub tooltip: Option<crate::ui::tooltip::TooltipState>,
+    // The workspace picker opened from a display row's workspace cell.
+    pub workspace_picker: Option<WorkspacePickerState>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -100,6 +104,14 @@ pub struct HelpScrollbarDrag {
     pub grab: u16,
 }
 
+// The workspace picker opened for one display row. The anchor is recomputed
+// from the current list layout each frame, so a resize or scroll cannot leave
+// the popover detached from its cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkspacePickerState {
+    pub monitor: usize,
+}
+
 // An interactive element the pointer can rest on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoverTarget {
@@ -107,20 +119,36 @@ pub enum HoverTarget {
     Map(usize),
     // The Apply button of a pending monitor.
     ApplyButton(usize),
-    // A display-list row.
+    // A display-list row (name, description or position cell).
     ListRow(usize),
+    // The enable/disable checkbox cell of a display row.
+    ListIcon(usize),
+    // The resolution cell of a display row.
+    ListResolution(usize),
+    // The scale cell of a display row.
+    ListScale(usize),
+    // The rotation cell of a display row.
+    ListRotation(usize),
+    // The workspace cell of a display row.
+    ListWorkspace(usize),
+    // A digit in the workspace picker; 0 clears the assignment.
+    WorkspaceDigit(u8),
     // A resolution-table row.
     ResolutionRow(usize),
     // A scale-table row.
     ScaleRow(usize),
     // A preset-menu row.
     PresetRow(usize),
+    // A button in the preset menu's footer.
+    PresetButton(PresetButtonAction),
     // A popup footer button.
     Popup(PopupAction),
     // The close button embedded in the help modal's footer.
     HelpClose,
     // The draggable scrollbar inside the help modal.
     HelpScrollbar,
+    // A button in the display list's action bar.
+    Action(ActionId),
 }
 
 // How long one blink phase stays on screen.
@@ -241,6 +269,36 @@ impl App {
         !self.move_origins.is_empty()
     }
 
+    // Opens the workspace picker for a display row and selects that row.
+    pub(crate) fn open_workspace_picker(&mut self, monitor: usize) {
+        self.selected_monitor = monitor;
+        self.workspace_picker = Some(WorkspacePickerState { monitor });
+        self.clear_hover();
+    }
+
+    pub(crate) fn close_workspace_picker(&mut self) {
+        self.workspace_picker = None;
+    }
+
+    // The screen cell the picker points at, recomputed from the live layout.
+    pub(crate) fn workspace_picker_anchor(&self, layout: ScreenLayout) -> Option<Rect> {
+        let picker = self.workspace_picker?;
+        MonitorList::cell_rect(
+            layout.list,
+            &self.monitors,
+            self.selected_monitor,
+            picker.monitor,
+            ListColumn::Workspace,
+        )
+    }
+
+    // Assigns a workspace to the selected monitor, using the same path as the
+    // digit keys so the active-preset marker is cleared consistently.
+    pub(crate) fn assign_workspace(&mut self, workspace: u8) {
+        MonitorList::set_workspace(self, workspace);
+        self.clear_active_preset_if_changed();
+    }
+
     // Whether the armed map highlights are currently painted hot. The blink
     // counter gates this; an un-armed layout never draws anything, and once the
     // blink has settled it stays red until the popup is dismissed.
@@ -353,6 +411,43 @@ impl App {
             step,
             anchor: self.hover_point,
         })
+    }
+
+    // Whether a modal owns the screen. Tooltips must not float above one.
+    fn has_open_overlay(&self) -> bool {
+        self.show_help
+            || self.show_popup.is_some()
+            || self.show_preset_menu.is_some()
+            || self.workspace_picker.is_some()
+    }
+
+    // Whether an open overlay owns `target`. Its own controls keep their
+    // tooltips; every target from the view behind the overlay is suppressed.
+    fn overlay_owns_hover(&self, target: HoverTarget) -> bool {
+        match target {
+            HoverTarget::HelpClose | HoverTarget::HelpScrollbar => self.show_help,
+            HoverTarget::Popup(_) => self.show_popup.is_some(),
+            HoverTarget::PresetButton(_) | HoverTarget::PresetRow(_) => {
+                self.show_preset_menu.is_some()
+            }
+            HoverTarget::WorkspaceDigit(_) => self.workspace_picker.is_some(),
+            _ => false,
+        }
+    }
+
+    // The tooltip the next frame should draw. A target behind an open overlay is
+    // suppressed so a stale hover cannot surface over a modal opened from the
+    // keyboard; the overlay's own controls still describe themselves.
+    fn tooltip_for_draw(&self, now: Instant) -> Option<crate::ui::tooltip::TooltipState> {
+        if self.has_open_overlay()
+            && !self
+                .hover
+                .is_some_and(|target| self.overlay_owns_hover(target))
+        {
+            None
+        } else {
+            self.tooltip_at(now)
+        }
     }
 
     // Resolves the presets directory, honouring the injectable override.
@@ -538,10 +633,16 @@ impl App {
         let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
         layout.popup = self.show_popup.as_ref().map(|popup| popup.layout(area));
         self.layout = Some(layout);
+        // A resize can drop the workspace column or scroll the row away. Close
+        // the picker instead of leaving an invisible modal that swallows input.
+        if self.workspace_picker.is_some() && self.workspace_picker_anchor(layout).is_none() {
+            self.workspace_picker = None;
+            self.clear_hover();
+        }
         // The tooltip is derived at draw time.
         let now = Instant::now();
         self.drop_unavailable_help_hover();
-        self.tooltip = self.tooltip_at(now);
+        self.tooltip = self.tooltip_for_draw(now);
         frame.render_widget(&*self, area);
     }
 
@@ -558,6 +659,21 @@ impl App {
 
     fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
         crate::actions::mouse::handle_mouse(self, mouse_event);
+    }
+
+    // Runs a footer button's action through the real key path, so a click and
+    // the advertised key can never diverge.
+    pub(crate) fn perform_action(&mut self, action: ActionId) {
+        let enabled = self
+            .monitors
+            .get(self.selected_monitor)
+            .is_some_and(|monitor| monitor.enabled);
+        self.handle_key_event(KeyEvent::new(action.key(enabled), KeyModifiers::NONE));
+    }
+
+    // Runs a preset-menu button through the menu's own key handler.
+    pub(crate) fn perform_preset_button(&mut self, action: PresetButtonAction) {
+        self.handle_key_event(KeyEvent::new(action.key(), KeyModifiers::NONE));
     }
 
     // Dispatches one key press. `pub(crate)` so the mouse tests can drive the
@@ -611,6 +727,10 @@ impl App {
                 _ => {
                     // For unrelated keys, keep the popup visible
                 }
+            }
+            if self.show_popup.is_none() {
+                // A dismissed popup must not leave its button hover behind.
+                self.clear_hover();
             }
             return;
         }
@@ -836,6 +956,37 @@ impl App {
                     }
                 }
             }
+            if self.show_preset_menu.is_none() {
+                // A consumed menu button must not leave a tooltip on the list.
+                self.clear_hover();
+            }
+            return;
+        }
+
+        // The workspace picker is a small modal: digits assign and close it,
+        // Esc/q dismiss it, and nothing behind it sees the key.
+        if self.workspace_picker.is_some() {
+            // The cell may have disappeared after a resize; do not keep an
+            // invisible modal that swallows every key.
+            if let Some(layout) = self.layout
+                && self.workspace_picker_anchor(layout).is_none()
+            {
+                self.workspace_picker = None;
+                self.clear_hover();
+                return;
+            }
+            match key_event.code {
+                KeyCode::Char(c @ '0'..='9') => {
+                    self.workspace_picker = None;
+                    self.assign_workspace(c.to_digit(10).unwrap_or(0) as u8);
+                    self.clear_hover();
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    self.workspace_picker = None;
+                    self.clear_hover();
+                }
+                _ => {}
+            }
             return;
         }
 
@@ -847,20 +998,43 @@ impl App {
         }
 
         // A displaced monitor (dragging or released) is a confirm state in View:
-        // only Apply and Cancel/Revert act, so nothing else can change or persist
-        // the layout under an unconfirmed move. Enter/Space apply even while the
-        // button is still held; in the sub-modes the move keeps its record but
-        // those keys apply the highlighted value instead.
-        if self.mode == TUIMode::View && self.has_pending_move() {
-            match key_event.code {
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    self.apply_move();
+        // Apply and Cancel/Revert still act, and the snap keys keep nudging the
+        // layout so a mouse drag can be finished with the keyboard. An armed drag
+        // that has not displaced anything yet also takes those keys; every other
+        // key keeps its normal meaning until the mouse moves the display.
+        // Nothing but the snap keys can change the layout under an unconfirmed
+        // move. Enter/Space apply even while the button is still held; in the
+        // sub-modes the move keeps its record but those keys apply the
+        // highlighted value instead.
+        if self.mode == TUIMode::View && (self.has_pending_move() || self.drag.is_some()) {
+            let origin = self.selected_position();
+            if Map::handle_movement(self, key_event) {
+                // A key that changed nothing (e.g. there is no snap target in
+                // that direction) must not create a phantom pending move or end
+                // a held gesture.
+                if let (Some(origin), Some(moved)) = (origin, self.selected_position())
+                    && moved != origin
+                {
+                    // The keyboard takes over the gesture: a held drag must not
+                    // yank the monitor back to its old grab point on the next
+                    // mouse motion. The pre-nudge position is the revert target;
+                    // monitors already pending keep their original one.
                     self.drag = None;
+                    self.note_move(self.selected_monitor, origin);
                 }
-                KeyCode::Esc | KeyCode::Char('q') => self.cancel_move(),
-                _ => {}
+                return;
             }
-            return;
+            if self.has_pending_move() {
+                match key_event.code {
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        self.apply_move();
+                        self.drag = None;
+                    }
+                    KeyCode::Esc | KeyCode::Char('q') => self.cancel_move(),
+                    _ => {}
+                }
+                return;
+            }
         }
 
         match key_event.code {
@@ -1014,9 +1188,9 @@ impl App {
 
     // Clear the active preset marker as soon as the current monitor state
     // diverges from what the active preset defines (or the preset file is gone).
-    fn clear_active_preset_if_changed(&mut self) {
+    pub(crate) fn clear_active_preset_if_changed(&mut self) {
         if let Some(ref active) = self.active_preset.clone() {
-            if let Some(state) = crate::config::load_preset(active) {
+            if let Some(state) = crate::config::load_preset_in(&self.presets_dir(), active) {
                 for monitor_state in &state {
                     if let Some(monitor) =
                         self.monitors.iter().find(|m| m.name == monitor_state.name)
@@ -1078,6 +1252,14 @@ impl App {
     // revert target, and every pending monitor shows its own Apply button.
     pub(crate) fn note_move(&mut self, index: usize, origin: (i32, i32)) {
         self.move_origins.entry(index).or_insert(origin);
+    }
+
+    // The current position of the selected monitor, if it has one.
+    fn selected_position(&self) -> Option<(i32, i32)> {
+        self.monitors
+            .get(self.selected_monitor)
+            .and_then(|monitor| monitor.position.as_ref())
+            .map(|position| (position.x, position.y))
     }
 
     // Drops a monitor's move record without touching its position. Used when the
@@ -1652,18 +1834,204 @@ mod tests {
             KeyCode::Char('m'),
             KeyCode::Char('r'),
             KeyCode::Char('o'),
-            KeyCode::Char('K'),
         ] {
             app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
         }
 
         assert_eq!(app.mode, TUIMode::View, "no sub-mode is entered");
-        assert!(!app.show_help, "the help modal is not opened");
         assert!(app.monitors[0].enabled, "the monitor is not disabled");
         assert!(
             app.move_origins.contains_key(&0),
             "the move is still the only pending action"
         );
+    }
+
+    #[test]
+    fn movement_keys_keep_nudging_a_pending_move() {
+        // A mouse drag leaves the layout in the confirm state; snapping with
+        // the keyboard must still work before Enter/Esc decide.
+        let mut a = monitor();
+        a.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 3000, y: 2000 });
+        b.modes = a.modes.clone();
+        let mut app = app_with(vec![a, b]);
+        app.note_move(1, (3000, 2000));
+        app.selected_monitor = 1;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 1080 }),
+            "h and the arrow keys snap the pending monitor like in Move mode"
+        );
+        assert_eq!(
+            app.move_origins.get(&1),
+            Some(&(3000, 2000)),
+            "the original revert target survives the nudge"
+        );
+        assert_eq!(app.mode, TUIMode::View, "the confirm state stays put");
+    }
+
+    #[test]
+    fn a_keyboard_nudge_ends_a_held_drag() {
+        let mut app = app_mid_drag((250, 140), (250, 140), false);
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+
+        assert!(
+            app.drag.is_none(),
+            "the keyboard takes over the mouse gesture"
+        );
+        assert_eq!(
+            app.monitors[0].position,
+            Some(Position { x: 0, y: 140 }),
+            "the nudge still applies"
+        );
+        assert_eq!(
+            app.move_origins.get(&0),
+            Some(&(250, 140)),
+            "the drag origin stays the revert target"
+        );
+    }
+
+    #[test]
+    fn a_nudge_without_movement_does_not_create_a_pending_move() {
+        // B sits to the right of A, so snapping further right finds no target:
+        // the key is consumed but nothing moves and B must not gain an Apply
+        // button (or steal the single-move auto-fix preference).
+        let mut a = monitor();
+        a.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 1920, y: 0 });
+        b.modes = a.modes.clone();
+        let mut app = app_with(vec![a, b]);
+        app.note_move(0, (10, 10));
+        app.selected_monitor = 1;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE));
+
+        assert_eq!(
+            app.monitors[1].position,
+            Some(Position { x: 1920, y: 0 }),
+            "there is nothing to snap onto"
+        );
+        assert!(
+            !app.move_origins.contains_key(&1),
+            "an unchanged monitor must not become pending"
+        );
+        assert!(app.move_origins.contains_key(&0));
+    }
+
+    #[test]
+    fn enter_applies_a_keyboard_nudged_move() {
+        let dir = TempDir::new("app-apply-nudge");
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 0, y: 140 }));
+        assert!(app.move_origins.is_empty(), "the nudge was applied");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "Apply persists the nudged layout"
+        );
+    }
+
+    #[test]
+    fn a_movement_key_nudges_an_armed_drag_before_it_moves() {
+        // Pressing the button without dragging yet is not a confirm state, but
+        // a snap key must already steer the display instead of scrolling the
+        // list behind the same gesture.
+        let mut app = app_mid_drag((250, 140), (250, 140), false);
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        app.move_origins.clear();
+        assert!(app.drag.is_some(), "the button is still held");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 0, y: 140 }));
+        assert!(app.drag.is_none(), "the nudge takes over the gesture");
+        assert_eq!(
+            app.move_origins.get(&0),
+            Some(&(250, 140)),
+            "the pre-nudge position is the revert target"
+        );
+    }
+
+    #[test]
+    fn a_cancelled_nudge_keeps_the_active_preset_marker() {
+        let dir = TempDir::new("app-preset-nudge");
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        app.presets_dir = Some(dir.path().to_path_buf());
+        app.active_preset = Some("desk".to_string());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(!app.has_pending_move());
+        assert_eq!(
+            app.active_preset.as_deref(),
+            Some("desk"),
+            "reverting the nudge restores the preset's layout"
+        );
+
+        // Committing the nudge runs the preset check, which drops the marker
+        // (the injected dir holds no such preset).
+        let mut app = pending_move_app((250, 140), (100, 100));
+        app.monitors[0].modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        app.presets_dir = Some(dir.path().to_path_buf());
+        app.state_path = Some(dir.path().join("monitor_state.json"));
+        app.active_preset = Some("desk".to_string());
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.active_preset.is_none());
+    }
+
+    #[test]
+    fn a_nudged_monitor_joins_the_pending_moves_for_cancel() {
+        let mut a = monitor();
+        a.position = Some(Position { x: 10, y: 20 });
+        a.modes = crate::test_utils::tests::test_monitors()[0].modes.clone();
+        let mut b = Monitor {
+            name: "DP-2".to_string(),
+            ..monitor()
+        };
+        b.position = Some(Position { x: 900, y: 2000 });
+        b.modes = a.modes.clone();
+        let mut app = app_with(vec![a, b]);
+        app.note_move(0, (1, 2));
+        app.selected_monitor = 1;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[1].position, Some(Position { x: 900, y: 1100 }));
+        assert_eq!(
+            app.move_origins.get(&1),
+            Some(&(900, 2000)),
+            "the nudged monitor records its own pre-nudge position"
+        );
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(app.monitors[0].position, Some(Position { x: 1, y: 2 }));
+        assert_eq!(app.monitors[1].position, Some(Position { x: 900, y: 2000 }));
+        assert!(app.move_origins.is_empty());
     }
 
     #[test]
@@ -2186,19 +2554,19 @@ mod tests {
         app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(1999)).is_none(),
-            "nothing before the 2s dwell"
+            app.tooltip_at(t0 + Duration::from_millis(999)).is_none(),
+            "nothing before the 1s dwell"
         );
 
         let state = app
-            .tooltip_at(t0 + Duration::from_millis(2000))
+            .tooltip_at(t0 + Duration::from_millis(1000))
             .expect("tooltip");
         assert_eq!(state.text, "Drag to move, click to select");
         assert_eq!(state.step, 0, "first fade step");
         assert_eq!(state.anchor, (10, 5));
 
         assert_eq!(
-            app.tooltip_at(t0 + Duration::from_millis(2250))
+            app.tooltip_at(t0 + Duration::from_millis(1250))
                 .unwrap()
                 .step,
             2
@@ -2230,7 +2598,7 @@ mod tests {
     }
 
     // The dwell clock must not be disturbed by anything that happens while the
-    // pointer rests, so a hovered element still reaches its 3s tooltip.
+    // pointer rests, so a hovered element still reaches its tooltip.
     #[test]
     fn the_tooltip_dwell_survives_animation_ticks() {
         let t0 = Instant::now();
@@ -2245,10 +2613,10 @@ mod tests {
         }
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(2000)).is_some(),
-            "the tooltip is due right at the 2s mark"
+            app.tooltip_at(t0 + Duration::from_millis(1000)).is_some(),
+            "the tooltip is due right at the 1s mark"
         );
-        assert!(app.tooltip_at(t0 + Duration::from_millis(2200)).is_some());
+        assert!(app.tooltip_at(t0 + Duration::from_millis(1200)).is_some());
     }
 
     // --- validate on apply + Space auto-fix -----------------------------
@@ -2562,6 +2930,162 @@ mod tests {
             "the scale change must validate immediately"
         );
         assert!(app.highlights.is_some());
+    }
+
+    #[test]
+    fn closing_a_popup_with_escape_clears_its_hover() {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.show_popup = Some(Popup {
+            title: " Error ".to_string(),
+            lines: vec!["boom".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        });
+        app.hover = Some(HoverTarget::Popup(PopupAction::Close));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.show_popup.is_none());
+        assert!(
+            app.hover.is_none(),
+            "the popup button hover must be cleared"
+        );
+        assert!(
+            app.tooltip_for_draw(Instant::now()).is_none(),
+            "no tooltip may outlive the popup"
+        );
+    }
+
+    #[test]
+    fn closing_the_preset_menu_with_escape_clears_its_hover() {
+        let mut app = App::new(None);
+        app.preset_backup = Some(vec![]);
+        app.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+        app.hover = Some(HoverTarget::PresetButton(PresetButtonAction::Close));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.show_preset_menu.is_none());
+        assert!(app.hover.is_none(), "the menu button hover must be cleared");
+        assert!(app.tooltip_for_draw(Instant::now()).is_none());
+    }
+
+    #[test]
+    fn a_tooltip_is_suppressed_under_an_open_overlay() {
+        let mut app = App::new(None);
+        app.monitors = vec![monitor()];
+        app.hover = Some(HoverTarget::ListRow(0));
+        app.hover_since = Some(Instant::now() - Duration::from_secs(10));
+        let now = Instant::now();
+        assert!(app.tooltip_at(now).is_some(), "the hover is ready");
+
+        app.show_help = true;
+
+        assert!(
+            app.tooltip_for_draw(now).is_none(),
+            "an overlay must hide stale hover tooltips"
+        );
+    }
+
+    // The overlay's own controls must keep their tooltips: resolve_hover sets
+    // these targets while the overlay is open, so suppressing the whole overlay
+    // would make the feature unreachable.
+    fn overlay_tooltip(app: &mut App, target: HoverTarget, now: Instant) -> &'static str {
+        app.hover = Some(target);
+        app.hover_since = Some(now - Duration::from_secs(10));
+        app.tooltip_for_draw(now)
+            .unwrap_or_else(|| panic!("{target:?} must have a tooltip"))
+            .text
+    }
+
+    #[test]
+    fn help_controls_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_help = true;
+
+        for target in [HoverTarget::HelpClose, HoverTarget::HelpScrollbar] {
+            assert_eq!(
+                overlay_tooltip(&mut app, target, now),
+                crate::ui::tooltip::text_for(target)
+            );
+        }
+    }
+
+    #[test]
+    fn popup_buttons_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_popup = Some(Popup {
+            title: " Error ".to_string(),
+            lines: vec!["boom".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        });
+
+        for action in [
+            PopupAction::Close,
+            PopupAction::Accept,
+            PopupAction::Force,
+            PopupAction::AutoFix,
+        ] {
+            let target = HoverTarget::Popup(action);
+            assert_eq!(
+                overlay_tooltip(&mut app, target, now),
+                crate::ui::tooltip::text_for(target)
+            );
+        }
+    }
+
+    #[test]
+    fn preset_menu_controls_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+
+        let button = HoverTarget::PresetButton(PresetButtonAction::Close);
+        assert_eq!(
+            overlay_tooltip(&mut app, button, now),
+            crate::ui::tooltip::text_for(button)
+        );
+        let row = HoverTarget::PresetRow(0);
+        assert_eq!(
+            overlay_tooltip(&mut app, row, now),
+            crate::ui::tooltip::text_for(row)
+        );
+    }
+
+    #[test]
+    fn workspace_digits_keep_their_tooltip() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.workspace_picker = Some(WorkspacePickerState { monitor: 0 });
+
+        let target = HoverTarget::WorkspaceDigit(1);
+        assert_eq!(
+            overlay_tooltip(&mut app, target, now),
+            crate::ui::tooltip::text_for(target)
+        );
+    }
+
+    #[test]
+    fn a_target_from_another_overlay_stays_suppressed() {
+        // The ownership check must not turn into "any overlay unlocks every
+        // target": a stale popup hover under the help stays hidden.
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_help = true;
+        app.hover = Some(HoverTarget::Popup(PopupAction::Close));
+        app.hover_since = Some(now - Duration::from_secs(10));
+
+        assert!(app.tooltip_for_draw(now).is_none());
     }
 
     #[test]

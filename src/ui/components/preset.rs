@@ -1,12 +1,14 @@
 //! Preset menu component for managing saved monitor configurations.
 
+use crate::app::state::HoverTarget;
 use crate::config::{count_enabled_monitors_in_preset, load_preset};
+use crate::ui::styles;
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Stylize,
-    text::Line,
+    style::{Color, Style, Stylize},
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
@@ -38,6 +40,97 @@ pub enum MenuState {
     CreateName(String),
     DeleteConfirm(String),
     RenameName(String, String), // (old_name, new_name)
+}
+
+// An action a clickable preset-menu button performs. Its key is dispatched
+// through the regular menu handler, so a click and the key stay in sync.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresetButtonAction {
+    Apply,
+    Override,
+    New,
+    Delete,
+    Rename,
+    Close,
+    Save,
+    Cancel,
+    Yes,
+    No,
+}
+
+impl PresetButtonAction {
+    pub fn key(self) -> KeyCode {
+        match self {
+            PresetButtonAction::Apply | PresetButtonAction::Save => KeyCode::Enter,
+            PresetButtonAction::Override => KeyCode::Char('o'),
+            PresetButtonAction::New => KeyCode::Char('n'),
+            PresetButtonAction::Delete => KeyCode::Char('d'),
+            PresetButtonAction::Rename => KeyCode::Char('r'),
+            PresetButtonAction::Close | PresetButtonAction::Cancel => KeyCode::Esc,
+            PresetButtonAction::Yes => KeyCode::Char('y'),
+            PresetButtonAction::No => KeyCode::Char('n'),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PresetButtonAction::Apply => "Apply",
+            PresetButtonAction::Override => "Override",
+            PresetButtonAction::New => "New",
+            PresetButtonAction::Delete => "Delete",
+            PresetButtonAction::Rename => "Rename",
+            PresetButtonAction::Close => "Close",
+            PresetButtonAction::Save => "Save",
+            PresetButtonAction::Cancel => "Cancel",
+            PresetButtonAction::Yes => "Yes",
+            PresetButtonAction::No => "No",
+        }
+    }
+
+    fn key_label(self) -> &'static str {
+        match self {
+            PresetButtonAction::Apply | PresetButtonAction::Save => "Enter",
+            PresetButtonAction::Override => "o",
+            PresetButtonAction::New => "n",
+            PresetButtonAction::Delete => "d",
+            PresetButtonAction::Rename => "r",
+            PresetButtonAction::Close | PresetButtonAction::Cancel => "Esc",
+            PresetButtonAction::Yes => "y",
+            // The delete prompt's "No" returns to the list; Esc is its wider
+            // cancel key, but the button advertises the dedicated `n`.
+            PresetButtonAction::No => "n",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            PresetButtonAction::Apply => "Apply the selected preset",
+            PresetButtonAction::Override => "Overwrite the preset with the current layout",
+            PresetButtonAction::New => "Create a new preset",
+            PresetButtonAction::Delete => "Delete the selected preset",
+            PresetButtonAction::Rename => "Rename the selected preset",
+            PresetButtonAction::Close => "Close the preset menu",
+            PresetButtonAction::Save => "Save the entered name",
+            PresetButtonAction::Cancel => "Cancel without saving",
+            PresetButtonAction::Yes => "Delete the preset",
+            PresetButtonAction::No => "Keep the preset",
+        }
+    }
+}
+
+// A clickable button placed in the menu footer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresetButton {
+    pub action: PresetButtonAction,
+    pub rect: Rect,
+}
+
+// The menu's frame, content area and footer buttons for one screen area.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PresetFrame {
+    pub frame: Rect,
+    pub content: Rect,
+    pub buttons: Vec<PresetButton>,
 }
 
 // Preset entry with name, enabled monitor count, and hardware-match status.
@@ -107,14 +200,116 @@ impl PresetMenu {
         preset_rect(area)
     }
 
+    // The footer buttons offered by the current menu state.
+    fn actions(&self) -> Vec<PresetButtonAction> {
+        match self.state {
+            MenuState::List => vec![
+                PresetButtonAction::Apply,
+                PresetButtonAction::Override,
+                PresetButtonAction::New,
+                PresetButtonAction::Delete,
+                PresetButtonAction::Rename,
+                PresetButtonAction::Close,
+            ],
+            MenuState::CreateName(_) | MenuState::RenameName(_, _) => {
+                vec![PresetButtonAction::Save, PresetButtonAction::Cancel]
+            }
+            MenuState::DeleteConfirm(_) => vec![
+                PresetButtonAction::Yes,
+                PresetButtonAction::No,
+                PresetButtonAction::Cancel,
+            ],
+        }
+    }
+
+    // The frame, content area and clickable footer buttons for one screen area.
+    pub fn layout(&self, area: Rect) -> PresetFrame {
+        let frame = preset_rect(area);
+        let inner = Block::bordered().inner(frame);
+        if inner.width == 0 || inner.height == 0 {
+            return PresetFrame {
+                frame,
+                content: Rect::default(),
+                buttons: Vec::new(),
+            };
+        }
+
+        // Drop a chip that cannot be drawn whole; a partially clipped label
+        // would leave a clickable rect that does not match its text.
+        let labels: Vec<(String, PresetButtonAction)> = self
+            .actions()
+            .into_iter()
+            .filter_map(|action| {
+                let label = button_label(action);
+                (label.chars().count() as u16 <= inner.width).then_some((label, action))
+            })
+            .collect();
+        let rows = wrap_buttons(&labels, inner.width);
+        let footer_height = (rows.len() as u16).min(inner.height);
+        let content_height = inner.height.saturating_sub(footer_height);
+        let content = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: content_height,
+        };
+        let footer_top = inner.y.saturating_add(content_height);
+
+        let mut buttons = Vec::new();
+        for (row, row_buttons) in rows.iter().enumerate() {
+            let y = footer_top.saturating_add(row as u16);
+            if y >= inner.bottom() {
+                break;
+            }
+            let row_width: u16 = row_buttons
+                .iter()
+                .map(|(label, _)| label.chars().count() as u16)
+                .sum::<u16>()
+                .saturating_add(row_buttons.len().saturating_sub(1) as u16);
+            let mut x = inner.x + inner.width.saturating_sub(row_width) / 2;
+            for (label, action) in row_buttons {
+                let width = (label.chars().count() as u16).min(inner.right().saturating_sub(x));
+                if width == 0 {
+                    break;
+                }
+                buttons.push(PresetButton {
+                    action: *action,
+                    rect: Rect {
+                        x,
+                        y,
+                        width,
+                        height: 1,
+                    },
+                });
+                x = x.saturating_add(width).saturating_add(1);
+            }
+        }
+
+        PresetFrame {
+            frame,
+            content,
+            buttons,
+        }
+    }
+
+    // The button under a screen point, if any.
+    pub fn button_at(&self, area: Rect, point: (u16, u16)) -> Option<PresetButtonAction> {
+        self.layout(area)
+            .buttons
+            .into_iter()
+            .find(|button| inside(button.rect, point))
+            .map(|button| button.action)
+    }
+
     // Maps a click's row to a preset index; only the list state is clickable.
     pub fn row_at(&self, area: Rect, y: u16) -> Option<usize> {
         if self.state != MenuState::List {
             return None;
         }
+        let layout = self.layout(area);
         // One border line plus the leading blank line before the entries.
-        let top = preset_rect(area).y.saturating_add(2);
-        if y < top {
+        let top = layout.content.y.saturating_add(1);
+        if y < top || y >= layout.content.bottom() {
             return None;
         }
         let index = (y - top) as usize;
@@ -302,6 +497,64 @@ impl PresetMenu {
         }
     }
 }
+// The full chip text for a menu button.
+fn button_label(action: PresetButtonAction) -> String {
+    format!("[ {}  {} ]", action.label(), action.key_label())
+}
+
+// The styled spans of a menu button.
+fn button_spans(action: PresetButtonAction) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(
+            format!("[ {}  ", action.label()),
+            Style::default().fg(Color::Gray),
+        ),
+        Span::styled(
+            action.key_label().to_string(),
+            Style::default().fg(Color::Blue).bold(),
+        ),
+        Span::styled(" ]", Style::default().fg(Color::Gray)),
+    ]
+}
+
+// Half-open containment so adjacent buttons never both claim a cell.
+fn inside(rect: Rect, point: (u16, u16)) -> bool {
+    point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
+}
+
+// Greedily wraps button labels into rows that fit `width`.
+fn wrap_buttons(
+    labels: &[(String, PresetButtonAction)],
+    width: u16,
+) -> Vec<Vec<(String, PresetButtonAction)>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut row_width: u16 = 0;
+
+    for (label, action) in labels {
+        let label_width = label.chars().count() as u16;
+        let needed = if row.is_empty() {
+            label_width
+        } else {
+            row_width + 1 + label_width
+        };
+        if !row.is_empty() && needed > width {
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+        }
+        row_width = if row.is_empty() {
+            label_width
+        } else {
+            row_width + 1 + label_width
+        };
+        row.push((label.clone(), *action));
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
 // Responsive popup rect for preset menu
 fn preset_rect(area: Rect) -> Rect {
     let vertical = Layout::default()
@@ -325,8 +578,12 @@ impl PresetMenu {
         buf: &mut Buffer,
         hover: Option<crate::app::state::HoverTarget>,
     ) {
-        let popup_area = preset_rect(area);
-        Clear.render(popup_area, buf);
+        let layout = self.layout(area);
+        let frame = layout.frame;
+        if frame.width == 0 || frame.height == 0 {
+            return;
+        }
+        Clear.render(frame, buf);
 
         let mut text: Vec<Line> = match &self.state {
             MenuState::List => {
@@ -373,21 +630,13 @@ impl PresetMenu {
                         if is_active {
                             line = line.bold();
                         }
-                        if hover == Some(crate::app::state::HoverTarget::PresetRow(i)) {
-                            line = line.style(crate::ui::styles::hover_style());
+                        if hover == Some(HoverTarget::PresetRow(i)) {
+                            line = line.style(styles::hover_style());
                         }
                         lines.push(line);
                     }
                 }
                 lines.push(Line::from(""));
-                // Responsive hints
-                if popup_area.width >= 60 {
-                    lines.push(Line::from("[Enter/Space] Apply  [o] Override  [n] New").dim());
-                    lines.push(Line::from("[d] Delete  [r] Rename  [Esc] Close").dim());
-                } else {
-                    lines.push(Line::from("[Enter] Apply [o] Override [n] New").dim());
-                    lines.push(Line::from("[d] Delete [r] Rename [Esc] Close").dim());
-                }
                 lines
             }
             MenuState::CreateName(name) => {
@@ -396,11 +645,6 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Name: {} ", name).yellow()),
                     Line::from(""),
-                    if popup_area.width >= 60 {
-                        Line::from("[Enter] Save  [Esc] Cancel").dim()
-                    } else {
-                        Line::from("[Enter] Save [Esc] Cancel").dim()
-                    },
                 ]
             }
             MenuState::DeleteConfirm(name) => {
@@ -409,11 +653,6 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Are you sure you want to delete '{}'? ", name).yellow()),
                     Line::from(""),
-                    if popup_area.width >= 60 {
-                        Line::from("[y] Yes  [n] No  [Esc] Cancel").dim()
-                    } else {
-                        Line::from("[y] Yes [n] No [Esc] Cancel").dim()
-                    },
                 ]
             }
             MenuState::RenameName(old_name, new_name) => {
@@ -422,11 +661,6 @@ impl PresetMenu {
                     Line::from(""),
                     Line::from(format!(" Rename '{}' to: {} ", old_name, new_name).yellow()),
                     Line::from(""),
-                    if popup_area.width >= 60 {
-                        Line::from("[Enter] Save  [Esc] Cancel").dim()
-                    } else {
-                        Line::from("[Enter] Save [Esc] Cancel").dim()
-                    },
                 ]
             }
         };
@@ -436,12 +670,28 @@ impl PresetMenu {
             text.push(Line::from(err.as_str()).red());
         }
 
-        let p = Paragraph::new(text).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Presets ".white()),
-        );
-        p.render(popup_area, buf);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Presets ".white());
+        Widget::render(block, frame, buf);
+
+        if layout.content.width > 0 && layout.content.height > 0 {
+            Paragraph::new(text)
+                .wrap(Wrap { trim: false })
+                .render(layout.content, buf);
+        }
+
+        for button in &layout.buttons {
+            let hovered = hover == Some(HoverTarget::PresetButton(button.action));
+            if hovered {
+                Paragraph::new(
+                    Line::from(button_label(button.action)).style(styles::hover_style().reversed()),
+                )
+                .render(button.rect, buf);
+            } else {
+                Paragraph::new(Line::from(button_spans(button.action))).render(button.rect, buf);
+            }
+        }
     }
 }
 
@@ -949,7 +1199,7 @@ mod tests {
         let text = text_of(&render(&m, Rect::new(0, 0, 80, 30)));
 
         assert!(text.contains("something went wrong"), "got: {text}");
-        assert!(text.contains("[Enter/Space] Apply"), "got: {text}");
+        assert!(text.contains("[ Apply  Enter ]"), "got: {text}");
     }
 
     #[test]
@@ -1004,6 +1254,144 @@ mod tests {
                 assert_eq!(buf[(x, y)].symbol(), " ", "spill at ({}, {})", x, y);
             }
         }
+    }
+
+    #[test]
+    fn the_list_state_offers_all_six_buttons() {
+        let actions: Vec<PresetButtonAction> = two_presets()
+            .layout(Rect::new(0, 0, 80, 30))
+            .buttons
+            .iter()
+            .map(|button| button.action)
+            .collect();
+
+        assert_eq!(
+            actions,
+            vec![
+                PresetButtonAction::Apply,
+                PresetButtonAction::Override,
+                PresetButtonAction::New,
+                PresetButtonAction::Delete,
+                PresetButtonAction::Rename,
+                PresetButtonAction::Close,
+            ]
+        );
+    }
+
+    #[test]
+    fn sub_states_offer_their_own_buttons() {
+        let area = Rect::new(0, 0, 80, 30);
+
+        let actions = |menu: &PresetMenu| -> Vec<PresetButtonAction> {
+            menu.layout(area)
+                .buttons
+                .iter()
+                .map(|button| button.action)
+                .collect()
+        };
+
+        assert_eq!(
+            actions(&creating("x")),
+            vec![PresetButtonAction::Save, PresetButtonAction::Cancel]
+        );
+        assert_eq!(
+            actions(&confirming("desk")),
+            vec![
+                PresetButtonAction::Yes,
+                PresetButtonAction::No,
+                PresetButtonAction::Cancel
+            ]
+        );
+        assert_eq!(
+            actions(&renaming("desk", "desk2")),
+            vec![PresetButtonAction::Save, PresetButtonAction::Cancel]
+        );
+    }
+
+    #[test]
+    fn button_at_maps_every_drawn_chip() {
+        let area = Rect::new(0, 0, 80, 30);
+        let m = two_presets();
+        let frame = m.layout(area);
+
+        for button in &frame.buttons {
+            assert_eq!(
+                m.button_at(area, (button.rect.x, button.rect.y)),
+                Some(button.action)
+            );
+        }
+        assert_eq!(m.button_at(area, (0, 0)), None);
+    }
+
+    #[test]
+    fn every_button_dispatches_the_key_it_shows() {
+        assert_eq!(PresetButtonAction::Apply.key(), KeyCode::Enter);
+        assert_eq!(PresetButtonAction::New.key(), KeyCode::Char('n'));
+        assert_eq!(PresetButtonAction::No.key(), KeyCode::Char('n'));
+        assert_eq!(PresetButtonAction::Yes.key(), KeyCode::Char('y'));
+        assert_eq!(PresetButtonAction::Close.key(), KeyCode::Esc);
+        assert_eq!(PresetButtonAction::Cancel.key(), KeyCode::Esc);
+    }
+
+    #[test]
+    fn narrow_footers_drop_whole_chips() {
+        let area = Rect::new(0, 0, 12, 10);
+        let m = two_presets();
+        let frame = m.layout(area);
+
+        for button in &frame.buttons {
+            let label = button_label(button.action);
+            assert!(
+                (label.chars().count() as u16) <= button.rect.width,
+                "clipped {:?} into {:?}",
+                label,
+                button.rect
+            );
+            assert!(button.rect.right() <= frame.frame.right());
+        }
+        let text = text_of(&render(&m, area));
+        assert_eq!(
+            text.matches('[').count(),
+            text.matches(']').count(),
+            "no partial chip may be drawn: {text}"
+        );
+    }
+
+    #[test]
+    fn the_hovered_button_is_inverted() {
+        let area = Rect::new(0, 0, 80, 30);
+        let m = two_presets();
+        let button = m.layout(area).buttons[0];
+        let mut buf = Buffer::empty(area);
+
+        m.render_with(
+            area,
+            &mut buf,
+            Some(HoverTarget::PresetButton(button.action)),
+        );
+
+        assert!(
+            buf[(button.rect.x, button.rect.y)]
+                .style()
+                .add_modifier
+                .contains(ratatui::style::Modifier::REVERSED),
+            "the hovered chip must be inverted"
+        );
+    }
+
+    #[test]
+    fn the_footer_is_not_part_of_the_preset_list() {
+        // Enough entries to make a footer row a plausible list index.
+        let entries = (0..100).map(|i| entry(&format!("p{i}"), 1)).collect();
+        let m = menu(entries);
+        let area = Rect::new(0, 0, 80, 30);
+        let button = m.layout(area).buttons[0];
+
+        assert_eq!(
+            m.row_at(area, button.rect.y),
+            None,
+            "a footer click must not select a clipped preset"
+        );
     }
 
     #[test]

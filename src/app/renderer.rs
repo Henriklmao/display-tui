@@ -1,6 +1,7 @@
 //! UI rendering for the display-tui application.
 
 use super::state::{App, HoverTarget};
+use crate::ui::components::workspace_picker;
 use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
 use crate::utils::TUIMode;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
@@ -58,6 +59,10 @@ impl Widget for &App {
             }
         }
         monitor_list.render(layout.list, buf);
+
+        if let Some(anchor) = self.workspace_picker_anchor(layout) {
+            workspace_picker::render(anchor, area, buf, self.hover);
+        }
 
         if let Some(ref preset_menu) = self.show_preset_menu {
             preset_menu.render_with(area, buf, hover);
@@ -382,6 +387,22 @@ mod tests {
             text.contains("Click to save your changes"),
             "tooltip missing: {text}"
         );
+    }
+
+    #[test]
+    fn the_workspace_picker_is_drawn_above_the_list() {
+        use crate::app::state::WorkspacePickerState;
+
+        let area = Rect::new(0, 0, 160, 40);
+        let mut a = app(TUIMode::View);
+        a.layout = Some(crate::ui::layouts::screen_layout(area, TUIMode::View));
+        a.workspace_picker = Some(WorkspacePickerState { monitor: 0 });
+
+        let text = text_of(&render_app(&a, area));
+
+        assert!(text.contains("Workspace"), "picker title missing: {text}");
+        assert!(text.contains("[0]"), "clear digit missing: {text}");
+        assert!(text.contains("[9]"), "digit grid missing: {text}");
     }
 
     #[test]

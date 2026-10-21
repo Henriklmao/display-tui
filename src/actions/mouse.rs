@@ -41,6 +41,13 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         None => return,
     };
 
+    // The workspace cell can disappear after a resize or scroll; close the
+    // picker instead of leaving an invisible modal behind.
+    if app.workspace_picker.is_some() && app.workspace_picker_anchor(layout).is_none() {
+        app.close_workspace_picker();
+        app.set_hover(None, point(event), now, false);
+    }
+
     // A release always ends the drag, even if a modal has taken over since the
     // press so the drag cannot stay armed behind an overlay.
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
@@ -625,6 +632,7 @@ fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, now: Instant) {
                 // A footer button runs the menu's own key path.
                 app.last_click = None;
                 app.perform_preset_button(button);
+                app.set_hover(None, point, now, false);
                 return;
             }
             if !inside(PresetMenu::rect(area), point) {
@@ -632,6 +640,7 @@ fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, now: Instant) {
                 app.last_click = None;
                 app.restore_preset_backup();
                 app.show_preset_menu = None;
+                app.set_hover(None, point, now, false);
                 return;
             }
             let double_click = register_click(app, point, now);
@@ -651,6 +660,7 @@ fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, now: Instant) {
             } else {
                 app.preview_preset(&name);
             }
+            app.set_hover(None, point, now, false);
         }
         _ => {}
     }
@@ -1630,6 +1640,51 @@ mod tests {
     }
 
     #[test]
+    fn a_resized_away_workspace_cell_closes_the_picker() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+        assert!(a.workspace_picker.is_some());
+
+        // 80 columns drop the workspace column entirely.
+        a.layout = Some(screen_layout(Rect::new(0, 0, 80, 40), TUIMode::View));
+        moved(&mut a, 10, 10);
+
+        assert!(a.workspace_picker.is_none());
+    }
+
+    #[test]
+    fn a_resized_away_workspace_cell_closes_the_picker_on_keys_too() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+
+        a.layout = Some(screen_layout(Rect::new(0, 0, 80, 40), TUIMode::View));
+        a.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+
+        assert!(a.workspace_picker.is_none());
+    }
+
+    #[test]
+    fn closing_the_picker_clears_its_hover() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let chip = workspace_picker::digit_rect(anchor, screen, 3).expect("digit 3");
+        moved(&mut a, chip.x, chip.y);
+        assert_eq!(a.hover, Some(HoverTarget::WorkspaceDigit(3)));
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(a.workspace_picker.is_none());
+        assert_eq!(a.hover, None);
+    }
+
+    #[test]
     fn keyboard_digits_assign_in_the_picker() {
         let screen = Rect::new(0, 0, 160, 40);
         let mut a = app_in(screen, TUIMode::View, test_monitors());
@@ -1736,6 +1791,22 @@ mod tests {
             a.show_preset_menu.as_ref().map(|menu| &menu.state),
             Some(MenuState::CreateName(_))
         ));
+    }
+
+    #[test]
+    fn clicking_a_preset_button_clears_its_hover() {
+        let mut a = app(TUIMode::View, test_monitors());
+        open_preset_menu(&mut a);
+        let rect = preset_button(&a, PresetButtonAction::New);
+        moved(&mut a, rect.x, rect.y);
+        assert_eq!(
+            a.hover,
+            Some(HoverTarget::PresetButton(PresetButtonAction::New))
+        );
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.hover, None, "a consumed click must not leave a tooltip");
     }
 
     #[test]

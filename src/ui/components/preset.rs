@@ -66,10 +66,9 @@ impl PresetButtonAction {
             PresetButtonAction::New => KeyCode::Char('n'),
             PresetButtonAction::Delete => KeyCode::Char('d'),
             PresetButtonAction::Rename => KeyCode::Char('r'),
-            PresetButtonAction::Close
-            | PresetButtonAction::Cancel
-            | PresetButtonAction::No => KeyCode::Esc,
+            PresetButtonAction::Close | PresetButtonAction::Cancel => KeyCode::Esc,
             PresetButtonAction::Yes => KeyCode::Char('y'),
+            PresetButtonAction::No => KeyCode::Char('n'),
         }
     }
 
@@ -236,10 +235,15 @@ impl PresetMenu {
             };
         }
 
+        // Drop a chip that cannot be drawn whole; a partially clipped label
+        // would leave a clickable rect that does not match its text.
         let labels: Vec<(String, PresetButtonAction)> = self
             .actions()
             .into_iter()
-            .map(|action| (button_label(action), action))
+            .filter_map(|action| {
+                let label = button_label(action);
+                (label.chars().count() as u16 <= inner.width).then_some((label, action))
+            })
             .collect();
         let rows = wrap_buttons(&labels, inner.width);
         let footer_height = (rows.len() as u16).min(inner.height);
@@ -1320,6 +1324,40 @@ mod tests {
             );
         }
         assert_eq!(m.button_at(area, (0, 0)), None);
+    }
+
+    #[test]
+    fn every_button_dispatches_the_key_it_shows() {
+        assert_eq!(PresetButtonAction::Apply.key(), KeyCode::Enter);
+        assert_eq!(PresetButtonAction::New.key(), KeyCode::Char('n'));
+        assert_eq!(PresetButtonAction::No.key(), KeyCode::Char('n'));
+        assert_eq!(PresetButtonAction::Yes.key(), KeyCode::Char('y'));
+        assert_eq!(PresetButtonAction::Close.key(), KeyCode::Esc);
+        assert_eq!(PresetButtonAction::Cancel.key(), KeyCode::Esc);
+    }
+
+    #[test]
+    fn narrow_footers_drop_whole_chips() {
+        let area = Rect::new(0, 0, 12, 10);
+        let m = two_presets();
+        let frame = m.layout(area);
+
+        for button in &frame.buttons {
+            let label = button_label(button.action);
+            assert!(
+                (label.chars().count() as u16) <= button.rect.width,
+                "clipped {:?} into {:?}",
+                label,
+                button.rect
+            );
+            assert!(button.rect.right() <= frame.frame.right());
+        }
+        let text = text_of(&render(&m, area));
+        assert_eq!(
+            text.matches('[').count(),
+            text.matches(']').count(),
+            "no partial chip may be drawn: {text}"
+        );
     }
 
     #[test]

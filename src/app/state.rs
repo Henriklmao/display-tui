@@ -596,6 +596,12 @@ impl App {
         let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
         layout.popup = self.show_popup.as_ref().map(|popup| popup.layout(area));
         self.layout = Some(layout);
+        // A resize can drop the workspace column or scroll the row away. Close
+        // the picker instead of leaving an invisible modal that swallows input.
+        if self.workspace_picker.is_some() && self.workspace_picker_anchor(layout).is_none() {
+            self.workspace_picker = None;
+            self.clear_hover();
+        }
         // The tooltip is derived at draw time.
         let now = Instant::now();
         self.drop_unavailable_help_hover();
@@ -915,13 +921,24 @@ impl App {
         // The workspace picker is a small modal: digits assign and close it,
         // Esc/q dismiss it, and nothing behind it sees the key.
         if self.workspace_picker.is_some() {
+            // The cell may have disappeared after a resize; do not keep an
+            // invisible modal that swallows every key.
+            if let Some(layout) = self.layout
+                && self.workspace_picker_anchor(layout).is_none()
+            {
+                self.workspace_picker = None;
+                self.clear_hover();
+                return;
+            }
             match key_event.code {
                 KeyCode::Char(c @ '0'..='9') => {
                     self.workspace_picker = None;
                     self.assign_workspace(c.to_digit(10).unwrap_or(0) as u8);
+                    self.clear_hover();
                 }
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
                     self.workspace_picker = None;
+                    self.clear_hover();
                 }
                 _ => {}
             }

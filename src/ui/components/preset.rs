@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Stylize,
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -316,6 +316,15 @@ fn preset_rect(area: Rect) -> Rect {
 }
 impl PresetMenu {
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.render_with(area, buf, None);
+    }
+
+    pub fn render_with(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        hover: Option<crate::app::state::HoverTarget>,
+    ) {
         let popup_area = preset_rect(area);
         Clear.render(popup_area, buf);
 
@@ -363,6 +372,9 @@ impl PresetMenu {
                         // Highlight the currently active preset in bold.
                         if is_active {
                             line = line.bold();
+                        }
+                        if hover == Some(crate::app::state::HoverTarget::PresetRow(i)) {
+                            line = line.style(crate::ui::styles::hover_style());
                         }
                         lines.push(line);
                     }
@@ -424,7 +436,7 @@ impl PresetMenu {
             text.push(Line::from(err.as_str()).red());
         }
 
-        let p = Paragraph::new(text).block(
+        let p = Paragraph::new(text).wrap(Wrap { trim: false }).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Presets ".white()),
@@ -892,6 +904,20 @@ mod tests {
         assert!(text.contains("desk (2 monitors)"), "got: {text}");
         assert!(text.contains("gaming (1 monitors)"), "got: {text}");
         assert!(text.contains("Presets"));
+    }
+
+    #[test]
+    fn a_long_preset_name_wraps_instead_of_clipping() {
+        let long = "a-preset-name-that-is-quite-long-indeed-and-keeps-going";
+        let m = menu(vec![entry(long, 2)]);
+
+        let text = text_of(&render(&m, Rect::new(0, 0, 30, 12)));
+
+        assert!(text.contains("Presets"), "got: {text}");
+        assert!(
+            text.contains("a-preset"),
+            "the start of the name renders: {text}"
+        );
     }
 
     #[test]

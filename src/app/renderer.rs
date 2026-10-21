@@ -2,19 +2,14 @@
 
 use super::state::App;
 use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
-use crate::ui::layouts::centered_rect;
 use crate::utils::TUIMode;
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
-};
+use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let is_previewing = self.show_preset_menu.is_some();
+
+        let hover = self.hover;
 
         let mut monitor_list =
             MonitorList::new(&self.monitors, self.mode, Some(self.selected_monitor));
@@ -31,9 +26,13 @@ impl Widget for &App {
             guides: self.drag.as_ref().map(|drag| drag.guides),
             canvas: self.drag.as_ref().map(|drag| drag.canvas),
             pending: &pending,
+            highlights: self.highlights.as_ref(),
+            highlight_phase: self.highlight_visible(),
+            hover,
         };
         monitor_list.is_previewing = is_previewing;
         monitor_list.moved_pending = self.has_pending_move();
+        monitor_list.hover = hover;
 
         let layout = self
             .layout
@@ -46,11 +45,13 @@ impl Widget for &App {
                     if let Some(selected) = self.monitors.get(self.selected_monitor) {
                         let mut resolutions =
                             Resolutions::new(selected, Some(self.selected_resolution));
+                        resolutions.hover = hover;
                         resolutions.render(side, buf);
                     }
                 }
                 TUIMode::Scale => {
                     let mut scale = Scale::new(self.selected_scale);
+                    scale.hover = hover;
                     scale.render(side, buf);
                 }
                 _ => {}
@@ -59,7 +60,7 @@ impl Widget for &App {
         monitor_list.render(layout.list, buf);
 
         if let Some(ref preset_menu) = self.show_preset_menu {
-            preset_menu.render(area, buf);
+            preset_menu.render_with(area, buf, hover);
         }
 
         if self.show_help {
@@ -67,38 +68,12 @@ impl Widget for &App {
         }
 
         if let Some(ref popup) = self.show_popup {
-            let popup_area = centered_rect(50, 40, area);
-            let mut text = vec![Line::from("")];
-            for line in &popup.lines {
-                text.push(Line::from(line.clone()));
-                text.push(Line::from(""));
-            }
-            if popup.is_error && popup.is_forceable {
-                text.push(Line::from(
-                    "Press <f> to force write, or <Esc/Enter> to close.".gray(),
-                ));
-            } else if popup.is_error {
-                text.push(Line::from("<Esc/Enter> to close.".gray()));
-            }
-            let color = if popup.is_error {
-                Color::Red
-            } else {
-                Color::Yellow
-            };
-            let border_style = Style::default().fg(color);
-            let title = Line::from(popup.title.clone().bold().white());
+            popup.render_with(area, buf, hover);
+        }
 
-            let p = Paragraph::new(text)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(title)
-                        .border_style(border_style),
-                )
-                .alignment(Alignment::Center);
-
-            Clear.render(popup_area, buf);
-            p.render(popup_area, buf);
+        // Topmost layer: the hover tooltip.
+        if let Some(ref tooltip) = self.tooltip {
+            crate::ui::tooltip::render(tooltip, area, buf);
         }
     }
 }
@@ -106,8 +81,9 @@ impl Widget for &App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::tests::{test_monitors, text_of};
+    use crate::test_utils::tests::{find_cell, find_text, test_monitors, text_of};
     use crate::ui::components::PresetMenu;
+    use ratatui::style::Color;
     use ratatui::widgets::Widget;
 
     use super::super::state::Popup;
@@ -132,6 +108,7 @@ mod tests {
             is_error: true,
             apply_preset: None,
             is_forceable,
+            fix: None,
         }
     }
 
@@ -200,8 +177,8 @@ mod tests {
 
         assert!(text.contains("hyprctl refused"), "message missing: {text}");
         assert!(
-            text.contains("Press <f> to force write"),
-            "force hint missing: {text}"
+            text.contains("[ f force write ]"),
+            "force button missing: {text}"
         );
     }
 
@@ -213,8 +190,8 @@ mod tests {
         let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
 
         assert!(
-            text.contains("<Esc/Enter> to close."),
-            "close hint missing: {text}"
+            text.contains("[ Esc close ]"),
+            "close button missing: {text}"
         );
         assert!(
             !text.contains("force write"),
@@ -225,27 +202,31 @@ mod tests {
     #[test]
     fn popup_border_colour_follows_the_error_flag() {
         let area = Rect::new(0, 0, 120, 40);
-        let popup_area = centered_rect(50, 40, area);
 
         let mut error = app(TUIMode::View);
-        error.show_popup = Some(error_popup(false));
+        let error_popup = error_popup(false);
+        let error_frame = error_popup.layout(area).frame;
+        error.show_popup = Some(error_popup);
         let buf = render_app(&error, area);
         assert_eq!(
-            buf[(popup_area.x, popup_area.y)].style().fg,
+            buf[(error_frame.x, error_frame.y)].style().fg,
             Some(Color::Red)
         );
 
         let mut info = app(TUIMode::View);
-        info.show_popup = Some(Popup {
+        let info_popup = Popup {
             title: "Saved".to_string(),
             lines: vec!["Preset written".to_string()],
             is_error: false,
             apply_preset: None,
             is_forceable: false,
-        });
+            fix: None,
+        };
+        let info_frame = info_popup.layout(area).frame;
+        info.show_popup = Some(info_popup);
         let buf = render_app(&info, area);
         assert_eq!(
-            buf[(popup_area.x, popup_area.y)].style().fg,
+            buf[(info_frame.x, info_frame.y)].style().fg,
             Some(Color::Yellow)
         );
     }
@@ -279,6 +260,155 @@ mod tests {
             a.mode = mode;
             // Must not panic even though the tables index a selected monitor.
             let _ = render_app(&a, Rect::new(0, 0, 120, 40));
+        }
+    }
+
+    // The Resolution/Scale side table must show — and act on — the hovered
+    // monitor, matching the display list and map.
+    #[test]
+    fn the_resolution_table_follows_the_hovered_monitor() {
+        use crate::app::state::HoverTarget;
+        use crate::monitor::Resolution;
+        use std::time::Instant;
+
+        let mut a = App::new(None);
+        a.mode = TUIMode::Resolution;
+        let mut first = powered_monitor("Alpha", 0);
+        first.modes.truncate(1); // only 1920x1080
+        let mut second = powered_monitor("Beta", 1920);
+        second.modes.push(Resolution {
+            width: 2560,
+            height: 1440,
+            refresh: 60.0,
+            preferred: false,
+            current: false,
+        });
+        a.monitors = vec![first, second];
+        a.selected_monitor = 0;
+
+        let area = Rect::new(0, 0, 200, 40);
+        let before = text_of(&render_app(&a, area));
+        assert!(
+            !before.contains("2560x1440"),
+            "the stored selection's table has no such mode"
+        );
+
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), Instant::now(), true);
+        let after = text_of(&render_app(&a, area));
+        assert!(
+            after.contains("2560x1440"),
+            "the table shows the hovered monitor's modes: {after}"
+        );
+    }
+
+    #[test]
+    fn hovering_a_monitor_selects_it_visually_without_persisting() {
+        use crate::app::state::HoverTarget;
+        use std::time::Instant;
+
+        let mut a = App::new(None);
+        a.monitors = vec![powered_monitor("Alpha", 0), powered_monitor("Beta", 1920)];
+        a.selected_monitor = 0;
+        a.set_hover(Some(HoverTarget::Map(1)), (10, 10), Instant::now(), true);
+        let area = Rect::new(0, 0, 120, 40);
+
+        let buf = render_app(&a, area);
+        let layout = crate::ui::layouts::screen_layout(area, TUIMode::View);
+        let (_, marker_row) = find_cell(&buf, "\u{f04b}").expect("selection marker");
+        assert_eq!(
+            marker_row,
+            layout.list.y + 4,
+            "the list marker follows the hovered (second) monitor"
+        );
+
+        let (bx, by) = find_text(&buf, "Beta").expect("Beta map label");
+        assert_eq!(
+            buf[(bx, by)].style().fg,
+            Some(Color::Yellow),
+            "the hovered monitor is marked yellow on the map"
+        );
+        let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha map label");
+        assert_eq!(
+            buf[(ax, ay)].style().fg,
+            Some(Color::Blue),
+            "the previously selected monitor loses the yellow highlight"
+        );
+        assert_eq!(
+            a.selected_monitor, 1,
+            "the hover temporarily selects the monitor"
+        );
+
+        // Leaving the map reverts to the stored selection.
+        a.set_hover(None, (10, 10), Instant::now(), false);
+        assert_eq!(
+            a.selected_monitor, 0,
+            "hover must not persist the selection"
+        );
+        let buf = render_app(&a, area);
+        let (_, marker_row) = find_cell(&buf, "\u{f04b}").expect("selection marker");
+        assert_eq!(
+            marker_row,
+            layout.list.y + 3,
+            "the list reverts to the stored selection on hover-out"
+        );
+    }
+
+    // An enabled monitor of 1920x1080 at (x, 0).
+    fn powered_monitor(name: &str, x: i32) -> crate::monitor::Monitor {
+        let mut monitor = test_monitors()[0].clone();
+        monitor.name = name.to_string();
+        monitor.position = Some(crate::monitor::Position { x, y: 0 });
+        monitor
+    }
+
+    #[test]
+    fn the_tooltip_is_drawn_on_top_of_everything() {
+        let mut a = app(TUIMode::View);
+        a.tooltip = Some(crate::ui::tooltip::TooltipState {
+            text: "Click to save your changes",
+            step: 3,
+            anchor: (10, 10),
+        });
+
+        let text = text_of(&render_app(&a, Rect::new(0, 0, 120, 40)));
+
+        assert!(
+            text.contains("Click to save your changes"),
+            "tooltip missing: {text}"
+        );
+    }
+
+    #[test]
+    fn every_overlay_survives_the_size_matrix() {
+        for (width, height) in [
+            (0u16, 0u16),
+            (1, 1),
+            (6, 3),
+            (20, 8),
+            (40, 12),
+            (80, 24),
+            (120, 40),
+            (240, 80),
+        ] {
+            let area = Rect::new(0, 0, width, height);
+            for mode in [
+                TUIMode::View,
+                TUIMode::Move,
+                TUIMode::Resolution,
+                TUIMode::Scale,
+            ] {
+                let mut a = app(mode);
+                a.show_help = true;
+                render_app(&a, area);
+
+                a.show_help = false;
+                a.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+                render_app(&a, area);
+
+                let mut a = app(mode);
+                a.show_popup = Some(error_popup(true));
+                render_app(&a, area);
+            }
         }
     }
 }

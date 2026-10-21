@@ -95,6 +95,7 @@ fn right_sections() -> Vec<Line<'static>> {
         Line::from("Apply <Enter/Space>"),
         Line::from("Up/Down <k/j>"),
         Line::from("Cancel <Esc/q>"),
+        Line::from("[f] force write  [Space] auto fix"),
         Line::from(""),
         Line::from(" --- Tip --- ".bold().yellow()),
         Line::from("Arrow keys work as alternative".light_blue()),
@@ -108,6 +109,12 @@ fn help_block() -> Block<'static> {
         .borders(Borders::ALL)
         .title(" Keybindings/Help ".bold().white())
         .border_style(Style::default().fg(Color::Cyan))
+}
+
+// The footer button line, mirroring the popup buttons (help closes on any
+// click, so this is purely visual parity).
+fn close_hint() -> Line<'static> {
+    Line::from("[ Esc close ]").gray()
 }
 
 // Renders a centered version line spanning the full popup width.
@@ -124,7 +131,11 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     let columns = Layout::default()
@@ -143,6 +154,10 @@ fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
     left.render(columns[0], buf);
     right.render(columns[1], buf);
+
+    Paragraph::new(close_hint())
+        .alignment(Alignment::Center)
+        .render(rows[2], buf);
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
@@ -155,6 +170,8 @@ fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     lines.push(Line::from(""));
     lines.extend(right_sections());
     lines.retain(|line| line.width() > 0);
+    lines.push(Line::from(""));
+    lines.push(close_hint());
 
     let p = Paragraph::new(lines)
         .block(help_block())
@@ -273,6 +290,7 @@ mod tests {
             "right-click",
             "Cancel/Revert all <Esc/q>",
             "Up/Down <k/j>",
+            "[f] force write",
         ];
 
         for (width, height) in [(120u16, 40u16), (60, 30)] {
@@ -346,7 +364,7 @@ mod tests {
         let mut buf = Buffer::empty(area);
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
-                buf[(x, y)].set_symbol("x");
+                buf[(x, y)].set_symbol("#");
             }
         }
 
@@ -360,9 +378,9 @@ mod tests {
                     && y < popup.y + popup.height;
                 let symbol = buf[(x, y)].symbol();
                 if inside {
-                    assert_ne!(symbol, "x", "popup did not overwrite ({}, {})", x, y);
+                    assert_ne!(symbol, "#", "popup did not overwrite ({}, {})", x, y);
                 } else {
-                    assert_eq!(symbol, "x", "background was clobbered at ({}, {})", x, y);
+                    assert_eq!(symbol, "#", "background was clobbered at ({}, {})", x, y);
                 }
             }
         }

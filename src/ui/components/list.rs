@@ -14,9 +14,12 @@ use ratatui::{
 };
 
 use crate::App;
+use crate::app::state::HoverTarget;
 use crate::rotation::Rotation;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
+use crate::ui::styles;
 use crate::utils::TUIMode;
+use crate::validation::diagnostics::{CautionFlags, caution_flags};
 
 // Highlight marker shown in front of the selected row.
 //
@@ -36,6 +39,22 @@ const COLUMN_WIDTHS: [Constraint; 8] = [
     Constraint::Percentage(10),
     Constraint::Percentage(10),
 ];
+
+// The columns shown at a given terminal width: trailing columns are dropped
+// instead of being squeezed into unreadable slivers. The checkbox and name
+// columns always survive, so hit-testing stays meaningful.
+fn visible_columns(width: u16) -> Vec<Constraint> {
+    let count = if width < 60 {
+        2 // icon, name
+    } else if width < 90 {
+        4 // icon, name, description, resolution
+    } else if width < 110 {
+        6 // ... position, scale
+    } else {
+        COLUMN_WIDTHS.len()
+    };
+    COLUMN_WIDTHS[..count].to_vec()
+}
 
 // Gap between table columns.
 const COLUMN_SPACING: u16 = 1;
@@ -113,6 +132,8 @@ pub struct MonitorList<'a> {
     pub is_previewing: bool,
     // Whether a mouse move is waiting to be applied.
     pub moved_pending: bool,
+    // The element currently under the pointer, for the hover glow.
+    pub hover: Option<HoverTarget>,
 }
 
 impl<'a> MonitorList<'a> {
@@ -124,6 +145,7 @@ impl<'a> MonitorList<'a> {
             monitors,
             is_previewing: false,
             moved_pending: false,
+            hover: None,
         }
     }
 
@@ -200,10 +222,14 @@ impl<'a> MonitorList<'a> {
         }
     }
     fn cycle_rotation(app: &mut App) {
-        let monitor = &mut app.monitors[app.selected_monitor];
-        let current_rotation = Rotation::from_transform(&monitor.transform);
-        let next_rotation = current_rotation.cycle();
-        monitor.transform = Some(next_rotation.to_transform().to_string());
+        {
+            let monitor = &mut app.monitors[app.selected_monitor];
+            let current_rotation = Rotation::from_transform(&monitor.transform);
+            let next_rotation = current_rotation.cycle();
+            monitor.transform = Some(next_rotation.to_transform().to_string());
+        }
+        // A quarter turn swaps the logical width/height, so validate now.
+        app.check_layout();
     }
 
     fn next_monitor(app: &mut App) {
@@ -257,10 +283,12 @@ impl<'a> MonitorList<'a> {
     fn monitors_to_rows(
         &self,
         workspace_counts: &std::collections::HashMap<u8, usize>,
+        caution: &CautionFlags,
     ) -> Vec<Row<'static>> {
         self.monitors
             .iter()
-            .map(|monitor| {
+            .enumerate()
+            .map(|(index, monitor)| {
                 let name = monitor.name.clone();
                 let description = monitor
                     .description
@@ -287,14 +315,16 @@ impl<'a> MonitorList<'a> {
                     Some(ws) => {
                         let ws_str = ws.to_string();
                         if is_duplicate_ws {
-                            Cell::default().content(Line::from(ws_str.red()))
+                            // `Cell::default()` carries a zero column span and
+                            // would never be painted; build it from the content.
+                            Cell::from(Line::from(ws_str.red()))
                         } else {
                             Cell::from(ws_str)
                         }
                     }
                     None => Cell::from("-"),
                 };
-                Row::new(vec![
+                let row = Row::new(vec![
                     Cell::from(if enabled == "true" {
                         "".to_string()
                     } else {
@@ -312,7 +342,31 @@ impl<'a> MonitorList<'a> {
                     Cell::from(scale),
                     Cell::from(rotation),
                     workspace_cell,
-                ])
+                ]);
+
+                // A live caution background on any offending monitor, derived
+                // from the preview state at render time. The per-cell styles
+                // (icon colour, red workspace number) still win because cells
+                // are painted over the row style.
+                //
+                // The selected row is deliberately exempt: ratatui patches the
+                // selection style (reversed) over the whole row afterwards, so
+                // a caution background would turn into a black block and make a
+                // warned row look different from a clean selected row. The red
+                // workspace number still marks the problem on the selected row.
+                let selected = self.state.selected() == Some(index);
+                let mut style = Style::default();
+                if caution.flags(index) && !selected {
+                    style = style.bg(Color::Yellow).fg(Color::Black);
+                }
+                if self.hover == Some(HoverTarget::ListRow(index)) {
+                    style = style.fg(styles::hover_accent()).bold();
+                }
+                if style == Style::default() {
+                    row
+                } else {
+                    row.style(style)
+                }
             })
             .collect()
     }
@@ -333,6 +387,9 @@ impl<'a> MonitorList<'a> {
         );
         let workspace_counts = workspace_counts(self.monitors);
         let has_duplicate_workspace = has_duplicate_workspace(self.monitors);
+        // Derived from the live preview every frame, so every drag pixel, snap,
+        // toggle and preset preview updates the caution background instantly.
+        let caution = caution_flags(self.monitors);
 
         let is_mini_mode = area.width < 115;
         // Footer hints as (drop rank, spans), drawn in the order given: when the
@@ -445,9 +502,9 @@ impl<'a> MonitorList<'a> {
             ])
             .split(inner_area);
 
-        let widths = COLUMN_WIDTHS;
+        let widths = visible_columns(area.width);
 
-        let table = Table::new(self.monitors_to_rows(&workspace_counts), widths)
+        let table = Table::new(self.monitors_to_rows(&workspace_counts, &caution), widths)
             .column_spacing(COLUMN_SPACING)
             .header(
                 Row::new(vec![
@@ -465,7 +522,7 @@ impl<'a> MonitorList<'a> {
                 .green()
                 .reversed(),
             )
-            .row_highlight_style(Style::new().yellow())
+            .row_highlight_style(Style::new().reversed().bold())
             .cell_highlight_style(Style::new().blue())
             .highlight_symbol(HIGHLIGHT_SYMBOL);
 
@@ -499,6 +556,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: pending,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -521,6 +579,7 @@ mod tests {
             monitors: &test_monitors(),
             is_previewing: false,
             moved_pending: false,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
 
@@ -612,6 +671,7 @@ mod tests {
             monitors,
             is_previewing: false,
             moved_pending: false,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -694,6 +754,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: true,
             moved_pending: false,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 130, 8));
         list.render(buf.area, &mut buf);
@@ -792,6 +853,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(wide);
         list.render(wide, &mut buf);
@@ -808,6 +870,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(wide);
         sub.render(wide, &mut buf);
@@ -832,6 +895,7 @@ mod tests {
                 monitors: &monitors,
                 is_previewing: false,
                 moved_pending: true,
+                hover: None,
             };
             let mut buf = Buffer::empty(area);
             list.render(area, &mut buf);
@@ -966,6 +1030,7 @@ mod tests {
             monitors: &monitors,
             is_previewing: false,
             moved_pending: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         list.render(area, &mut buf);
@@ -1098,5 +1163,289 @@ mod tests {
 
         assert_eq!(a.selected_monitor, 0);
         assert_eq!(a.mode, TUIMode::View, "sub-modes need a monitor");
+    }
+
+    // --- live caution background ----------------------------------------
+
+    use crate::monitor::{Position, Resolution};
+
+    // An enabled 1920x1080 monitor at (x, 0) with the given name.
+    fn placed(name: &str, x: i32) -> Monitor {
+        Monitor {
+            name: name.to_string(),
+            enabled: true,
+            position: Some(Position { x, y: 0 }),
+            scale: Some(1.0),
+            modes: vec![Resolution {
+                width: 1920,
+                height: 1080,
+                refresh: 60.0,
+                preferred: true,
+                current: true,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_overlapping_row_carries_a_yellow_caution_background() {
+        // B pokes into A: both are offending partners and both are flagged.
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 2, area);
+
+        for name in ["Alpha", "Beta"] {
+            let (x, y) = find_text(&buf, name).expect("monitor row");
+            assert_eq!(
+                buf[(x, y)].style().bg,
+                Some(Color::Yellow),
+                "{name} must carry the caution background"
+            );
+            assert_eq!(buf[(x, y)].style().fg, Some(Color::Black));
+        }
+    }
+
+    #[test]
+    fn a_clean_row_has_no_caution_background() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+
+        let (x, y) = find_text(&buf, "Alpha").expect("monitor row");
+        assert_ne!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "a valid layout must not be cautioned"
+        );
+    }
+
+    #[test]
+    fn a_detached_row_is_cautioned_but_its_anchor_is_not() {
+        let monitors = vec![placed("Alpha", 0), placed("Far", 50_000)];
+        let area = Rect::new(0, 0, 130, 10);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+
+        let (fx, fy) = find_text(&buf, "Far").expect("detached row");
+        assert_eq!(buf[(fx, fy)].style().bg, Some(Color::Yellow));
+
+        let (ax, ay) = find_text(&buf, "Alpha").expect("anchor row");
+        assert_ne!(
+            buf[(ax, ay)].style().bg,
+            Some(Color::Yellow),
+            "only the offender is flagged, never the anchor"
+        );
+    }
+
+    // Regression: ratatui patches the highlight style over the whole selected
+    // row after the cells are painted, so a fg-only highlight used to clobber
+    // the red workspace number and hide it behind yellow-on-yellow.
+    #[test]
+    fn the_red_workspace_number_survives_on_selected_and_unselected_rows() {
+        let monitors = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+
+        for selected in [0, 1] {
+            let buf = render_list_to(&monitors, TUIMode::View, selected, area);
+            let (x, y) = find_text(&buf, "3").expect("workspace cell");
+            assert_eq!(
+                buf[(x, y)].style().fg,
+                Some(Color::Red),
+                "duplicate workspace must stay red on row {selected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_selected_caution_row_keeps_readable_contrast() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+        let buf = render_list_to(&monitors, TUIMode::View, 0, area);
+        let (_, row) = find_text(&buf, "Alpha").expect("monitor row");
+        let inner = Block::bordered().inner(area);
+
+        for x in inner.left()..inner.right() {
+            let style = buf[(x, row)].style();
+            if let (Some(fg), Some(bg)) = (style.fg, style.bg) {
+                // Reset/Reset is the terminal's own default pair, which is
+                // always contrasting; only explicit colours can collide.
+                if fg == Color::Reset && bg == Color::Reset {
+                    continue;
+                }
+                assert_ne!(fg, bg, "cell ({x}, {row}) would be invisible when reversed");
+            }
+        }
+    }
+
+    // The selected row must look the same whether or not it carries a warning:
+    // the reversed selection patch turns a yellow caution background into a
+    // solid block, so a warned selected row looked nothing like a clean one.
+    #[test]
+    fn a_selected_warned_row_looks_like_any_other_selected_row() {
+        let clean = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(1);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(2);
+                m
+            },
+        ];
+        // Same layout, but both monitors share a workspace (duplicate warning).
+        let warned = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+
+        let clean_buf = render_list_to(&clean, TUIMode::View, 0, area);
+        let warned_buf = render_list_to(&warned, TUIMode::View, 0, area);
+
+        let (cx, cy) = find_text(&clean_buf, "Alpha").expect("clean row");
+        let (wx, wy) = find_text(&warned_buf, "Alpha").expect("warned row");
+        assert_eq!(cy, wy, "both render on the first data row");
+        assert_eq!(
+            clean_buf[(cx, cy)].style(),
+            warned_buf[(wx, wy)].style(),
+            "the selected warned row must have the same background/style"
+        );
+        assert_ne!(
+            warned_buf[(wx, wy)].style().bg,
+            Some(Color::Yellow),
+            "the selection must not add a caution background"
+        );
+    }
+
+    #[test]
+    fn an_unselected_warned_row_keeps_its_caution_background() {
+        let warned = vec![
+            {
+                let mut m = placed("Alpha", 0);
+                m.workspace = Some(3);
+                m
+            },
+            {
+                let mut m = placed("Beta", 1920);
+                m.workspace = Some(3);
+                m
+            },
+        ];
+        let area = Rect::new(0, 0, 130, 10);
+        // Select the second row; the first (warned) row stays unselected.
+        let buf = render_list_to(&warned, TUIMode::View, 1, area);
+
+        let (x, y) = find_text(&buf, "Alpha").expect("warned row");
+        assert_eq!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "an unselected warned row still carries the caution background"
+        );
+    }
+
+    #[test]
+    fn moving_a_monitor_clear_un_flags_its_row_without_any_apply() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 100)];
+        let area = Rect::new(0, 0, 130, 9);
+
+        let flagged = render_list_to(&monitors, TUIMode::View, 2, area);
+        let (x, y) = find_text(&flagged, "Beta").expect("Beta row");
+        assert_eq!(flagged[(x, y)].style().bg, Some(Color::Yellow));
+
+        // Move Beta clear of Alpha: re-rendering alone must clear the caution,
+        // with no popup, apply or write in between.
+        let mut cleared = monitors;
+        cleared[1].position = Some(Position { x: 1920, y: 0 });
+        let buf = render_list_to(&cleared, TUIMode::View, 2, area);
+        let (x, y) = find_text(&buf, "Beta").expect("Beta row");
+        assert_ne!(
+            buf[(x, y)].style().bg,
+            Some(Color::Yellow),
+            "the caution background must disappear live"
+        );
+    }
+
+    #[test]
+    fn narrow_lists_drop_trailing_columns_instead_of_squeezing() {
+        let monitors = test_monitors();
+
+        let wide = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 140, 9),
+        ));
+        assert!(
+            wide.contains("workspace"),
+            "wide keeps every column: {wide}"
+        );
+
+        let medium = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 70, 9),
+        ));
+        assert!(medium.contains("description"), "medium keeps descriptions");
+        assert!(
+            !medium.contains("rotation"),
+            "medium drops rotation: {medium}"
+        );
+
+        let narrow = text_of(&render_list_to(
+            &monitors,
+            TUIMode::View,
+            0,
+            Rect::new(0, 0, 50, 9),
+        ));
+        assert!(narrow.contains("name"), "narrow keeps names: {narrow}");
+        assert!(
+            !narrow.contains("description"),
+            "narrow drops descriptions: {narrow}"
+        );
+    }
+
+    #[test]
+    fn a_hovered_row_glows_in_the_accent_colour() {
+        let monitors = vec![placed("Alpha", 0), placed("Beta", 1920)];
+        let mut list = MonitorList {
+            state: TableState::default().with_selected(Some(2)),
+            selected_row: Some(2),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: false,
+            hover: Some(crate::app::state::HoverTarget::ListRow(1)),
+        };
+        let area = Rect::new(0, 0, 130, 9);
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+
+        let (x, y) = find_text(&buf, "Beta").expect("Beta row");
+        assert_eq!(
+            buf[(x, y)].style().fg,
+            Some(crate::ui::styles::hover_accent()),
+            "the hovered row carries the steady accent"
+        );
     }
 }

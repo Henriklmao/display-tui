@@ -11,8 +11,10 @@ use ratatui::{
 };
 
 use crate::App;
+use crate::app::state::HoverTarget;
 use crate::monitor::Monitor;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
+use crate::ui::styles;
 use crate::utils::TUIMode;
 use ratatui::layout::Constraint;
 
@@ -20,6 +22,8 @@ use ratatui::layout::Constraint;
 pub struct Resolutions<'a> {
     pub state: TableState,
     pub monitor: &'a Monitor,
+    // The element currently under the pointer, for the hover glow.
+    pub hover: Option<HoverTarget>,
 }
 
 impl<'a> Resolutions<'a> {
@@ -27,6 +31,7 @@ impl<'a> Resolutions<'a> {
         Resolutions {
             state: TableState::default().with_selected(selected),
             monitor,
+            hover: None,
         }
     }
 
@@ -77,14 +82,18 @@ impl<'a> Resolutions<'a> {
 
     fn select(app: &mut App) {
         app.monitors[app.selected_monitor].set_current_resolution(app.selected_resolution);
+        // Applying a resolution changes the monitor's logical size, so it can
+        // create an overlap or a gap: validate immediately.
+        app.check_layout();
     }
 
     fn resolutions_to_rows(&self) -> Vec<Row<'static>> {
         self.monitor
             .modes
             .iter()
-            .map(|mode| {
-                Row::new(vec![
+            .enumerate()
+            .map(|(index, mode)| {
+                let row = Row::new(vec![
                     Cell::from(if mode.current {
                         "".to_string()
                     } else {
@@ -107,7 +116,12 @@ impl<'a> Resolutions<'a> {
                     } else {
                         Color::Red
                     })),
-                ])
+                ]);
+                if self.hover == Some(HoverTarget::ResolutionRow(index)) {
+                    row.style(styles::hover_style())
+                } else {
+                    row
+                }
             })
             .collect()
     }
@@ -162,6 +176,7 @@ mod tests {
         let mut resolutions = Resolutions {
             state: TableState::default(),
             monitor: &test_monitors()[0],
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 65, 7));
 

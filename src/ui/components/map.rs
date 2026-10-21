@@ -5,8 +5,11 @@
 use crate::{
     App,
     actions::movement::{self, SnapGuides},
+    app::state::HoverTarget,
     monitor::{Monitor, MonitorCanvas},
+    ui::styles,
     utils::TUIMode,
+    validation::diagnostics::{EdgeSegment, LayoutHighlights},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -37,6 +40,42 @@ pub struct Map<'a> {
     pub canvas: Option<MonitorCanvas>,
     // Monitors with an unapplied move; each shows a clickable Apply button.
     pub pending: &'a [usize],
+    // Overlap/detachment highlights to overlay, painted in world coordinates.
+    pub highlights: Option<&'a LayoutHighlights>,
+    // Blink phase: `true` paints the highlights hot (red), `false` leaves the
+    // monitor's normal border showing.
+    pub highlight_phase: bool,
+    // The element currently under the pointer, for the hover glow.
+    pub hover: Option<HoverTarget>,
+}
+
+// Draws one world-space highlight segment, mirroring y with the guide rule so
+// a horizontal world line lands on the same canvas row as the monitor edge.
+fn draw_highlight_segment(
+    ctx: &mut ratatui::widgets::canvas::Context,
+    canvas: &MonitorCanvas,
+    segment: &EdgeSegment,
+    color: Color,
+) {
+    let [bottom, top] = canvas.y_bounds;
+    let mirror = |y: f64| bottom + top - y;
+    if segment.horizontal {
+        ctx.draw(&CanvasLine {
+            x1: segment.start,
+            y1: mirror(segment.fixed),
+            x2: segment.end,
+            y2: mirror(segment.fixed),
+            color,
+        });
+    } else {
+        ctx.draw(&CanvasLine {
+            x1: segment.fixed,
+            y1: mirror(segment.start),
+            x2: segment.fixed,
+            y2: mirror(segment.end),
+            color,
+        });
+    }
 }
 
 impl<'a> Widget for Map<'a> {
@@ -66,14 +105,24 @@ impl<'a> Widget for Map<'a> {
                 let mut index = 0;
                 for monitor in self.monitors {
                     if self.selected != index && monitor.enabled {
-                        self.render_enabled_monitor(ctx, &monitor_canvas, monitor, Color::Blue);
+                        self.render_enabled_monitor(
+                            ctx,
+                            &monitor_canvas,
+                            monitor,
+                            self.monitor_color(index, Color::Blue),
+                        );
                     }
                     index += 1;
                 }
                 index = 0;
                 for monitor in self.monitors {
                     if self.selected == index && monitor.enabled {
-                        self.render_enabled_monitor(ctx, &monitor_canvas, monitor, Color::Yellow);
+                        self.render_enabled_monitor(
+                            ctx,
+                            &monitor_canvas,
+                            monitor,
+                            self.monitor_color(index, Color::Yellow),
+                        );
                     }
                     index += 1;
                 }
@@ -102,6 +151,41 @@ impl<'a> Widget for Map<'a> {
                             color: Color::Magenta,
                         });
                     }
+                    // Centre-to-centre alignments get a guide that spans both
+                    // monitors, so the shared centre is visible at a glance.
+                    if let Some(guide) = guides.center_x {
+                        let mirror = |y: f64| bottom + top - y;
+                        let start = guide.moved.0.min(guide.other.0);
+                        let end = guide.moved.1.max(guide.other.1);
+                        ctx.draw(&CanvasLine {
+                            x1: guide.at,
+                            y1: mirror(start),
+                            x2: guide.at,
+                            y2: mirror(end),
+                            color: Color::Magenta,
+                        });
+                    }
+                    if let Some(guide) = guides.center_y {
+                        let mirror = |y: f64| bottom + top - y;
+                        let start = guide.moved.0.min(guide.other.0);
+                        let end = guide.moved.1.max(guide.other.1);
+                        ctx.draw(&CanvasLine {
+                            x1: start,
+                            y1: mirror(guide.at),
+                            x2: end,
+                            y2: mirror(guide.at),
+                            color: Color::Magenta,
+                        });
+                    }
+                }
+                // Overlap and detachment highlights, on top of every monitor
+                // rectangle (and the guides) but under the Apply buttons.
+                if self.highlight_phase
+                    && let Some(highlights) = self.highlights
+                {
+                    for segment in highlights.segments.iter().chain(&highlights.connectors) {
+                        draw_highlight_segment(ctx, &monitor_canvas, segment, Color::Red);
+                    }
                 }
             })
             .render(area, buf);
@@ -113,16 +197,32 @@ impl<'a> Widget for Map<'a> {
                 && monitor.enabled
                 && let Some(rect) = Map::apply_button_rect(area, &monitor_canvas, monitor)
             {
+                let hovered = self.hover == Some(HoverTarget::ApplyButton(index));
+                let color = if hovered {
+                    styles::hover_accent()
+                } else {
+                    Color::Green
+                };
                 Clear.render(rect, buf);
-                Paragraph::new(Line::from("Apply").green().bold())
+                Paragraph::new(Line::from("Apply").fg(color).bold())
                     .alignment(Alignment::Center)
-                    .block(Block::bordered().border_style(Style::default().fg(Color::Green)))
+                    .block(Block::bordered().border_style(Style::default().fg(color)))
                     .render(rect, buf);
             }
         }
     }
 }
 impl<'a> Map<'a> {
+    // The colour of a monitor: a hovered monitor is marked yellow (the same
+    // cue as the selection), otherwise it keeps its base colour.
+    fn monitor_color(&self, index: usize, base: Color) -> Color {
+        if self.hover == Some(HoverTarget::Map(index)) {
+            Color::Yellow
+        } else {
+            base
+        }
+    }
+
     pub fn handle_events(app: &mut App, key_event: KeyEvent) {
         let is_shift = key_event.modifiers.contains(KeyModifiers::SHIFT);
         let selected = app.selected_monitor;
@@ -365,6 +465,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
 
@@ -451,6 +554,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -476,6 +582,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -493,6 +602,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -514,6 +626,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         first_selected.render(area, &mut buf);
@@ -528,6 +643,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         second_selected.render(area, &mut buf);
@@ -713,6 +831,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -734,6 +855,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -759,6 +883,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 100, 30));
         map.render(buf.area, &mut buf);
@@ -789,6 +916,9 @@ mod tests {
                 guides: None,
                 canvas: None,
                 pending: &[],
+                highlights: None,
+                highlight_phase: true,
+                hover: None,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -931,6 +1061,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -971,6 +1104,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         plain.render(buf.area, &mut buf);
         assert!(!text_of(&buf).contains("Apply"), "no button without a move");
@@ -983,6 +1119,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         moved.render(buf.area, &mut buf);
         assert!(text_of(&buf).contains("Apply"), "the button is drawn");
@@ -1006,6 +1145,9 @@ mod tests {
             guides: None,
             canvas: None,
             pending: &[0, 1, 2],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1029,6 +1171,9 @@ mod tests {
                 guides: None,
                 canvas: None,
                 pending: &[0],
+                highlights: None,
+                highlight_phase: true,
+                hover: None,
             };
             let mut buf = Buffer::empty(Rect::new(0, 0, width, height));
             map.render(buf.area, &mut buf);
@@ -1050,9 +1195,13 @@ mod tests {
             guides: Some(SnapGuides {
                 x: None,
                 y: Some(0.0),
+                ..Default::default()
             }),
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1079,9 +1228,13 @@ mod tests {
             guides: Some(SnapGuides {
                 x: Some(0.0),
                 y: None,
+                ..Default::default()
             }),
             canvas: None,
             pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
         };
         let mut buf = Buffer::empty(area);
         map.render(area, &mut buf);
@@ -1094,6 +1247,259 @@ mod tests {
         assert!(
             col < area.width / 2,
             "vertical guide on the wrong side: col {col}"
+        );
+    }
+
+    // A centre-to-centre snap draws a guide that spans both monitors instead of
+    // the full canvas height.
+    #[test]
+    fn a_centre_to_centre_guide_spans_only_the_two_monitors() {
+        // Two stacked monitors, aligned on x, well away from the top/bottom.
+        let monitors = vec![monitor("A", 0, 2000), monitor("B", 0, 4000)];
+        let area = Rect::new(0, 0, 100, 30);
+        let map = Map {
+            selected: 1,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: Some(SnapGuides {
+                x: None,
+                y: None,
+                center_x: Some(crate::actions::movement::CenterGuide {
+                    at: 960.0,
+                    moved: (4000.0, 5080.0),
+                    other: (2000.0, 3080.0),
+                }),
+                center_y: None,
+            }),
+            canvas: None,
+            pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: None,
+        };
+        let mut buf = Buffer::empty(area);
+        map.render(area, &mut buf);
+
+        let rows: Vec<u16> = (area.top()..area.bottom())
+            .filter(|&y| {
+                (area.left()..area.right()).any(|x| buf[(x, y)].style().fg == Some(Color::Magenta))
+            })
+            .collect();
+
+        assert!(!rows.is_empty(), "the centre guide must be drawn");
+        // It is clipped to the two monitors, not the whole canvas.
+        let first = *rows.first().unwrap();
+        let last = *rows.last().unwrap();
+        assert!(
+            first > area.top() && last < area.bottom().saturating_sub(1),
+            "the guide must not span the whole canvas: {rows:?}"
+        );
+    }
+
+    // --- overlap / detachment highlights --------------------------------
+
+    use crate::validation::diagnostics::{LayoutHighlights, layout_highlights};
+
+    fn sized(name: &str, x: i32, y: i32, w: i32, h: i32) -> Monitor {
+        let mut m = monitor(name, x, y);
+        m.modes[0].width = w;
+        m.modes[0].height = h;
+        m
+    }
+
+    // Whether any red cell lies within `tol` world pixels of `world`.
+    fn red_near(
+        buf: &Buffer,
+        area: Rect,
+        monitors: &[Monitor],
+        world: (f64, f64),
+        tol: f64,
+    ) -> bool {
+        let canvas = Monitor::get_monitors_canvas(monitors, &area);
+        let inner = Block::bordered().inner(area);
+        for row in inner.top()..inner.bottom() {
+            for col in inner.left()..inner.right() {
+                if let Some((wx, wy)) = Map::world_at_in(area, &canvas, col, row)
+                    && (wx - world.0).abs() <= tol
+                    && (wy - world.1).abs() <= tol
+                {
+                    let style = buf[(col, row)].style();
+                    if style.fg == Some(Color::Red) || style.bg == Some(Color::Red) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn map_with<'a>(monitors: &'a [Monitor], highlights: &'a LayoutHighlights) -> Map<'a> {
+        Map {
+            selected: 0,
+            monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[],
+            highlights: Some(highlights),
+            highlight_phase: true,
+            hover: None,
+        }
+    }
+
+    #[test]
+    fn an_overlap_is_painted_red_only_from_the_overlap_point_onward() {
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("B", 50, 50, 100, 100)];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        map_with(&monitors, &highlights).render(area, &mut buf);
+
+        assert!(
+            red_near(&buf, area, &monitors, (100.0, 75.0), 6.0),
+            "the overlapping part of A's right edge is red"
+        );
+        assert!(
+            !red_near(&buf, area, &monitors, (100.0, 25.0), 6.0),
+            "the edge above the overlap point stays in the normal colour"
+        );
+    }
+
+    #[test]
+    fn a_detached_monitor_gets_its_full_border_its_anchor_edge_and_a_connector() {
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+        map_with(&monitors, &highlights).render(area, &mut buf);
+
+        assert!(
+            red_near(&buf, area, &monitors, (5000.0, 90.0), 20.0),
+            "the detached monitor's whole left border is red"
+        );
+        assert!(
+            red_near(&buf, area, &monitors, (100.0, 90.0), 20.0),
+            "the anchor's facing edge is red"
+        );
+        assert!(
+            !red_near(&buf, area, &monitors, (0.0, 90.0), 20.0),
+            "the anchor's far edge is not red"
+        );
+        assert!(
+            red_near(&buf, area, &monitors, (2500.0, 50.0), 30.0),
+            "the connector runs between the two"
+        );
+    }
+
+    #[test]
+    fn the_blink_phase_hides_the_highlights() {
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
+        let highlights = layout_highlights(&monitors);
+        let area = Rect::new(0, 0, 100, 30);
+        let mut buf = Buffer::empty(area);
+
+        let mut map = map_with(&monitors, &highlights);
+        map.highlight_phase = false;
+        map.render(area, &mut buf);
+
+        for row in area.top()..area.bottom() {
+            for col in area.left()..area.right() {
+                let style = buf[(col, row)].style();
+                assert_ne!(
+                    style.fg,
+                    Some(Color::Red),
+                    "cell ({col}, {row}) must not be red in the off phase"
+                );
+                assert_ne!(style.bg, Some(Color::Red));
+            }
+        }
+    }
+
+    #[test]
+    fn highlight_rendering_survives_tiny_areas() {
+        let monitors = vec![sized("A", 0, 0, 100, 100), sized("C", 5000, 0, 100, 100)];
+        let highlights = layout_highlights(&monitors);
+        for (width, height) in [(1u16, 1u16), (3, 2), (10, 5), (40, 12)] {
+            let area = Rect::new(0, 0, width, height);
+            let mut buf = Buffer::empty(area);
+            map_with(&monitors, &highlights).render(area, &mut buf);
+        }
+    }
+
+    // --- hover glow ------------------------------------------------------
+
+    #[test]
+    fn a_hovered_monitor_is_marked_yellow() {
+        let monitors = vec![monitor("Alpha", 0, 0), monitor("Beta", 1920, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+
+        let mut buf = Buffer::empty(area);
+        Map {
+            selected: 99,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: Some(HoverTarget::Map(1)),
+        }
+        .render(area, &mut buf);
+
+        let (bx, by) = find_text(&buf, "Beta").expect("Beta label");
+        assert_eq!(
+            buf[(bx, by)].style().fg,
+            Some(Color::Yellow),
+            "the hovered monitor is marked yellow"
+        );
+        let (ax, ay) = find_text(&buf, "Alpha").expect("Alpha label");
+        assert_eq!(
+            buf[(ax, ay)].style().fg,
+            Some(Color::Blue),
+            "the other monitor keeps its colour"
+        );
+    }
+
+    #[test]
+    fn the_hover_glow_is_steady_and_never_blinks() {
+        // Regression: the glow used to alternate between two accent colours on
+        // an 80ms tick, which made hovered monitors blink constantly.
+        let monitors = vec![monitor("Alpha", 0, 0)];
+        let area = Rect::new(0, 0, 100, 30);
+
+        let mut first = Buffer::empty(area);
+        Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: Some(HoverTarget::Map(0)),
+        }
+        .render(area, &mut first);
+        let mut second = Buffer::empty(area);
+        Map {
+            selected: 0,
+            monitors: &monitors,
+            is_previewing: false,
+            guides: None,
+            canvas: None,
+            pending: &[],
+            highlights: None,
+            highlight_phase: true,
+            hover: Some(HoverTarget::Map(0)),
+        }
+        .render(area, &mut second);
+
+        let (x, y) = find_text(&first, "Alpha").expect("label");
+        assert_eq!(
+            first[(x, y)].style().fg,
+            second[(x, y)].style().fg,
+            "the glow must not change between frames"
         );
     }
 }

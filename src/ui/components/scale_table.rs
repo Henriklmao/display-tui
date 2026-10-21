@@ -11,19 +11,24 @@ use ratatui::{
 };
 
 use crate::App;
+use crate::app::state::HoverTarget;
 use crate::ui::layouts::{row_in_window, scrolled_offset};
+use crate::ui::styles;
 use crate::utils::{ScaleValue, TUIMode, change_mode};
 use ratatui::layout::Constraint;
 
 #[derive(Debug)]
 pub struct Scale {
     pub state: TableState,
+    // The element currently under the pointer, for the hover glow.
+    pub hover: Option<HoverTarget>,
 }
 
 impl Scale {
     pub fn new(selected: usize) -> Self {
         Scale {
             state: TableState::default().with_selected(selected),
+            hover: None,
         }
     }
 
@@ -74,12 +79,22 @@ impl Scale {
     fn select(app: &mut App) {
         let scale_value = Some(ScaleValue::table()[app.selected_scale].value);
         app.monitors[app.selected_monitor].scale = scale_value;
+        // A new scale changes the logical size: re-check the layout now.
+        app.check_layout();
     }
 
     fn scale_to_rows(&self) -> Vec<Row<'static>> {
         ScaleValue::table()
             .iter()
-            .map(|scale| Row::new(vec![Cell::from(scale.name)]))
+            .enumerate()
+            .map(|(index, scale)| {
+                let row = Row::new(vec![Cell::from(scale.name)]);
+                if self.hover == Some(HoverTarget::ScaleRow(index)) {
+                    row.style(styles::hover_style())
+                } else {
+                    row
+                }
+            })
             .collect()
     }
 }
@@ -114,6 +129,7 @@ mod tests {
     fn render_scale() {
         let mut scales = Scale {
             state: TableState::default(),
+            hover: None,
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 11));
 

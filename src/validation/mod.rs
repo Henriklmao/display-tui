@@ -1,13 +1,14 @@
 //! Monitor configuration validation module.
 
+pub mod diagnostics;
 pub mod errors;
 pub mod rules;
 
 pub use errors::ValidationError;
 
 use self::rules::{
-    validate_contiguous, validate_no_overlap, validate_preset_name as validate_preset_name_rule,
-    validate_workspaces_unique,
+    validate_contiguous, validate_no_overlap, validate_origin,
+    validate_preset_name as validate_preset_name_rule, validate_workspaces_unique,
 };
 use crate::monitor::Monitor;
 
@@ -28,6 +29,12 @@ pub fn validate(monitors: &[Monitor]) -> Result<(), Vec<String>> {
     }
 
     if let Err(validation_errors) = validate_contiguous(monitors) {
+        for err in validation_errors {
+            errors.push(err.to_string());
+        }
+    }
+
+    if let Err(validation_errors) = validate_origin(monitors) {
         for err in validation_errors {
             errors.push(err.to_string());
         }
@@ -134,6 +141,19 @@ mod tests {
     #[test]
     fn preset_name_wrapper_accepts_valid_names() {
         assert_eq!(validate_preset_name("gaming-desk"), Ok(()));
+    }
+
+    #[test]
+    fn a_layout_off_the_origin_is_reported_after_the_geometry_rules() {
+        // Valid geometry, but shifted away from (0,0).
+        let monitors = vec![box_at("A", 1000, 0, Some(1)), box_at("B", 2920, 0, Some(2))];
+
+        let errors = validate(&monitors).unwrap_err();
+
+        assert_eq!(
+            errors,
+            vec!["No monitor starts at the origin (0,0)".to_string()]
+        );
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub enum ValidationError {
     NonContiguousMonitors {
         disconnected: Vec<String>,
     },
+    // No enabled monitor has its top-left corner at the origin.
+    NoOriginMonitor,
     // A preset name is invalid.
     InvalidName,
 }
@@ -46,6 +48,9 @@ impl fmt::Display for ValidationError {
                     "Monitors not contiguous. Disconnected: {}",
                     disconnected.join(", ")
                 )
+            }
+            ValidationError::NoOriginMonitor => {
+                write!(f, "No monitor starts at the origin (0,0)")
             }
             ValidationError::InvalidName => {
                 write!(

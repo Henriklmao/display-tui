@@ -45,6 +45,7 @@ pub fn text_for(target: HoverTarget) -> &'static str {
         HoverTarget::PresetRow(_) => "Click previews, double-click applies",
         HoverTarget::HelpClose => "Close the keybindings help",
         HoverTarget::HelpScrollbar => "Drag or click to scroll the help",
+        HoverTarget::Action(action) => action.description(),
         HoverTarget::Popup(action) => match action {
             PopupAction::Close => "Close without applying",
             PopupAction::Accept => "Accept and write the configuration",
@@ -238,6 +239,8 @@ mod tests {
             HoverTarget::PresetRow(0),
             HoverTarget::HelpClose,
             HoverTarget::HelpScrollbar,
+            HoverTarget::Action(crate::ui::components::ActionId::Save),
+            HoverTarget::Action(crate::ui::components::ActionId::Apply),
             HoverTarget::Popup(PopupAction::Close),
             HoverTarget::Popup(PopupAction::Accept),
             HoverTarget::Popup(PopupAction::Force),

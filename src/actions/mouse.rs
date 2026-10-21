@@ -9,7 +9,8 @@ use crate::actions::movement::snap_to_alignment;
 use crate::app::state::{HelpScrollbarDrag, HoverTarget};
 use crate::monitor::{Monitor, MonitorCanvas};
 use crate::ui::components::{
-    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+    ActionBar, ActionBarContext, HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions,
+    Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
@@ -142,7 +143,12 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         MouseEventKind::Drag(MouseButton::Left) => handle_left_drag(app, layout, point(event)),
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
         // The mouse's Apply: a right click resolves a pending move.
-        MouseEventKind::Down(MouseButton::Right) => handle_right_click(app),
+        MouseEventKind::Down(MouseButton::Right) => {
+            // Right-clicking the footer is not the map's Apply gesture.
+            if !action_bar(app, layout).contains(point(event)) {
+                handle_right_click(app);
+            }
+        }
         MouseEventKind::ScrollUp => handle_scroll(app, layout, point(event), -1),
         MouseEventKind::ScrollDown => handle_scroll(app, layout, point(event), 1),
         _ => {}
@@ -180,6 +186,12 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
     point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
 }
 
+// The footer buttons for the current frame. Pure, so the click and hover maps
+// always agree with what the renderer drew.
+fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
+    ActionBar::layout(layout.list, ActionBarContext::from_app(app))
+}
+
 // Resolves the interactive element under `point`, honouring the same modal
 // precedence as the click handler. Pure so it can be unit-tested.
 fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<HoverTarget> {
@@ -204,6 +216,16 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
                 .row_at(layout.area, point.1)
                 .map(HoverTarget::PresetRow);
         }
+        return None;
+    }
+
+    let bar = action_bar(app, layout);
+    if let Some(action) = bar.button_at(point) {
+        return Some(HoverTarget::Action(action));
+    }
+    // The footer row is not a display row: hovering its empty space must not
+    // highlight the list behind it.
+    if bar.contains(point) {
         return None;
     }
 
@@ -269,6 +291,20 @@ fn clamp_selection(app: &mut App) {
 }
 
 fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now: Instant) {
+    // Footer buttons work even with no monitors (Save, Quit, Help) and always
+    // win over the rows behind them.
+    let bar = action_bar(app, layout);
+    if let Some(action) = bar.button_at(point) {
+        app.last_click = None;
+        app.perform_action(action);
+        return;
+    }
+    if bar.contains(point) {
+        // Empty space in the footer is not a display row.
+        app.last_click = None;
+        return;
+    }
+
     if app.monitors.is_empty() {
         return;
     }
@@ -421,6 +457,10 @@ fn handle_scroll(app: &mut App, layout: ScreenLayout, point: (u16, u16), delta: 
     if app.monitors.is_empty() {
         return;
     }
+    // The wheel belongs to the list/table, not to the action bar.
+    if action_bar(app, layout).contains(point) {
+        return;
+    }
     clamp_selection(app);
 
     if layout.side_table.is_some_and(|side| inside(side, point)) {
@@ -511,7 +551,7 @@ mod tests {
     use crate::app::state::Popup;
     use crate::monitor::{Monitor, Position, Resolution};
     use crate::test_utils::tests::{TempDir, find_cell, find_text, test_monitors, text_of};
-    use crate::ui::components::PresetMenu;
+    use crate::ui::components::{ActionId, PresetMenu};
     use crate::ui::layouts::screen_layout;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::buffer::Buffer;
@@ -1058,6 +1098,111 @@ mod tests {
         moved(&mut a, col, row);
 
         assert_eq!(a.hover, Some(HoverTarget::Map(1)));
+    }
+
+    fn footer_button(a: &App, action: ActionId) -> Rect {
+        let layout = a.layout.unwrap();
+        ActionBar::layout(layout.list, ActionBarContext::from_app(a))
+            .buttons
+            .iter()
+            .find(|button| button.action == action)
+            .map(|button| button.rect)
+            .unwrap_or_else(|| panic!("{action:?} is not in the footer"))
+    }
+
+    #[test]
+    fn moving_over_a_footer_button_sets_the_action_hover() {
+        let mut a = app_in(
+            Rect::new(0, 0, 160, 40),
+            TUIMode::View,
+            test_monitors(),
+        );
+        let rect = footer_button(&a, ActionId::Save);
+
+        moved(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.hover, Some(HoverTarget::Action(ActionId::Save)));
+        assert_eq!(
+            crate::ui::tooltip::text_for(HoverTarget::Action(ActionId::Save)),
+            ActionId::Save.description()
+        );
+    }
+
+    #[test]
+    fn clicking_the_help_button_opens_the_modal_without_selecting_a_row() {
+        let mut a = app(TUIMode::View, test_monitors());
+        let rect = footer_button(&a, ActionId::Help);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(a.show_help, "the help button opens the modal");
+        assert_eq!(a.selected_monitor, 0, "the footer is not a display row");
+    }
+
+    #[test]
+    fn clicking_the_move_button_switches_mode() {
+        let mut a = app(TUIMode::View, test_monitors());
+        let rect = footer_button(&a, ActionId::Move);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.mode, TUIMode::Move);
+    }
+
+    #[test]
+    fn clicking_apply_in_a_pending_move_commits_it() {
+        let dir = TempDir::new("mouse-footer-apply");
+        let mut a = app(TUIMode::View, test_monitors());
+        a.state_path = Some(dir.path().join("monitor_state.json"));
+        a.note_move(0, (0, 0));
+        let rect = footer_button(&a, ActionId::Apply);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(!a.has_pending_move(), "Apply commits every pending move");
+        assert!(
+            dir.path().join("monitor_state.json").exists(),
+            "Apply persists the monitor state"
+        );
+    }
+
+    #[test]
+    fn right_clicking_the_footer_is_not_the_map_apply_gesture() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.note_move(0, (0, 0));
+        let rect = footer_button(&a, ActionId::Apply);
+
+        right_click(&mut a, rect.x, rect.y);
+
+        assert!(
+            a.has_pending_move(),
+            "a right click on the footer must not apply a move"
+        );
+    }
+
+    #[test]
+    fn the_wheel_over_the_footer_does_not_change_the_selection() {
+        let mut a = app(TUIMode::View, test_monitors());
+        let rect = footer_button(&a, ActionId::Save);
+
+        wheel_down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.selected_monitor, 0);
+    }
+
+    #[test]
+    fn range_hints_in_the_footer_stay_inert() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let buf = render_in(&a, screen);
+        let (col, row) = find_text(&buf, "<0-9>").expect("workspace hint");
+
+        moved(&mut a, col, row);
+        assert_eq!(a.hover, None, "a range hint is not a target");
+
+        down(&mut a, col, row);
+        assert_eq!(a.selected_monitor, 0, "the hint is not a list row");
+        assert_eq!(a.mode, TUIMode::View);
     }
 
     #[test]

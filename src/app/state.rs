@@ -7,12 +7,12 @@ use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{
-    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+    ActionId, HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEvent};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
 use std::io;
@@ -121,6 +121,8 @@ pub enum HoverTarget {
     HelpClose,
     // The draggable scrollbar inside the help modal.
     HelpScrollbar,
+    // A button in the display list's action bar.
+    Action(ActionId),
 }
 
 // How long one blink phase stays on screen.
@@ -558,6 +560,16 @@ impl App {
 
     fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
         crate::actions::mouse::handle_mouse(self, mouse_event);
+    }
+
+    // Runs a footer button's action through the real key path, so a click and
+    // the advertised key can never diverge.
+    pub(crate) fn perform_action(&mut self, action: ActionId) {
+        let enabled = self
+            .monitors
+            .get(self.selected_monitor)
+            .is_some_and(|monitor| monitor.enabled);
+        self.handle_key_event(KeyEvent::new(action.key(enabled), KeyModifiers::NONE));
     }
 
     // Dispatches one key press. `pub(crate)` so the mouse tests can drive the

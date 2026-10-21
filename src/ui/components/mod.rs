@@ -1,5 +1,6 @@
 //! UI component modules.
 
+pub mod action_bar;
 pub mod help;
 pub mod list;
 pub mod map;
@@ -8,8 +9,9 @@ pub mod preset;
 pub mod resolution_table;
 pub mod scale_table;
 
+pub use action_bar::{ActionBar, ActionBarContext, ActionId};
 pub use help::HelpModal;
-pub use list::MonitorList;
+pub use list::{ListColumn, MonitorList};
 pub use map::Map;
 pub use popup::{PopupAction, PopupFrame};
 pub use preset::{MenuEvent, PresetAction, PresetEntry, PresetMenu};

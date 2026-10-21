@@ -32,7 +32,7 @@ const MAX_WIDTH: u16 = 84;
 const MAX_HEIGHT: u16 = 30;
 
 // Width below which the version is dropped to keep the full title visible.
-const VERSION_MIN_WIDTH: u16 = 42;
+const VERSION_MIN_WIDTH: u16 = 46;
 
 // Width of the key column inside each section. Descriptions start here, so
 // every row reads as a table.
@@ -40,7 +40,6 @@ const KEY_COLUMN: usize = 14;
 
 // The close hint embedded in the bottom border.
 const CLOSE_BUTTON: &str = "[ Esc ]";
-const CLOSE_TEXT: &str = "Close";
 
 // Palette of the modal: section rules warm, keys bright, prose neutral.
 const SECTION_COLOR: Color = Color::Yellow;
@@ -125,7 +124,7 @@ impl HelpModal {
 
 // Total display width of the footer label.
 fn footer_width() -> u16 {
-    CLOSE_BUTTON.chars().count() as u16 + 1 + CLOSE_TEXT.chars().count() as u16
+    CLOSE_BUTTON.chars().count() as u16
 }
 
 // Start column and available width of the centred footer, kept inside the
@@ -494,7 +493,7 @@ fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     put(buf, right, bottom, '╝', border);
 
     // The version is dropped on narrow popups so the title keeps its room.
-    let version = format!(" v{} ", env!("CARGO_PKG_VERSION"));
+    let version = format!(" Display-TUI v{} ", env!("CARGO_PKG_VERSION"));
     let version_start = if popup.width >= VERSION_MIN_WIDTH {
         let start = right.saturating_sub(version.len() as u16);
         draw_spans(
@@ -523,11 +522,7 @@ fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     } else {
         Style::default().fg(KEY_COLOR).bold()
     };
-    let footer: &[(&str, Style)] = &[
-        (CLOSE_BUTTON, key_style),
-        (" ", Style::default().fg(Color::Gray)),
-        (CLOSE_TEXT, Style::default().white()),
-    ];
+    let footer: &[(&str, Style)] = &[(CLOSE_BUTTON, key_style)];
     draw_spans(buf, bottom, start, right, footer);
 }
 
@@ -824,8 +819,12 @@ mod tests {
             top.contains("⌨ Keybindings/Help"),
             "title is not embedded: {top:?}"
         );
-        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let version = format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"));
         assert!(top.contains(&version), "version is not embedded: {top:?}");
+        assert!(
+            top.contains(&format!(" {version} ")),
+            "the header version keeps its surrounding spaces: {top:?}"
+        );
 
         // The title sits left, the version right.
         let title_at = top.find("Keybindings/Help").unwrap();
@@ -853,7 +852,10 @@ mod tests {
         let top = inner_row(&buf, popup, popup.y);
 
         assert!(top.contains("Keybindings/Help"), "{top:?}");
-        assert!(top.contains(env!("CARGO_PKG_VERSION")), "{top:?}");
+        assert!(
+            top.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
+            "{top:?}"
+        );
     }
 
     #[test]
@@ -864,7 +866,7 @@ mod tests {
 
         assert!(text.contains("Keybindings/Help"), "{text}");
         assert!(
-            !text.contains(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+            !text.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
             "the version must be dropped, not squeezed in: {text}"
         );
     }
@@ -876,13 +878,16 @@ mod tests {
         let bottom = inner_row(&buf, popup, popup.bottom() - 1);
 
         assert!(
-            bottom.contains(&format!("{CLOSE_BUTTON} {CLOSE_TEXT}")),
+            bottom.contains(CLOSE_BUTTON),
             "footer is not embedded: {bottom:?}"
+        );
+        assert!(
+            !bottom.contains("Close"),
+            "the footer must only show the key: {bottom:?}"
         );
         let at = bottom.find(CLOSE_BUTTON).unwrap();
         let before = bottom[..at].chars().count();
-        let trailing =
-            bottom.chars().count() - (before + CLOSE_BUTTON.len() + 1 + CLOSE_TEXT.len());
+        let trailing = bottom.chars().count() - (before + CLOSE_BUTTON.len());
         assert!(
             before.abs_diff(trailing) <= 1,
             "footer is not centred: {before} before, {trailing} after"
@@ -1045,7 +1050,7 @@ mod tests {
     #[test]
     fn the_close_hint_survives_a_short_terminal() {
         // The footer lives in the border, so a short popup cannot drop it.
-        assert!(as_text(&render_help(80, 6)).contains("[ Esc ] Close"));
+        assert!(as_text(&render_help(80, 6)).contains("[ Esc ]"));
     }
 
     #[test]

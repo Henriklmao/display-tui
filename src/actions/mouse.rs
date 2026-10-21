@@ -8,9 +8,10 @@ use crate::App;
 use crate::actions::movement::snap_to_alignment;
 use crate::app::state::{HelpScrollbarDrag, HoverTarget};
 use crate::monitor::{Monitor, MonitorCanvas};
+use crate::ui::components::workspace_picker;
 use crate::ui::components::{
-    ActionBar, ActionBarContext, HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions,
-    Scale,
+    ActionBar, ActionBarContext, ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction,
+    PresetMenu, Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
@@ -129,6 +130,24 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         return;
     }
 
+    if app.workspace_picker.is_some() {
+        // The picker is a small modal: a left click either assigns a digit or
+        // dismisses it; everything else is swallowed.
+        if is_left_click(event.kind) {
+            let point = point(event);
+            let digit = app
+                .workspace_picker_anchor(layout)
+                .and_then(|anchor| workspace_picker::digit_at(anchor, layout.area, point));
+            app.last_click = None;
+            app.close_workspace_picker();
+            app.set_hover(None, point, now, false);
+            if let Some(digit) = digit {
+                app.assign_workspace(digit);
+            }
+        }
+        return;
+    }
+
     // A button gesture takes the pointer off any hovered element; the next
     // motion event repopulates it.
     if matches!(
@@ -219,6 +238,13 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
         return None;
     }
 
+    if app.workspace_picker.is_some() {
+        return app
+            .workspace_picker_anchor(layout)
+            .and_then(|anchor| workspace_picker::digit_at(anchor, layout.area, point))
+            .map(HoverTarget::WorkspaceDigit);
+    }
+
     let bar = action_bar(app, layout);
     if let Some(action) = bar.button_at(point) {
         return Some(HoverTarget::Action(action));
@@ -276,7 +302,14 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
         && let Some(row) =
             MonitorList::row_at(layout.list, &app.monitors, app.selected_monitor, point.1)
     {
-        return Some(HoverTarget::ListRow(row));
+        return Some(match MonitorList::column_at(layout.list, point.0) {
+            Some(ListColumn::Icon) => HoverTarget::ListIcon(row),
+            Some(ListColumn::Resolution) => HoverTarget::ListResolution(row),
+            Some(ListColumn::Scale) => HoverTarget::ListScale(row),
+            Some(ListColumn::Rotation) => HoverTarget::ListRotation(row),
+            Some(ListColumn::Workspace) => HoverTarget::ListWorkspace(row),
+            _ => HoverTarget::ListRow(row),
+        });
     }
 
     None
@@ -377,18 +410,48 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
             MonitorList::row_at(layout.list, &app.monitors, app.selected_monitor, point.1)
     {
         // `row` is resolved against the current render's scroll window, so a
-        // click (and the toggle) always acts on the monitor actually drawn
-        // under the cursor.
+        // click always acts on the monitor actually drawn under the cursor.
+        let column = MonitorList::column_at(layout.list, point.0).unwrap_or(ListColumn::Name);
         let already_selected = app.selected_monitor == row;
         app.selected_monitor = row;
-        // The checkbox toggles only once the row is already selected, so the
-        // first click selects and the next one enables/disables.
-        if already_selected && point.0 < MonitorList::icon_column_end(layout.list) {
-            toggle_monitor(app, row);
-            // Disabling the pending monitor drops its Apply button and its move.
-            if !app.monitors[row].enabled {
-                app.discard_move(row);
+
+        match column {
+            // The checkbox keeps the select-then-toggle affordance: the first
+            // click selects the row, the next one toggles it.
+            ListColumn::Icon => {
+                if already_selected {
+                    toggle_monitor(app, row);
+                    // Disabling the pending monitor drops its Apply button and
+                    // its move.
+                    if !app.monitors[row].enabled {
+                        app.discard_move(row);
+                    }
+                }
             }
+            // The value cells open the matching picker directly.
+            ListColumn::Resolution => {
+                if let Some(monitor) = app.monitors.get(row) {
+                    app.selected_resolution = monitor
+                        .modes
+                        .iter()
+                        .position(|mode| mode.current)
+                        .unwrap_or(0);
+                }
+                app.perform_action(ActionId::Resolution);
+            }
+            ListColumn::Scale => {
+                if let Some(monitor) = app.monitors.get(row) {
+                    let current = monitor.scale.unwrap_or(1.0);
+                    app.selected_scale = ScaleValue::table()
+                        .iter()
+                        .position(|entry| (entry.value - current).abs() < 1e-6)
+                        .unwrap_or(0);
+                }
+                app.perform_action(ActionId::Scale);
+            }
+            ListColumn::Rotation => app.perform_action(ActionId::Rotate),
+            ListColumn::Workspace => app.open_workspace_picker(row),
+            _ => {}
         }
     }
 }
@@ -1242,6 +1305,149 @@ mod tests {
         moved(&mut a, col, row);
 
         assert_eq!(a.hover, Some(HoverTarget::ListRow(1)));
+    }
+
+    fn list_cell(a: &App, row: usize, column: ListColumn) -> Rect {
+        MonitorList::cell_rect(
+            a.layout.unwrap().list,
+            &a.monitors,
+            a.selected_monitor,
+            row,
+            column,
+        )
+        .unwrap_or_else(|| panic!("{column:?} cell of row {row} is not drawn"))
+    }
+
+    #[test]
+    fn the_list_action_cells_track_their_own_hover() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+
+        for (column, target) in [
+            (ListColumn::Icon, HoverTarget::ListIcon(0)),
+            (
+                ListColumn::Resolution,
+                HoverTarget::ListResolution(0),
+            ),
+            (ListColumn::Scale, HoverTarget::ListScale(0)),
+            (ListColumn::Rotation, HoverTarget::ListRotation(0)),
+            (ListColumn::Workspace, HoverTarget::ListWorkspace(0)),
+        ] {
+            let rect = list_cell(&a, 0, column);
+            moved(&mut a, rect.x, rect.y);
+            assert_eq!(a.hover, Some(target), "hovering {column:?}");
+        }
+    }
+
+    #[test]
+    fn clicking_the_resolution_cell_opens_the_table() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let rect = list_cell(&a, 0, ListColumn::Resolution);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.mode, TUIMode::Resolution);
+        assert_eq!(a.selected_resolution, 0, "the current mode is preselected");
+    }
+
+    #[test]
+    fn clicking_the_scale_cell_opens_the_table() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let rect = list_cell(&a, 0, ListColumn::Scale);
+        let expected = ScaleValue::table()
+            .iter()
+            .position(|entry| (entry.value - 1.0).abs() < 1e-6)
+            .expect("100% in the table");
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.mode, TUIMode::Scale);
+        assert_eq!(a.selected_scale, expected);
+    }
+
+    #[test]
+    fn clicking_the_rotation_cell_rotates_once() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let rect = list_cell(&a, 0, ListColumn::Rotation);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.monitors[0].transform.as_deref(), Some("90"));
+        assert_eq!(a.mode, TUIMode::View, "rotating stays in View");
+    }
+
+    #[test]
+    fn clicking_the_workspace_cell_opens_the_picker() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let rect = list_cell(&a, 0, ListColumn::Workspace);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.workspace_picker.map(|picker| picker.monitor), Some(0));
+        assert_eq!(a.selected_monitor, 0);
+    }
+
+    #[test]
+    fn a_workspace_digit_assigns_and_closes_the_picker() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+
+        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let chip = workspace_picker::digit_rect(anchor, screen, 3).expect("digit 3");
+        moved(&mut a, chip.x, chip.y);
+        assert_eq!(a.hover, Some(HoverTarget::WorkspaceDigit(3)));
+
+        down(&mut a, chip.x, chip.y);
+
+        assert_eq!(a.monitors[0].workspace, Some(3));
+        assert!(a.workspace_picker.is_none());
+    }
+
+    #[test]
+    fn zero_clears_the_workspace() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.monitors[0].workspace = Some(5);
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+
+        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let chip = workspace_picker::digit_rect(anchor, screen, 0).expect("digit 0");
+        down(&mut a, chip.x, chip.y);
+
+        assert_eq!(a.monitors[0].workspace, None);
+    }
+
+    #[test]
+    fn clicking_outside_the_picker_dismisses_it() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+
+        down(&mut a, 0, 0);
+
+        assert!(a.workspace_picker.is_none());
+        assert_eq!(a.monitors[0].workspace, None);
+    }
+
+    #[test]
+    fn keyboard_digits_assign_in_the_picker() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let cell = list_cell(&a, 0, ListColumn::Workspace);
+        down(&mut a, cell.x, cell.y);
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+
+        assert_eq!(a.monitors[0].workspace, Some(4));
+        assert!(a.workspace_picker.is_none());
     }
 
     #[test]

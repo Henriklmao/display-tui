@@ -104,6 +104,18 @@ fn column_for_index(index: usize) -> Option<ListColumn> {
     }
 }
 
+// Whether the pointer rests on one specific action cell.
+fn cell_hover(hover: Option<HoverTarget>, index: usize, column: ListColumn) -> bool {
+    match (hover, column) {
+        (Some(HoverTarget::ListIcon(row)), ListColumn::Icon) => row == index,
+        (Some(HoverTarget::ListResolution(row)), ListColumn::Resolution) => row == index,
+        (Some(HoverTarget::ListScale(row)), ListColumn::Scale) => row == index,
+        (Some(HoverTarget::ListRotation(row)), ListColumn::Rotation) => row == index,
+        (Some(HoverTarget::ListWorkspace(row)), ListColumn::Workspace) => row == index,
+        _ => false,
+    }
+}
+
 #[derive(Debug)]
 pub struct MonitorList<'a> {
     pub mode: TUIMode,
@@ -217,7 +229,10 @@ impl<'a> MonitorList<'a> {
         let table_height = inner.height.saturating_sub(reserved);
         let viewport = table_height.saturating_sub(2);
         let offset = scrolled_offset(selected, viewport as usize);
-        if row < offset || row >= offset.saturating_add(viewport as usize) {
+        if row >= monitors.len()
+            || row < offset
+            || row >= offset.saturating_add(viewport as usize)
+        {
             return None;
         }
 
@@ -266,12 +281,13 @@ impl<'a> MonitorList<'a> {
         }
     }
 
-    fn set_workspace(app: &mut App, workspace: u8) {
-        let monitor = &mut app.monitors[app.selected_monitor];
-        if workspace == 0 {
-            monitor.workspace = None;
-        } else {
-            monitor.workspace = Some(workspace);
+    pub(crate) fn set_workspace(app: &mut App, workspace: u8) {
+        if let Some(monitor) = app.monitors.get_mut(app.selected_monitor) {
+            if workspace == 0 {
+                monitor.workspace = None;
+            } else {
+                monitor.workspace = Some(workspace);
+            }
         }
     }
     fn cycle_rotation(app: &mut App) {
@@ -364,7 +380,7 @@ impl<'a> MonitorList<'a> {
                 let is_duplicate_ws = monitor
                     .workspace
                     .is_some_and(|ws| workspace_counts.get(&ws).copied().unwrap_or(0) > 1);
-                let workspace_cell = match monitor.workspace {
+                let mut workspace_cell = match monitor.workspace {
                     Some(ws) => {
                         let ws_str = ws.to_string();
                         if is_duplicate_ws {
@@ -377,23 +393,47 @@ impl<'a> MonitorList<'a> {
                     }
                     None => Cell::from("-"),
                 };
+                if cell_hover(self.hover, index, ListColumn::Workspace) {
+                    workspace_cell = workspace_cell.style(styles::hover_style());
+                }
+
+                let mut icon_cell = Cell::from(if enabled == "true" {
+                    "".to_string()
+                } else {
+                    "".to_string()
+                })
+                .style(Style::default().fg(if enabled == "true" {
+                    Color::Green
+                } else {
+                    Color::Red
+                }));
+                if cell_hover(self.hover, index, ListColumn::Icon) {
+                    icon_cell = icon_cell.style(styles::hover_style());
+                }
+
+                let mut resolution_cell = Cell::from(resolution);
+                if cell_hover(self.hover, index, ListColumn::Resolution) {
+                    resolution_cell = resolution_cell.style(styles::hover_style());
+                }
+
+                let mut scale_cell = Cell::from(scale);
+                if cell_hover(self.hover, index, ListColumn::Scale) {
+                    scale_cell = scale_cell.style(styles::hover_style());
+                }
+
+                let mut rotation_cell = Cell::from(rotation);
+                if cell_hover(self.hover, index, ListColumn::Rotation) {
+                    rotation_cell = rotation_cell.style(styles::hover_style());
+                }
+
                 let row = Row::new(vec![
-                    Cell::from(if enabled == "true" {
-                        "".to_string()
-                    } else {
-                        "".to_string()
-                    })
-                    .style(Style::default().fg(if enabled == "true" {
-                        Color::Green
-                    } else {
-                        Color::Red
-                    })),
+                    icon_cell,
                     Cell::from(name),
                     Cell::from(description),
-                    Cell::from(resolution),
+                    resolution_cell,
                     Cell::from(position),
-                    Cell::from(scale),
-                    Cell::from(rotation),
+                    scale_cell,
+                    rotation_cell,
                     workspace_cell,
                 ]);
 
@@ -1053,6 +1093,92 @@ mod tests {
             MonitorList::row_at(area, &monitors, 0, 6),
             None,
             "past the last monitor"
+        );
+    }
+
+    #[test]
+    fn column_at_maps_every_drawn_column() {
+        let area = Rect::new(0, 0, 160, 12);
+
+        for column in [
+            ListColumn::Icon,
+            ListColumn::Name,
+            ListColumn::Description,
+            ListColumn::Resolution,
+            ListColumn::Position,
+            ListColumn::Scale,
+            ListColumn::Rotation,
+            ListColumn::Workspace,
+        ] {
+            let rect = MonitorList::column_rect(area, column).expect("visible column");
+            assert_eq!(MonitorList::column_at(area, rect.x), Some(column));
+            assert_eq!(
+                MonitorList::column_at(area, rect.right() - 1),
+                Some(column),
+                "the last cell of {column:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn columns_disappear_on_narrow_terminals() {
+        let area = Rect::new(0, 0, 80, 12);
+
+        assert!(MonitorList::column_rect(area, ListColumn::Resolution).is_some());
+        assert!(
+            MonitorList::column_rect(area, ListColumn::Scale).is_none(),
+            "scale is dropped before the resolution column"
+        );
+        assert!(
+            MonitorList::column_rect(area, ListColumn::Workspace).is_none(),
+            "workspace is dropped on a narrow terminal"
+        );
+    }
+
+    #[test]
+    fn cell_rect_maps_the_drawn_row_and_column() {
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 160, 12);
+
+        let first = MonitorList::cell_rect(area, &monitors, 0, 0, ListColumn::Workspace)
+            .expect("first row");
+        let second = MonitorList::cell_rect(area, &monitors, 0, 1, ListColumn::Workspace)
+            .expect("second row");
+        let column =
+            MonitorList::column_rect(area, ListColumn::Workspace).expect("workspace column");
+
+        assert_eq!(first.y, 3);
+        assert_eq!(second.y, 4);
+        assert_eq!(first.x, column.x);
+        assert_eq!(first.width, column.width);
+        assert_eq!(
+            MonitorList::cell_rect(area, &monitors, 0, 2, ListColumn::Workspace),
+            None,
+            "past the last monitor"
+        );
+    }
+
+    #[test]
+    fn a_hovered_action_cell_glows() {
+        let monitors = test_monitors();
+        let area = Rect::new(0, 0, 160, 8);
+        let mut list = MonitorList {
+            state: TableState::default(),
+            selected_row: Some(0),
+            mode: TUIMode::View,
+            monitors: &monitors,
+            is_previewing: false,
+            moved_pending: false,
+            hover: Some(HoverTarget::ListResolution(0)),
+        };
+        let mut buf = Buffer::empty(area);
+        list.render(area, &mut buf);
+
+        let (x, y) = find_text(&buf, "1920x1080").expect("resolution cell");
+        assert_eq!(
+            buf[(x, y)].style().fg,
+            Some(styles::hover_accent()),
+            "the hovered cell must use the accent colour"
         );
     }
 

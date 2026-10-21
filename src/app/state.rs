@@ -7,7 +7,7 @@ use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{
-    ActionId, HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+    ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
@@ -15,6 +15,7 @@ use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlight
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use ratatui::DefaultTerminal;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -58,6 +59,8 @@ pub struct App {
     pub hover_point: (u16, u16),
     // The tooltip to draw this frame, computed in `draw`.
     pub tooltip: Option<crate::ui::tooltip::TooltipState>,
+    // The workspace picker opened from a display row's workspace cell.
+    pub workspace_picker: Option<WorkspacePickerState>,
     // An in-progress mouse drag of a monitor on the map, if any.
     pub drag: Option<DragState>,
     // Pre-move position of every monitor with an unapplied move, keyed by
@@ -100,6 +103,14 @@ pub struct HelpScrollbarDrag {
     pub grab: u16,
 }
 
+// The workspace picker opened for one display row. The anchor is recomputed
+// from the current list layout each frame, so a resize or scroll cannot leave
+// the popover detached from its cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkspacePickerState {
+    pub monitor: usize,
+}
+
 // An interactive element the pointer can rest on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoverTarget {
@@ -107,8 +118,20 @@ pub enum HoverTarget {
     Map(usize),
     // The Apply button of a pending monitor.
     ApplyButton(usize),
-    // A display-list row.
+    // A display-list row (name, description or position cell).
     ListRow(usize),
+    // The enable/disable checkbox cell of a display row.
+    ListIcon(usize),
+    // The resolution cell of a display row.
+    ListResolution(usize),
+    // The scale cell of a display row.
+    ListScale(usize),
+    // The rotation cell of a display row.
+    ListRotation(usize),
+    // The workspace cell of a display row.
+    ListWorkspace(usize),
+    // A digit in the workspace picker; 0 clears the assignment.
+    WorkspaceDigit(u8),
     // A resolution-table row.
     ResolutionRow(usize),
     // A scale-table row.
@@ -241,6 +264,36 @@ impl App {
     // the on-map Apply buttons; derived from `move_origins` so it cannot drift.
     pub(crate) fn has_pending_move(&self) -> bool {
         !self.move_origins.is_empty()
+    }
+
+    // Opens the workspace picker for a display row and selects that row.
+    pub(crate) fn open_workspace_picker(&mut self, monitor: usize) {
+        self.selected_monitor = monitor;
+        self.workspace_picker = Some(WorkspacePickerState { monitor });
+        self.clear_hover();
+    }
+
+    pub(crate) fn close_workspace_picker(&mut self) {
+        self.workspace_picker = None;
+    }
+
+    // The screen cell the picker points at, recomputed from the live layout.
+    pub(crate) fn workspace_picker_anchor(&self, layout: ScreenLayout) -> Option<Rect> {
+        let picker = self.workspace_picker?;
+        MonitorList::cell_rect(
+            layout.list,
+            &self.monitors,
+            self.selected_monitor,
+            picker.monitor,
+            ListColumn::Workspace,
+        )
+    }
+
+    // Assigns a workspace to the selected monitor, using the same path as the
+    // digit keys so the active-preset marker is cleared consistently.
+    pub(crate) fn assign_workspace(&mut self, workspace: u8) {
+        MonitorList::set_workspace(self, workspace);
+        self.clear_active_preset_if_changed();
     }
 
     // Whether the armed map highlights are currently painted hot. The blink
@@ -847,6 +900,22 @@ impl App {
                         self.show_preset_menu = None;
                     }
                 }
+            }
+            return;
+        }
+
+        // The workspace picker is a small modal: digits assign and close it,
+        // Esc/q dismiss it, and nothing behind it sees the key.
+        if self.workspace_picker.is_some() {
+            match key_event.code {
+                KeyCode::Char(c @ '0'..='9') => {
+                    self.workspace_picker = None;
+                    self.assign_workspace(c.to_digit(10).unwrap_or(0) as u8);
+                }
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    self.workspace_picker = None;
+                }
+                _ => {}
             }
             return;
         }

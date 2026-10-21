@@ -10,8 +10,8 @@ use crate::app::state::{HelpScrollbarDrag, HoverTarget};
 use crate::monitor::{Monitor, MonitorCanvas};
 use crate::ui::components::workspace_picker;
 use crate::ui::components::{
-    ActionBar, ActionBarContext, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetMenu,
-    Resolutions, Scale,
+    ActionBar, ActionBarContext, ActionBarHits, HelpModal, ListColumn, Map, MonitorList,
+    PopupAction, PresetMenu, Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
@@ -221,12 +221,17 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 
 // The footer buttons for the current frame. Pure, so the click and hover maps
 // always agree with what the renderer drew.
-fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
+fn action_bar_hits(app: &App, layout: ScreenLayout) -> ActionBarHits {
     MonitorList::footer_rect(layout.list, &app.monitors)
         .map(|footer| {
-            ActionBar::layout_in(footer, ActionBarContext::from_app(app), layout.list.width)
+            ActionBar::hit_test_in(footer, ActionBarContext::from_app(app), layout.list.width)
         })
         .unwrap_or_default()
+}
+
+// The wheel gate only needs the footer rectangle, not the button set.
+fn footer_contains(app: &App, layout: ScreenLayout, point: (u16, u16)) -> bool {
+    MonitorList::footer_rect(layout.list, &app.monitors).is_some_and(|footer| inside(footer, point))
 }
 
 // Handles a left click in the footer before the generic hover reset. Resolving
@@ -234,7 +239,7 @@ fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
 // committing the hover selection makes the button act on the display it was
 // labelled for.
 fn footer_click(app: &mut App, layout: ScreenLayout, point: (u16, u16), now: Instant) -> bool {
-    let bar = action_bar(app, layout);
+    let bar = action_bar_hits(app, layout);
     if let Some(action) = bar.button_at(point) {
         app.last_click = None;
         // A click is a commit: keep the display the bar was drawn for.
@@ -288,7 +293,7 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
             .map(HoverTarget::WorkspaceDigit);
     }
 
-    let bar = action_bar(app, layout);
+    let bar = action_bar_hits(app, layout);
     if let Some(action) = bar.button_at(point) {
         return Some(HoverTarget::Action(action));
     }
@@ -564,7 +569,7 @@ fn handle_scroll(app: &mut App, layout: ScreenLayout, point: (u16, u16), delta: 
         return;
     }
     // The wheel belongs to the list/table, not to the action bar.
-    if action_bar(app, layout).contains(point) {
+    if footer_contains(app, layout, point) {
         return;
     }
     clamp_selection(app);
@@ -1288,6 +1293,47 @@ mod tests {
         assert!(!a.monitors[0].enabled, "the drawn display is disabled");
         assert!(!a.monitors[1].enabled, "the committed display is untouched");
         assert_eq!(a.selected_monitor, 0, "the click commits the hover");
+    }
+
+    #[test]
+    fn a_chip_found_in_the_rendered_list_runs_its_action() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let buf = render_in(&a, screen);
+        let (x, y) = find_text(&buf, "[ Help  K ]").expect("drawn help chip");
+
+        down(&mut a, x, y);
+
+        assert!(a.show_help, "the drawn chip must run Help");
+        assert_eq!(a.selected_monitor, 0);
+    }
+
+    #[test]
+    fn a_compacted_chip_found_in_the_rendered_list_runs_its_action() {
+        let screen = Rect::new(0, 0, 115, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let buf = render_in(&a, screen);
+        let (x, y) = find_text(&buf, "[o]").expect("compacted rotate chip");
+
+        down(&mut a, x, y);
+
+        assert_eq!(
+            a.monitors[0].transform.as_deref(),
+            Some("90"),
+            "the compact chip must still dispatch Rotate"
+        );
+    }
+
+    #[test]
+    fn a_chip_found_in_the_rendered_mini_footer_runs_its_action() {
+        let screen = Rect::new(0, 0, 100, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let buf = render_in(&a, screen);
+        let (x, y) = find_text(&buf, "[ Keybinds  K ]").expect("drawn keybinds chip");
+
+        down(&mut a, x, y);
+
+        assert!(a.show_help, "the drawn mini chip must run Help");
     }
 
     #[test]

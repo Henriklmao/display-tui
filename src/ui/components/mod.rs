@@ -10,7 +10,7 @@ pub mod resolution_table;
 pub mod scale_table;
 pub mod workspace_picker;
 
-pub use action_bar::{ActionBar, ActionBarContext, ActionId};
+pub use action_bar::{ActionBar, ActionBarContext, ActionBarHits, ActionId};
 pub use help::HelpModal;
 pub use list::{ListColumn, MonitorList};
 pub use map::Map;

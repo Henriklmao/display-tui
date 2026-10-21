@@ -71,14 +71,24 @@ fn workspace_counts(monitors: &[Monitor]) -> std::collections::HashMap<u8, usize
     counts
 }
 
-// Whether any workspace is assigned to more than one monitor.
+// Whether any workspace is assigned to more than one monitor. This stays on
+// the stack because the footer hit-test calls it on every mouse move.
 fn has_duplicate_workspace(monitors: &[Monitor]) -> bool {
-    workspace_counts(monitors).values().any(|&count| count > 1)
+    let mut seen = [false; 256];
+    for monitor in monitors {
+        if let Some(ws) = monitor.workspace {
+            if seen[ws as usize] {
+                return true;
+            }
+            seen[ws as usize] = true;
+        }
+    }
+    false
 }
 
 // The vertical split of the list's inner area: table, optional duplicate
 // warning, footer. Rendering and hit-testing both use this.
-fn list_chunks(inner: Rect, monitors: &[Monitor]) -> Vec<Rect> {
+fn list_chunks(inner: Rect, monitors: &[Monitor]) -> [Rect; 3] {
     Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
         .constraints([
@@ -90,19 +100,20 @@ fn list_chunks(inner: Rect, monitors: &[Monitor]) -> Vec<Rect> {
             }),
             Constraint::Length(1),
         ])
-        .split(inner)
-        .to_vec()
+        .areas::<3>(inner)
 }
 
 // The visible data-row window: first screen row, viewport height and scroll
 // offset. Shared by row and cell hit-testing.
 fn row_window(area: Rect, monitors: &[Monitor], selected: usize) -> (u16, u16, usize) {
     let inner = Block::bordered().inner(area);
-    let table = list_chunks(inner, monitors)[0];
+    let warning = u16::from(has_duplicate_workspace(monitors));
+    let footer = u16::from(inner.height > warning);
+    let table_height = inner.height.saturating_sub(warning).saturating_sub(footer);
     // The header row plus its bottom margin occupy two lines.
-    let viewport = table.height.saturating_sub(2);
+    let viewport = table_height.saturating_sub(2);
     let offset = scrolled_offset(selected, viewport as usize);
-    (table.y.saturating_add(2), viewport, offset)
+    (inner.y.saturating_add(2), viewport, offset)
 }
 
 // The columns of the display table, in draw order. Shared by rendering and
@@ -211,14 +222,22 @@ impl<'a> MonitorList<'a> {
     // The action-bar row the renderer actually reserves. `None` when the list
     // is too short, so the mouse cannot aim at a row that was not drawn.
     pub fn footer_rect(area: Rect, monitors: &[Monitor]) -> Option<Rect> {
+        // Arithmetic fast path: this runs on every mouse move, so it must not
+        // build a ratatui Layout (whose constraint list allocates).
         let inner = Block::bordered().inner(area);
         if inner.height == 0 {
             return None;
         }
-        list_chunks(inner, monitors)
-            .get(2)
-            .copied()
-            .filter(|footer| footer.height > 0)
+        let warning = u16::from(has_duplicate_workspace(monitors));
+        if inner.height <= warning {
+            return None;
+        }
+        Some(Rect {
+            x: inner.x,
+            y: inner.bottom() - 1,
+            width: inner.width,
+            height: 1,
+        })
     }
 
     // The table column under a screen column, if any.
@@ -264,6 +283,8 @@ impl<'a> MonitorList<'a> {
     }
 
     // Exclusive right edge (screen column) of the leading checkbox column.
+    // Kept as a test helper; production hit-testing uses `column_at`.
+    #[cfg(test)]
     pub fn icon_column_end(area: Rect) -> u16 {
         MonitorList::column_rect(area, ListColumn::Icon)
             .map(|rect| rect.right())
@@ -1047,6 +1068,59 @@ mod tests {
             MonitorList::footer_rect(Rect::new(0, 0, 120, 8), &monitors).is_some(),
             "a normal list reserves its footer"
         );
+    }
+
+    #[test]
+    fn the_fast_footer_rect_matches_the_layout_split() {
+        for height in 0..16 {
+            for duplicate in [false, true] {
+                let mut monitors = test_monitors();
+                if duplicate {
+                    for monitor in &mut monitors {
+                        monitor.workspace = Some(3);
+                    }
+                }
+                let area = Rect::new(0, 0, 120, height);
+                let inner = Block::bordered().inner(area);
+                let expected = if inner.height == 0 {
+                    None
+                } else {
+                    let footer = list_chunks(inner, &monitors)[2];
+                    (footer.height > 0).then_some(footer)
+                };
+
+                assert_eq!(
+                    MonitorList::footer_rect(area, &monitors),
+                    expected,
+                    "height {height}, duplicate {duplicate}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_fast_row_window_matches_the_layout_split() {
+        for height in 0..20 {
+            for duplicate in [false, true] {
+                let mut monitors = test_monitors();
+                if duplicate {
+                    for monitor in &mut monitors {
+                        monitor.workspace = Some(3);
+                    }
+                }
+                let area = Rect::new(0, 0, 120, height);
+                let inner = Block::bordered().inner(area);
+                let table = list_chunks(inner, &monitors)[0];
+                let viewport = table.height.saturating_sub(2);
+                let offset = scrolled_offset(0, viewport as usize);
+
+                assert_eq!(
+                    row_window(area, &monitors, 0),
+                    (table.y.saturating_add(2), viewport, offset),
+                    "height {height}, duplicate {duplicate}"
+                );
+            }
+        }
     }
 
     #[test]

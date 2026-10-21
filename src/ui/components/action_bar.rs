@@ -1,7 +1,7 @@
 //! Clickable action bar in the display list's footer.
 //!
 //! The bar replaces the old keybind text with buttons that dispatch exactly the
-//! key they name. Layout and hit-testing share [`ActionBar::layout_in`], so a
+//! key they name. The renderer and the mouse hit-test share [`resolve`], so a
 //! click always lands on the button that was drawn. Range hints (`0-9`, `k/j`,
 //! …) stay pure documentation and are deliberately not clickable.
 
@@ -199,68 +199,115 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
     point.0 >= rect.x && point.0 < rect.right() && point.1 >= rect.y && point.1 < rect.bottom()
 }
 
-// One hint before layout: either a button or a non-clickable range hint.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FooterItem {
+// One footer item before layout: static text plus the precomputed widths of
+// its full and compact forms. Nothing is allocated here, so a mouse move can
+// run the hit-test without formatting a single chip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ItemSpec {
     action: Option<ActionId>,
     priority: u8,
-    spans: Vec<Span<'static>>,
-    compact_spans: Option<Vec<Span<'static>>>,
-    hover_label: Option<String>,
-    compact_hover_label: Option<String>,
+    label: &'static str,
+    key: &'static str,
+    compact_key: &'static str,
+    full_width: usize,
+    compact_width: Option<usize>,
 }
 
-impl FooterItem {
-    // The width of the currently chosen form.
-    fn width(&self, compact: bool) -> usize {
-        spans_width(self.spans(compact))
-    }
+// Cell width of static text, matching what ratatui draws.
+fn text_width(text: &str) -> usize {
+    Span::raw(text).width()
+}
 
-    fn spans(&self, compact: bool) -> &[Span<'static>] {
-        match (compact, &self.compact_spans) {
-            (true, Some(spans)) => spans,
-            _ => &self.spans,
-        }
-    }
+impl ItemSpec {
+    const EMPTY: ItemSpec = ItemSpec {
+        action: None,
+        priority: 0,
+        label: "",
+        key: "",
+        compact_key: "",
+        full_width: 0,
+        compact_width: None,
+    };
 
-    fn hover_label(&self, compact: bool) -> Option<&str> {
+    fn width(self, compact: bool) -> usize {
         if compact {
-            self.compact_hover_label.as_deref()
+            self.compact_width.unwrap_or(self.full_width)
         } else {
-            self.hover_label.as_deref()
+            self.full_width
         }
-    }
-
-    fn can_compact(&self) -> bool {
-        self.compact_spans.is_some()
     }
 }
 
-// A hint while the bar is being fitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+const MAX_ITEMS: usize = 16;
+const MAX_PLACEMENTS: usize = MAX_ITEMS;
+
+// Fixed-capacity staging buffer for the footer set, so building it does not
+// allocate either.
+struct ItemList {
+    items: [ItemSpec; MAX_ITEMS],
+    len: usize,
+}
+
+impl ItemList {
+    fn new() -> Self {
+        ItemList {
+            items: [ItemSpec::EMPTY; MAX_ITEMS],
+            len: 0,
+        }
+    }
+
+    fn push(&mut self, item: ItemSpec) {
+        assert!(self.len < MAX_ITEMS, "the footer outgrew MAX_ITEMS");
+        if self.len < MAX_ITEMS {
+            self.items[self.len] = item;
+            self.len += 1;
+        }
+    }
+}
+
+// An item while the bar is being fitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ResolvedItem {
-    item: FooterItem,
+    spec: ItemSpec,
     compact: bool,
     removed: bool,
 }
 
 impl ResolvedItem {
-    fn width(&self) -> usize {
+    const EMPTY: ResolvedItem = ResolvedItem {
+        spec: ItemSpec::EMPTY,
+        compact: false,
+        removed: false,
+    };
+
+    fn width(self) -> usize {
         if self.removed {
             0
         } else {
-            self.item.width(self.compact)
+            self.spec.width(self.compact)
         }
     }
 }
 
-fn spans_width(spans: &[Span<'static>]) -> usize {
-    spans.iter().map(Span::width).sum()
+// One visible item after placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Placement {
+    rect: Rect,
+    spec: ItemSpec,
+    compact: bool,
+}
+
+impl Placement {
+    const EMPTY: Placement = Placement {
+        rect: Rect::new(0, 0, 0, 0),
+        spec: ItemSpec::EMPTY,
+        compact: false,
+    };
 }
 
 // Builds a button item. `label` can override the action's default verb (the
 // compact view calls the help button "Keybinds").
-fn button(action: ActionId, priority: u8, enabled: bool) -> FooterItem {
+fn button(action: ActionId, priority: u8, enabled: bool) -> ItemSpec {
     button_with_label(action, action.label(enabled), priority, enabled)
 }
 
@@ -269,104 +316,87 @@ fn button_with_label(
     label: &'static str,
     priority: u8,
     enabled: bool,
-) -> FooterItem {
+) -> ItemSpec {
     let key = action.key_label(enabled);
-    let full = format!("[ {}  {} ]", label, key);
-    let spans = vec![
-        Span::styled(format!("[ {}  ", label), Style::default().fg(Color::White)),
-        Span::styled(key.to_string(), Style::default().fg(Color::Blue).bold()),
-        Span::styled(" ]", Style::default().fg(Color::White)),
-    ];
-
-    let compact = format!("[{}]", action.compact_key(enabled));
-    let compact_spans = vec![Span::styled(
-        compact.clone(),
-        Style::default().fg(Color::Blue).bold(),
-    )];
-
-    FooterItem {
+    let compact_key = action.compact_key(enabled);
+    ItemSpec {
         action: Some(action),
         priority,
-        spans,
-        compact_spans: Some(compact_spans),
-        hover_label: Some(full),
-        compact_hover_label: Some(compact),
+        label,
+        key,
+        compact_key,
+        full_width: text_width(label) + text_width(key) + 6,
+        compact_width: Some(text_width(compact_key) + 2),
     }
 }
 
 // Builds a range hint that stays text and cannot be clicked.
-fn hint(priority: u8, label: &'static str, key: &'static str) -> FooterItem {
-    let spans = vec![
-        Span::styled(format!("{} ", label), Style::default().fg(Color::White)),
-        Span::styled(key.to_string(), Style::default().fg(Color::Blue).bold()),
-    ];
-    FooterItem {
+fn hint(priority: u8, label: &'static str, key: &'static str) -> ItemSpec {
+    ItemSpec {
         action: None,
         priority,
-        spans,
-        compact_spans: None,
-        hover_label: None,
-        compact_hover_label: None,
+        label,
+        key,
+        compact_key: "",
+        full_width: text_width(label) + text_width(key) + 1,
+        compact_width: None,
     }
 }
 
 // The footer set for the current mode and state.
-fn items(context: ActionBarContext, mini: bool) -> Vec<FooterItem> {
+fn items(context: ActionBarContext, mini: bool) -> ItemList {
     let enabled = context.selected_enabled;
+    let mut list = ItemList::new();
 
     if context.pending && context.mode == TUIMode::View {
-        return vec![
-            button(ActionId::ApplyPending, 4, enabled),
-            button(ActionId::CancelAll, 4, enabled),
-        ];
+        list.push(button(ActionId::ApplyPending, 4, enabled));
+        list.push(button(ActionId::CancelAll, 4, enabled));
+        return list;
     }
 
     match context.mode {
-        TUIMode::View if mini => vec![
-            button(ActionId::Save, 4, enabled),
-            button(ActionId::Presets, 2, enabled),
-            button(ActionId::Quit, 4, enabled),
-            button_with_label(ActionId::Help, "Keybinds", 4, enabled),
-        ],
-        TUIMode::View => {
-            let mut items = vec![
-                hint(0, "Scroll \u{f431}\u{f433}", "<k/j>"),
-                button(ActionId::Move, 3, enabled),
-                button(ActionId::Resolution, 3, enabled),
-                button(ActionId::Scale, 3, enabled),
-                button(ActionId::Rotate, 1, enabled),
-                hint(0, "Workspace", "<0-9>"),
-            ];
-            if context.has_monitors {
-                items.push(button(ActionId::ToggleEnabled, 3, enabled));
-            }
-            items.extend([
-                button(ActionId::Presets, 2, enabled),
-                button(ActionId::Save, 4, enabled),
-                button(ActionId::Quit, 4, enabled),
-                button(ActionId::Help, 4, enabled),
-            ]);
-            items
+        TUIMode::View if mini => {
+            list.push(button(ActionId::Save, 4, enabled));
+            list.push(button(ActionId::Presets, 2, enabled));
+            list.push(button(ActionId::Quit, 4, enabled));
+            list.push(button_with_label(ActionId::Help, "Keybinds", 4, enabled));
         }
-        TUIMode::Move => vec![
-            hint(0, "Fastmove", "<H/J/K/L>"),
-            hint(0, "Snapmove", "<h/j/k/l>"),
-            button(ActionId::Save, 4, enabled),
-            button(ActionId::Done, 4, enabled),
-        ],
-        TUIMode::Resolution | TUIMode::Scale => vec![
-            hint(0, "Navigate", "<k/j>"),
-            button(ActionId::Apply, 4, enabled),
-            button(ActionId::Save, 4, enabled),
-            button(ActionId::Cancel, 4, enabled),
-        ],
+        TUIMode::View => {
+            list.push(hint(0, "Scroll \u{f431}\u{f433}", "<k/j>"));
+            list.push(button(ActionId::Move, 3, enabled));
+            list.push(button(ActionId::Resolution, 3, enabled));
+            list.push(button(ActionId::Scale, 3, enabled));
+            list.push(button(ActionId::Rotate, 1, enabled));
+            list.push(hint(0, "Workspace", "<0-9>"));
+            if context.has_monitors {
+                list.push(button(ActionId::ToggleEnabled, 3, enabled));
+            }
+            list.push(button(ActionId::Presets, 2, enabled));
+            list.push(button(ActionId::Save, 4, enabled));
+            list.push(button(ActionId::Quit, 4, enabled));
+            list.push(button(ActionId::Help, 4, enabled));
+        }
+        TUIMode::Move => {
+            list.push(hint(0, "Fastmove", "<H/J/K/L>"));
+            list.push(hint(0, "Snapmove", "<h/j/k/l>"));
+            list.push(button(ActionId::Save, 4, enabled));
+            list.push(button(ActionId::Done, 4, enabled));
+        }
+        TUIMode::Resolution | TUIMode::Scale => {
+            list.push(hint(0, "Navigate", "<k/j>"));
+            list.push(button(ActionId::Apply, 4, enabled));
+            list.push(button(ActionId::Save, 4, enabled));
+            list.push(button(ActionId::Cancel, 4, enabled));
+        }
     }
+
+    list
 }
 
 // Total drawn width, including one space between adjacent items.
 fn total_width(items: &[ResolvedItem]) -> usize {
-    let mut count: usize = 0;
-    let mut width = 0;
+    let mut count = 0usize;
+    let mut width = 0usize;
     for item in items.iter().filter(|item| !item.removed) {
         count += 1;
         width += item.width();
@@ -382,13 +412,13 @@ fn fit(items: &mut [ResolvedItem], available: usize) {
             .iter()
             .enumerate()
             .filter(|(_, item)| !item.removed)
-            .min_by_key(|(_, item)| (item.item.priority, item.compact))
+            .min_by_key(|(_, item)| (item.spec.priority, item.compact))
             .map(|(index, _)| index)
         else {
             break;
         };
 
-        if !items[index].compact && items[index].item.can_compact() {
+        if !items[index].compact && items[index].spec.compact_width.is_some() {
             items[index].compact = true;
             if total_width(items) <= available {
                 break;
@@ -396,6 +426,163 @@ fn fit(items: &mut [ResolvedItem], available: usize) {
         }
 
         items[index].removed = true;
+    }
+}
+
+// Fits and places the footer set. The lightweight hit-test and the renderer
+// both use this, so their geometry cannot diverge.
+fn resolve(
+    footer: Rect,
+    context: ActionBarContext,
+    list_width: u16,
+) -> ([Placement; MAX_PLACEMENTS], usize) {
+    if footer.width == 0 || footer.height == 0 {
+        return ([Placement::EMPTY; MAX_PLACEMENTS], 0);
+    }
+
+    let mini = list_width < MINI_MODE_WIDTH;
+    let list = items(context, mini);
+    let mut resolved = [ResolvedItem::EMPTY; MAX_ITEMS];
+    for (index, spec) in list.items[..list.len].iter().enumerate() {
+        resolved[index] = ResolvedItem {
+            spec: *spec,
+            compact: false,
+            removed: false,
+        };
+    }
+    let resolved = &mut resolved[..list.len];
+
+    fit(resolved, footer.width as usize);
+
+    // The pending-move confirm state is a pair: offering Apply without its
+    // Cancel (or vice versa) is worse than showing no button at all.
+    if context.pending && context.mode == TUIMode::View {
+        let remains = |action: ActionId| {
+            resolved
+                .iter()
+                .any(|item| !item.removed && item.spec.action == Some(action))
+        };
+        if remains(ActionId::ApplyPending) != remains(ActionId::CancelAll) {
+            for item in resolved.iter_mut() {
+                if matches!(
+                    item.spec.action,
+                    Some(ActionId::ApplyPending | ActionId::CancelAll)
+                ) {
+                    item.removed = true;
+                }
+            }
+        }
+    }
+
+    let total = total_width(resolved).min(footer.width as usize) as u16;
+    let mut x = footer.x + footer.width.saturating_sub(total) / 2;
+    let mut placements = [Placement::EMPTY; MAX_PLACEMENTS];
+    let mut len = 0;
+    let mut first = true;
+
+    for item in resolved.iter().filter(|item| !item.removed) {
+        if !first {
+            x = x.saturating_add(1);
+        }
+        first = false;
+
+        let width = (item.width() as u16).min(footer.right().saturating_sub(x));
+        if width == 0 {
+            break;
+        }
+        placements[len] = Placement {
+            rect: Rect {
+                x,
+                y: footer.y,
+                width,
+                height: 1,
+            },
+            spec: item.spec,
+            compact: item.compact,
+        };
+        len += 1;
+        x = x.saturating_add(width);
+    }
+
+    (placements, len)
+}
+
+// The full chip text, used to repaint a button on hover.
+fn button_label(spec: ItemSpec, compact: bool) -> String {
+    if compact {
+        format!("[{}]", spec.compact_key)
+    } else {
+        format!("[ {}  {} ]", spec.label, spec.key)
+    }
+}
+
+// The styled spans for one item. Called only for visible items during a draw.
+fn item_spans(spec: ItemSpec, compact: bool) -> Vec<Span<'static>> {
+    if spec.action.is_some() {
+        if compact {
+            vec![Span::styled(
+                button_label(spec, true),
+                Style::default().fg(Color::Blue).bold(),
+            )]
+        } else {
+            vec![
+                Span::styled(
+                    format!("[ {}  ", spec.label),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    spec.key.to_string(),
+                    Style::default().fg(Color::Blue).bold(),
+                ),
+                Span::styled(" ]", Style::default().fg(Color::White)),
+            ]
+        }
+    } else {
+        vec![
+            Span::styled(
+                format!("{} ", spec.label),
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                spec.key.to_string(),
+                Style::default().fg(Color::Blue).bold(),
+            ),
+        ]
+    }
+}
+
+// The lightweight hit map used by the mouse. It contains the exact button
+// rects but no text, so hovering does not format a single chip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionBarHits {
+    pub area: Rect,
+    buttons: [Option<ActionButton>; MAX_ITEMS],
+    len: usize,
+}
+
+impl Default for ActionBarHits {
+    fn default() -> Self {
+        ActionBarHits {
+            area: Rect::default(),
+            buttons: [None; MAX_ITEMS],
+            len: 0,
+        }
+    }
+}
+
+impl ActionBarHits {
+    // The action under `point`, if a button was placed there.
+    pub fn button_at(&self, point: (u16, u16)) -> Option<ActionId> {
+        self.buttons[..self.len]
+            .iter()
+            .flatten()
+            .find(|button| inside(button.rect, point))
+            .map(|button| button.action)
+    }
+
+    // Whether `point` is inside the footer row at all.
+    pub fn contains(&self, point: (u16, u16)) -> bool {
+        inside(self.area, point)
     }
 }
 
@@ -424,77 +611,59 @@ impl ActionBar {
             return ActionBar::default();
         }
 
-        let mini = list_width < MINI_MODE_WIDTH;
-        let mut resolved: Vec<ResolvedItem> = items(context, mini)
-            .into_iter()
-            .map(|item| ResolvedItem {
-                item,
-                compact: false,
-                removed: false,
-            })
-            .collect();
-
-        fit(&mut resolved, footer.width as usize);
-
-        // The pending-move confirm state is a pair: offering Apply without its
-        // Cancel (or vice versa) is worse than showing no button at all.
-        if context.pending && context.mode == TUIMode::View {
-            let remains = |action: ActionId| {
-                resolved
-                    .iter()
-                    .any(|item| !item.removed && item.item.action == Some(action))
-            };
-            if remains(ActionId::ApplyPending) != remains(ActionId::CancelAll) {
-                for item in &mut resolved {
-                    if matches!(
-                        item.item.action,
-                        Some(ActionId::ApplyPending | ActionId::CancelAll)
-                    ) {
-                        item.removed = true;
-                    }
-                }
-            }
-        }
-
-        let total = total_width(&resolved).min(footer.width as usize) as u16;
-        let mut x = footer.x + footer.width.saturating_sub(total) / 2;
+        let (placements, count) = resolve(footer, context, list_width);
         let mut buttons = Vec::new();
-        let mut laid_out = Vec::new();
-        let mut first = true;
+        let mut items = Vec::new();
 
-        for item in resolved.iter().filter(|item| !item.removed) {
-            if !first {
-                x = x.saturating_add(1);
+        for placement in &placements[..count] {
+            if let Some(action) = placement.spec.action {
+                buttons.push(ActionButton {
+                    action,
+                    rect: placement.rect,
+                });
             }
-            first = false;
-
-            let width = (item.width() as u16).min(footer.right().saturating_sub(x));
-            if width == 0 {
-                break;
-            }
-            let rect = Rect {
-                x,
-                y: footer.y,
-                width,
-                height: 1,
-            };
-            if let Some(action) = item.item.action {
-                buttons.push(ActionButton { action, rect });
-            }
-            laid_out.push(LaidOutItem {
-                rect,
-                action: item.item.action,
-                spans: item.item.spans(item.compact).to_vec(),
-                hover_label: item.item.hover_label(item.compact).map(str::to_string),
+            items.push(LaidOutItem {
+                rect: placement.rect,
+                action: placement.spec.action,
+                spans: item_spans(placement.spec, placement.compact),
+                hover_label: placement
+                    .spec
+                    .action
+                    .map(|_| button_label(placement.spec, placement.compact)),
             });
-            x = x.saturating_add(width);
         }
 
         ActionBar {
             area: footer,
             buttons,
-            items: laid_out,
+            items,
         }
+    }
+
+    // Allocation-free hit map for the mouse. Geometry is shared with
+    // `layout_in` through `resolve`.
+    pub fn hit_test_in(footer: Rect, context: ActionBarContext, list_width: u16) -> ActionBarHits {
+        if footer.width == 0 || footer.height == 0 {
+            return ActionBarHits::default();
+        }
+
+        let (placements, count) = resolve(footer, context, list_width);
+        let mut hits = ActionBarHits {
+            area: footer,
+            ..ActionBarHits::default()
+        };
+        for placement in &placements[..count] {
+            if let Some(action) = placement.spec.action
+                && hits.len < MAX_ITEMS
+            {
+                hits.buttons[hits.len] = Some(ActionButton {
+                    action,
+                    rect: placement.rect,
+                });
+                hits.len += 1;
+            }
+        }
+        hits
     }
 
     // Test helper: draws the bar in the list area's last row.
@@ -781,6 +950,49 @@ mod tests {
             assert!(frame.contains((button.rect.x, button.rect.y)));
         }
         assert!(frame.button_at((0, 0)).is_none());
+    }
+
+    #[test]
+    fn the_lightweight_hit_test_matches_the_drawn_bar_cell_for_cell() {
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
+            for pending in [false, true] {
+                for width in [20u16, 40, 60, 80, 100, 114, 115, 120, 130, 160, 240] {
+                    let screen = area(width);
+                    let context = context(mode, pending);
+                    let frame = ActionBar::layout(screen, context);
+                    let hits = ActionBar::hit_test_in(frame.area, context, width);
+
+                    assert_eq!(hits.area, frame.area, "{mode:?}/{pending} at {width}");
+                    for x in frame.area.x..frame.area.right() {
+                        let point = (x, frame.area.y);
+                        assert_eq!(
+                            hits.button_at(point),
+                            frame.button_at(point),
+                            "{mode:?}/{pending} at {width}, cell {x}"
+                        );
+                        assert_eq!(
+                            hits.contains(point),
+                            frame.contains(point),
+                            "{mode:?}/{pending} at {width}, cell {x}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_lightweight_hit_test_ignores_an_absent_footer() {
+        let hits =
+            ActionBar::hit_test_in(Rect::new(0, 0, 80, 0), context(TUIMode::View, false), 80);
+
+        assert!(hits.button_at((0, 0)).is_none());
+        assert!(!hits.contains((0, 0)));
     }
 
     #[test]

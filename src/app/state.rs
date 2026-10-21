@@ -2318,19 +2318,19 @@ mod tests {
         app.set_hover(Some(HoverTarget::Map(0)), (10, 5), t0, true);
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(1999)).is_none(),
-            "nothing before the 2s dwell"
+            app.tooltip_at(t0 + Duration::from_millis(999)).is_none(),
+            "nothing before the 1s dwell"
         );
 
         let state = app
-            .tooltip_at(t0 + Duration::from_millis(2000))
+            .tooltip_at(t0 + Duration::from_millis(1000))
             .expect("tooltip");
         assert_eq!(state.text, "Drag to move, click to select");
         assert_eq!(state.step, 0, "first fade step");
         assert_eq!(state.anchor, (10, 5));
 
         assert_eq!(
-            app.tooltip_at(t0 + Duration::from_millis(2250))
+            app.tooltip_at(t0 + Duration::from_millis(1250))
                 .unwrap()
                 .step,
             2
@@ -2362,7 +2362,7 @@ mod tests {
     }
 
     // The dwell clock must not be disturbed by anything that happens while the
-    // pointer rests, so a hovered element still reaches its 3s tooltip.
+    // pointer rests, so a hovered element still reaches its tooltip.
     #[test]
     fn the_tooltip_dwell_survives_animation_ticks() {
         let t0 = Instant::now();
@@ -2377,10 +2377,10 @@ mod tests {
         }
 
         assert!(
-            app.tooltip_at(t0 + Duration::from_millis(2000)).is_some(),
-            "the tooltip is due right at the 2s mark"
+            app.tooltip_at(t0 + Duration::from_millis(1000)).is_some(),
+            "the tooltip is due right at the 1s mark"
         );
-        assert!(app.tooltip_at(t0 + Duration::from_millis(2200)).is_some());
+        assert!(app.tooltip_at(t0 + Duration::from_millis(1200)).is_some());
     }
 
     // --- validate on apply + Space auto-fix -----------------------------

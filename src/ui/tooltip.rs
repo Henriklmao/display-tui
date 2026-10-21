@@ -16,7 +16,7 @@ use ratatui::{
 use std::time::Duration;
 
 // How long the pointer must rest before the tooltip appears.
-pub const TOOLTIP_DELAY: Duration = Duration::from_secs(2);
+pub const TOOLTIP_DELAY: Duration = Duration::from_secs(1);
 
 // How long each fade-in step lasts.
 pub const TOOLTIP_FADE: Duration = Duration::from_millis(100);

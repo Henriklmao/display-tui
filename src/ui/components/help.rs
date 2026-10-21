@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn every_key_uses_the_accent_colour() {
         let buf = render_help(120, 40);
-        for key in ["<w>", "<q>", "<k>", "<j>", "[f]", "[Space]", "<h/j/k/l>"] {
+        for key in ["<w>", "<q>", "<k/j>", "<f>", "<Space>", "<h/j/k/l>"] {
             let (x, y) = find(&buf, key).unwrap_or_else(|| panic!("{key} missing"));
             assert_eq!(
                 buf[(x, y)].style().fg,
@@ -862,10 +862,10 @@ mod tests {
             "Apply pending move",
             "Right click",
             "<Esc/q>",
-            "Cancel / revert all",
-            "[f]",
+            "Cancel / revert",
+            "<f>",
             "Force write",
-            "[Space]",
+            "<Space>",
             "Auto fix",
             "Arrow keys work as alternative",
         ];

@@ -421,10 +421,29 @@ impl App {
             || self.workspace_picker.is_some()
     }
 
-    // The tooltip the next frame should draw. Suppressed under any overlay, so
-    // a stale hover cannot surface over a modal opened from the keyboard.
+    // Whether an open overlay owns `target`. Its own controls keep their
+    // tooltips; every target from the view behind the overlay is suppressed.
+    fn overlay_owns_hover(&self, target: HoverTarget) -> bool {
+        match target {
+            HoverTarget::HelpClose | HoverTarget::HelpScrollbar => self.show_help,
+            HoverTarget::Popup(_) => self.show_popup.is_some(),
+            HoverTarget::PresetButton(_) | HoverTarget::PresetRow(_) => {
+                self.show_preset_menu.is_some()
+            }
+            HoverTarget::WorkspaceDigit(_) => self.workspace_picker.is_some(),
+            _ => false,
+        }
+    }
+
+    // The tooltip the next frame should draw. A target behind an open overlay is
+    // suppressed so a stale hover cannot surface over a modal opened from the
+    // keyboard; the overlay's own controls still describe themselves.
     fn tooltip_for_draw(&self, now: Instant) -> Option<crate::ui::tooltip::TooltipState> {
-        if self.has_open_overlay() {
+        if self.has_open_overlay()
+            && !self
+                .hover
+                .is_some_and(|target| self.overlay_owns_hover(target))
+        {
             None
         } else {
             self.tooltip_at(now)
@@ -2971,6 +2990,102 @@ mod tests {
             app.tooltip_for_draw(now).is_none(),
             "an overlay must hide stale hover tooltips"
         );
+    }
+
+    // The overlay's own controls must keep their tooltips: resolve_hover sets
+    // these targets while the overlay is open, so suppressing the whole overlay
+    // would make the feature unreachable.
+    fn overlay_tooltip(app: &mut App, target: HoverTarget, now: Instant) -> &'static str {
+        app.hover = Some(target);
+        app.hover_since = Some(now - Duration::from_secs(10));
+        app.tooltip_for_draw(now)
+            .unwrap_or_else(|| panic!("{target:?} must have a tooltip"))
+            .text
+    }
+
+    #[test]
+    fn help_controls_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_help = true;
+
+        for target in [HoverTarget::HelpClose, HoverTarget::HelpScrollbar] {
+            assert_eq!(
+                overlay_tooltip(&mut app, target, now),
+                crate::ui::tooltip::text_for(target)
+            );
+        }
+    }
+
+    #[test]
+    fn popup_buttons_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_popup = Some(Popup {
+            title: " Error ".to_string(),
+            lines: vec!["boom".to_string()],
+            is_error: true,
+            apply_preset: None,
+            is_forceable: true,
+            fix: None,
+        });
+
+        for action in [
+            PopupAction::Close,
+            PopupAction::Accept,
+            PopupAction::Force,
+            PopupAction::AutoFix,
+        ] {
+            let target = HoverTarget::Popup(action);
+            assert_eq!(
+                overlay_tooltip(&mut app, target, now),
+                crate::ui::tooltip::text_for(target)
+            );
+        }
+    }
+
+    #[test]
+    fn preset_menu_controls_keep_their_tooltips() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_preset_menu = Some(PresetMenu::new(vec![], &[], None));
+
+        let button = HoverTarget::PresetButton(PresetButtonAction::Close);
+        assert_eq!(
+            overlay_tooltip(&mut app, button, now),
+            crate::ui::tooltip::text_for(button)
+        );
+        let row = HoverTarget::PresetRow(0);
+        assert_eq!(
+            overlay_tooltip(&mut app, row, now),
+            crate::ui::tooltip::text_for(row)
+        );
+    }
+
+    #[test]
+    fn workspace_digits_keep_their_tooltip() {
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.workspace_picker = Some(WorkspacePickerState { monitor: 0 });
+
+        let target = HoverTarget::WorkspaceDigit(1);
+        assert_eq!(
+            overlay_tooltip(&mut app, target, now),
+            crate::ui::tooltip::text_for(target)
+        );
+    }
+
+    #[test]
+    fn a_target_from_another_overlay_stays_suppressed() {
+        // The ownership check must not turn into "any overlay unlocks every
+        // target": a stale popup hover under the help stays hidden.
+        let now = Instant::now();
+        let mut app = App::new(None);
+        app.show_help = true;
+        app.hover = Some(HoverTarget::Popup(PopupAction::Close));
+        app.hover_since = Some(now - Duration::from_secs(10));
+
+        assert!(app.tooltip_for_draw(now).is_none());
     }
 
     #[test]

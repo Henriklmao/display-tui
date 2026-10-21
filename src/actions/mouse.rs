@@ -457,12 +457,15 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
 
         match column {
             // The checkbox keeps the select-then-toggle affordance: the first
-            // click selects the row, the next one toggles it.
-            ListColumn::Icon => {
+            // click selects the row, the next one toggles it. Like the other
+            // cell actions, the toggle obeys the pending-move confirm gate so
+            // disabling a monitor cannot drop the revert target of its move.
+            ListColumn::Icon if !confirm_pending => {
                 if already_selected {
                     toggle_monitor(app, row);
-                    // Disabling the pending monitor drops its Apply button and
-                    // its move.
+                    // Disabling a monitor from a sub-mode drops its Apply button
+                    // and its move; the View gate above blocks the toggle while
+                    // a move is unconfirmed.
                     if !app.monitors[row].enabled {
                         app.discard_move(row);
                     }
@@ -1629,6 +1632,7 @@ mod tests {
         a.note_move(0, (0, 0));
 
         for column in [
+            ListColumn::Icon,
             ListColumn::Resolution,
             ListColumn::Scale,
             ListColumn::Rotation,
@@ -1639,9 +1643,34 @@ mod tests {
         }
 
         assert_eq!(a.mode, TUIMode::View, "the confirm gate stays put");
+        assert!(a.monitors[0].enabled, "no enable/disable happened");
         assert_eq!(a.monitors[0].transform, None, "no rotation happened");
         assert!(a.workspace_picker.is_none(), "no picker opened");
         assert!(a.has_pending_move(), "the move is still pending");
+    }
+
+    #[test]
+    fn a_checkbox_click_cannot_orphan_a_pending_move() {
+        // Disabling a moved monitor used to drop its revert target while the
+        // displaced position stayed, so Escape could no longer undo the move.
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.monitors[0].position = Some(Position { x: 300, y: 0 });
+        a.note_move(0, (0, 0));
+        let rect = list_cell(&a, 0, ListColumn::Icon);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(a.monitors[0].enabled, "the toggle is gated while pending");
+        assert_eq!(a.move_origins.get(&0), Some(&(0, 0)));
+
+        a.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(
+            a.monitors[0].position,
+            Some(Position { x: 0, y: 0 }),
+            "Escape still reverts the move"
+        );
     }
 
     #[test]
@@ -3058,25 +3087,41 @@ mod tests {
     }
 
     #[test]
-    fn disabling_a_pending_monitor_by_mouse_clears_the_move() {
+    fn disabling_a_pending_monitor_by_mouse_is_gated_in_view() {
+        let screen = Rect::new(0, 0, 160, 40);
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
-        let mut a = app(TUIMode::View, monitors);
+        let mut a = app_in(screen, TUIMode::View, monitors);
+        a.selected_monitor = 1;
+        a.monitors[1].position = Some(Position { x: 3010, y: 1000 });
+        a.note_move(1, (3000, 1000));
 
-        let (col, row) = cell_for_monitor(&a, 1);
-        down(&mut a, col, row);
-        drag(&mut a, col + 6, row);
-        up(&mut a, col, row);
-        assert!(a.move_origins.contains_key(&1));
+        // The pending row is selected already, so the checkbox would toggle.
+        let rect = list_cell(&a, 1, ListColumn::Icon);
+        down(&mut a, rect.x, rect.y);
 
-        // The pending row is selected already, so clicking its checkbox in the
-        // list disables it. The first enabled icon is monitor A's row, and the
-        // pending monitor B is the table row directly below it.
-        let buf = render(&a);
-        let (icon_col, first_row) = find_cell(&buf, ENABLED_ICON).expect("enabled icon");
-        down(&mut a, icon_col, first_row + 1);
+        assert!(a.monitors[1].enabled, "the confirm gate blocks the toggle");
+        assert_eq!(
+            a.move_origins.get(&1),
+            Some(&(3000, 1000)),
+            "the revert target survives"
+        );
+    }
+
+    #[test]
+    fn disabling_a_pending_monitor_from_a_sub_mode_clears_the_move() {
+        // Sub-modes are not gated; disabling there drops the Apply button and
+        // its pending record, matching the keyboard path.
+        let screen = Rect::new(0, 0, 160, 40);
+        let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
+        let mut a = app_in(screen, TUIMode::Resolution, monitors);
+        a.selected_monitor = 1;
+        a.note_move(1, (3000, 1000));
+
+        let rect = list_cell(&a, 1, ListColumn::Icon);
+        down(&mut a, rect.x, rect.y);
 
         assert!(!a.monitors[1].enabled, "the click disabled the monitor");
-        assert!(a.move_origins.is_empty());
+        assert!(!a.move_origins.contains_key(&1));
     }
 
     #[test]

@@ -409,8 +409,8 @@ fn total_width(items: &[ResolvedItem]) -> usize {
     width + count.saturating_sub(1)
 }
 
-// Shrinks the bar until it fits: the lowest-priority item is compacted first,
-// then removed. Whole items only, so no label is ever drawn half a chip.
+// Shrinks the bar until it fits: every candidate is compacted first, then whole
+// items are removed. Whole items only, so no label is ever drawn half a chip.
 fn fit(items: &mut [ResolvedItem], available: usize) {
     while total_width(items) > available {
         let Some(index) = items
@@ -425,9 +425,10 @@ fn fit(items: &mut [ResolvedItem], available: usize) {
 
         if !items[index].compact && items[index].spec.compact_width.is_some() {
             items[index].compact = true;
-            if total_width(items) <= available {
-                break;
-            }
+            // Re-run the fit before dropping anything: the next pass can still
+            // compact another item, so a pair of buttons shrinks together
+            // instead of losing one while the other keeps its full label.
+            continue;
         }
 
         items[index].removed = true;
@@ -849,6 +850,20 @@ mod tests {
         assert!(!text.contains(SNAP_MOVE_HINT), "got: {text}");
         assert!(text.contains("[ Apply  Enter ]"), "got: {text}");
         assert!(text.contains("[ Cancel all  Esc ]"), "got: {text}");
+    }
+
+    #[test]
+    fn the_pending_pair_compacts_both_buttons_before_dropping_either() {
+        // A 20-cell footer cannot hold a full chip, but [↵] + [Esc] fits. Both
+        // pending actions must compact before either is dropped.
+        let screen = area(22);
+        let mut buf = Buffer::empty(screen);
+        let frame = ActionBar::render(screen, &mut buf, context(TUIMode::View, true), None);
+        let text = labels(&frame, &buf);
+
+        assert!(text.contains("[\u{21b5}]"), "got: {text}");
+        assert!(text.contains("[Esc]"), "got: {text}");
+        assert_eq!(frame.buttons.len(), 2, "both pending actions survive");
     }
 
     #[test]

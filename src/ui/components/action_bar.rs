@@ -1,21 +1,23 @@
 //! Clickable action bar in the display list's footer.
 //!
 //! The bar replaces the old keybind text with buttons that dispatch exactly the
-//! key they name. Layout and hit-testing share [`ActionBar::layout`], so a click
-//! always lands on the button that was drawn. Range hints (`0-9`, `k/j`, …) stay
-//! pure documentation and are deliberately not clickable.
+//! key they name. Layout and hit-testing share [`ActionBar::layout_in`], so a
+//! click always lands on the button that was drawn. Range hints (`0-9`, `k/j`,
+//! …) stay pure documentation and are deliberately not clickable.
 
 use crate::App;
 use crate::app::state::HoverTarget;
 use crate::ui::styles;
 use crate::utils::TUIMode;
 use crossterm::event::KeyCode;
+#[cfg(test)]
+use ratatui::widgets::Block;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 
 // Terminal width below which the list shows its compact footer set.
@@ -34,6 +36,7 @@ pub enum ActionId {
     Quit,
     Help,
     Apply,
+    ApplyPending,
     Cancel,
     CancelAll,
     Done,
@@ -54,7 +57,7 @@ impl ActionId {
             ActionId::Save => KeyCode::Char('w'),
             ActionId::Quit => KeyCode::Char('q'),
             ActionId::Help => KeyCode::Char('K'),
-            ActionId::Apply => KeyCode::Enter,
+            ActionId::Apply | ActionId::ApplyPending => KeyCode::Enter,
             ActionId::Cancel | ActionId::CancelAll | ActionId::Done => KeyCode::Esc,
         }
     }
@@ -72,7 +75,7 @@ impl ActionId {
             ActionId::Save => "Save",
             ActionId::Quit => "Quit",
             ActionId::Help => "Help",
-            ActionId::Apply => "Apply",
+            ActionId::Apply | ActionId::ApplyPending => "Apply",
             ActionId::Cancel => "Cancel",
             ActionId::CancelAll => "Cancel all",
             ActionId::Done => "Done",
@@ -92,7 +95,7 @@ impl ActionId {
             ActionId::Save => "w",
             ActionId::Quit => "q",
             ActionId::Help => "K",
-            ActionId::Apply => "Enter",
+            ActionId::Apply | ActionId::ApplyPending => "Enter",
             ActionId::Cancel | ActionId::CancelAll | ActionId::Done => "Esc",
         }
     }
@@ -100,7 +103,7 @@ impl ActionId {
     // The key shown when the bar has to shrink a button to its key alone.
     fn compact_key(self, enabled: bool) -> &'static str {
         match self {
-            ActionId::Apply => "\u{21b5}", // ↵
+            ActionId::Apply | ActionId::ApplyPending => "\u{21b5}", // ↵
             other => other.key_label(enabled),
         }
     }
@@ -117,7 +120,8 @@ impl ActionId {
             ActionId::Save => "Validate and save the configuration",
             ActionId::Quit => "Quit and save the monitor state",
             ActionId::Help => "Show the keybindings help",
-            ActionId::Apply => "Apply; right-click also works on the map",
+            ActionId::Apply => "Apply the highlighted value",
+            ActionId::ApplyPending => "Apply every pending move; right-click too",
             ActionId::Cancel => "Cancel and return to view mode",
             ActionId::CancelAll => "Revert every pending move",
             ActionId::Done => "Leave move mode",
@@ -270,10 +274,7 @@ fn button_with_label(
     let full = format!("[ {}  {} ]", label, key);
     let spans = vec![
         Span::styled(format!("[ {}  ", label), Style::default().fg(Color::White)),
-        Span::styled(
-            key.to_string(),
-            Style::default().fg(Color::Blue).bold(),
-        ),
+        Span::styled(key.to_string(), Style::default().fg(Color::Blue).bold()),
         Span::styled(" ]", Style::default().fg(Color::White)),
     ];
 
@@ -315,7 +316,7 @@ fn items(context: ActionBarContext, mini: bool) -> Vec<FooterItem> {
 
     if context.pending && context.mode == TUIMode::View {
         return vec![
-            button(ActionId::Apply, 4, enabled),
+            button(ActionId::ApplyPending, 4, enabled),
             button(ActionId::CancelAll, 4, enabled),
         ];
     }
@@ -399,8 +400,9 @@ fn fit(items: &mut [ResolvedItem], available: usize) {
 }
 
 impl ActionBar {
-    // Lays the bar out from the list area. The renderer uses the exact footer
-    // row instead (see `layout_in`), so a warning line cannot be overwritten.
+    // Test helper: lays the bar out from a whole list area. Production uses the
+    // exact footer row from `MonitorList::footer_rect` via `layout_in`.
+    #[cfg(test)]
     pub fn layout(area: Rect, context: ActionBarContext) -> Self {
         let inner = Block::bordered().inner(area);
         if inner.width == 0 || inner.height == 0 {
@@ -442,11 +444,11 @@ impl ActionBar {
                     .iter()
                     .any(|item| !item.removed && item.item.action == Some(action))
             };
-            if remains(ActionId::Apply) != remains(ActionId::CancelAll) {
+            if remains(ActionId::ApplyPending) != remains(ActionId::CancelAll) {
                 for item in &mut resolved {
                     if matches!(
                         item.item.action,
-                        Some(ActionId::Apply | ActionId::CancelAll)
+                        Some(ActionId::ApplyPending | ActionId::CancelAll)
                     ) {
                         item.removed = true;
                     }
@@ -495,7 +497,8 @@ impl ActionBar {
         }
     }
 
-    // Draws the bar in the list area's last row.
+    // Test helper: draws the bar in the list area's last row.
+    #[cfg(test)]
     pub fn render(
         area: Rect,
         buf: &mut Buffer,
@@ -633,11 +636,7 @@ mod tests {
 
     #[test]
     fn an_absent_footer_row_draws_nothing() {
-        let frame = ActionBar::layout_in(
-            Rect::new(0, 0, 80, 0),
-            context(TUIMode::View, false),
-            80,
-        );
+        let frame = ActionBar::layout_in(Rect::new(0, 0, 80, 0), context(TUIMode::View, false), 80);
 
         assert!(frame.buttons.is_empty());
         assert!(!frame.contains((0, 0)));
@@ -647,15 +646,10 @@ mod tests {
     fn pending_moves_offer_only_apply_and_cancel() {
         let screen = area(120);
         let mut buf = Buffer::empty(screen);
-        let frame = ActionBar::render(
-            screen,
-            &mut buf,
-            context(TUIMode::View, true),
-            None,
-        );
+        let frame = ActionBar::render(screen, &mut buf, context(TUIMode::View, true), None);
         let actions: Vec<ActionId> = frame.buttons.iter().map(|button| button.action).collect();
 
-        assert_eq!(actions, vec![ActionId::Apply, ActionId::CancelAll]);
+        assert_eq!(actions, vec![ActionId::ApplyPending, ActionId::CancelAll]);
         let text = labels(&frame, &buf);
         assert!(text.contains("Apply"), "got: {text}");
         assert!(text.contains("Cancel all"), "got: {text}");
@@ -671,7 +665,10 @@ mod tests {
         assert!(text.contains("Save"), "got: {text}");
         assert!(text.contains("Quit"), "got: {text}");
         assert!(text.contains("Keybinds"), "got: {text}");
-        assert!(!text.contains("Move"), "compact mode drops the mode buttons: {text}");
+        assert!(
+            !text.contains("Move"),
+            "compact mode drops the mode buttons: {text}"
+        );
     }
 
     #[test]
@@ -732,8 +729,7 @@ mod tests {
 
         assert_eq!(
             buf[(save.rect.x, save.rect.y)].style().add_modifier,
-            ratatui::style::Modifier::REVERSED
-                | ratatui::style::Modifier::BOLD,
+            ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD,
             "the hovered chip must be inverted"
         );
     }
@@ -767,6 +763,7 @@ mod tests {
         assert_eq!(ActionId::Quit.key(true), KeyCode::Char('q'));
         assert_eq!(ActionId::Help.key(true), KeyCode::Char('K'));
         assert_eq!(ActionId::Apply.key(true), KeyCode::Enter);
+        assert_eq!(ActionId::ApplyPending.key(true), KeyCode::Enter);
         assert_eq!(ActionId::Cancel.key(true), KeyCode::Esc);
         assert_eq!(ActionId::ToggleEnabled.key(true), KeyCode::Char('d'));
         assert_eq!(ActionId::ToggleEnabled.key(false), KeyCode::Char('e'));
@@ -793,7 +790,11 @@ mod tests {
         ActionBar::render(screen, &mut buf, context(TUIMode::View, false), None);
 
         let (_, y) = find_text(&buf, "Save").expect("save label");
-        assert!(text_of(&buf).contains("[ Save  w ]"), "got: {}", text_of(&buf));
+        assert!(
+            text_of(&buf).contains("[ Save  w ]"),
+            "got: {}",
+            text_of(&buf)
+        );
         assert_eq!(y, screen.height - 2);
     }
 }

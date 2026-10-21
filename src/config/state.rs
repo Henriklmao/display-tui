@@ -164,7 +164,7 @@ pub fn load_preset(name: &str) -> Option<Vec<MonitorState>> {
     load_preset_in(&get_presets_dir(), name)
 }
 
-fn load_preset_in(dir: &Path, name: &str) -> Option<Vec<MonitorState>> {
+pub(crate) fn load_preset_in(dir: &Path, name: &str) -> Option<Vec<MonitorState>> {
     if validate_preset_name(name).is_err() {
         return None;
     }

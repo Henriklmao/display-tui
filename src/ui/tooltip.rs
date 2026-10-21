@@ -256,6 +256,7 @@ mod tests {
             HoverTarget::HelpScrollbar,
             HoverTarget::Action(crate::ui::components::ActionId::Save),
             HoverTarget::Action(crate::ui::components::ActionId::Apply),
+            HoverTarget::Action(crate::ui::components::ActionId::ApplyPending),
             HoverTarget::Popup(PopupAction::Close),
             HoverTarget::Popup(PopupAction::Accept),
             HoverTarget::Popup(PopupAction::Force),

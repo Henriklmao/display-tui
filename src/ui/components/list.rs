@@ -76,6 +76,40 @@ fn has_duplicate_workspace(monitors: &[Monitor]) -> bool {
     workspace_counts(monitors).values().any(|&count| count > 1)
 }
 
+// The vertical split of the list's inner area: table, optional duplicate
+// warning, footer. Rendering and hit-testing both use this.
+fn list_chunks(inner: Rect, monitors: &[Monitor]) -> Vec<Rect> {
+    Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(if has_duplicate_workspace(monitors) {
+                1
+            } else {
+                0
+            }),
+            Constraint::Length(1),
+        ])
+        .split(inner)
+        .to_vec()
+}
+
+// The visible data-row window: first screen row, viewport height and scroll
+// offset. Shared by row and cell hit-testing.
+fn row_window(area: Rect, monitors: &[Monitor], selected: usize) -> (u16, u16, usize) {
+    let inner = Block::bordered().inner(area);
+    let reserved = if has_duplicate_workspace(monitors) {
+        2
+    } else {
+        1
+    };
+    let table_height = inner.height.saturating_sub(reserved);
+    // The header row plus its bottom margin occupy two lines.
+    let viewport = table_height.saturating_sub(2);
+    let offset = scrolled_offset(selected, viewport as usize);
+    (inner.y.saturating_add(2), viewport, offset)
+}
+
 // The columns of the display table, in draw order. Shared by rendering and
 // hit-testing so a click on a cell can never drift from the drawn column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,23 +179,8 @@ impl<'a> MonitorList<'a> {
     // Maps a click's row to a monitor index, honouring the table's scroll
     // window. `y` is the absolute screen row.
     pub fn row_at(area: Rect, monitors: &[Monitor], selected: usize, y: u16) -> Option<usize> {
-        let inner = Block::bordered().inner(area);
-        let reserved = if has_duplicate_workspace(monitors) {
-            2
-        } else {
-            1
-        };
-        let table_height = inner.height.saturating_sub(reserved);
-        // The header row plus its bottom margin occupy two lines.
-        let viewport = table_height.saturating_sub(2);
-        let offset = scrolled_offset(selected, viewport as usize);
-        row_in_window(
-            inner.y.saturating_add(2),
-            viewport,
-            offset,
-            monitors.len(),
-            y,
-        )
+        let (top, viewport, offset) = row_window(area, monitors, selected);
+        row_in_window(top, viewport, offset, monitors.len(), y)
     }
 
     // The drawn columns as (column, screen rect) pairs. Shared by rendering and
@@ -201,19 +220,10 @@ impl<'a> MonitorList<'a> {
         if inner.height == 0 {
             return None;
         }
-        let chunks = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(if has_duplicate_workspace(monitors) {
-                    1
-                } else {
-                    0
-                }),
-                Constraint::Length(1),
-            ])
-            .split(inner);
-        (chunks[2].height > 0).then_some(chunks[2])
+        list_chunks(inner, monitors)
+            .get(2)
+            .copied()
+            .filter(|footer| footer.height > 0)
     }
 
     // The table column under a screen column, if any.
@@ -242,26 +252,13 @@ impl<'a> MonitorList<'a> {
         row: usize,
         column: ListColumn,
     ) -> Option<Rect> {
-        let inner = Block::bordered().inner(area);
-        let reserved = if has_duplicate_workspace(monitors) {
-            2
-        } else {
-            1
-        };
-        let table_height = inner.height.saturating_sub(reserved);
-        let viewport = table_height.saturating_sub(2);
-        let offset = scrolled_offset(selected, viewport as usize);
-        if row >= monitors.len()
-            || row < offset
-            || row >= offset.saturating_add(viewport as usize)
+        let (top, viewport, offset) = row_window(area, monitors, selected);
+        if row >= monitors.len() || row < offset || row >= offset.saturating_add(viewport as usize)
         {
             return None;
         }
 
-        let y = inner
-            .y
-            .saturating_add(2)
-            .saturating_add((row - offset) as u16);
+        let y = top.saturating_add((row - offset) as u16);
         let column = MonitorList::column_rect(area, column)?;
         Some(Rect {
             x: column.x,
@@ -528,14 +525,7 @@ impl<'a> MonitorList<'a> {
         let inner_area = block.inner(area);
         Widget::render(block, area, buf);
 
-        let chunks = ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(if has_duplicate_workspace { 1 } else { 0 }),
-                Constraint::Length(1),
-            ])
-            .split(inner_area);
+        let chunks = list_chunks(inner_area, self.monitors);
 
         let widths = visible_columns(area.width);
 

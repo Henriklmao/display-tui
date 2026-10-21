@@ -19,8 +19,7 @@ const DIGITS: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
 const COLUMNS: usize = 5;
 const CHIP_WIDTH: u16 = 3;
 const GAP: u16 = 1;
-const PICKER_WIDTH: u16 =
-    COLUMNS as u16 * CHIP_WIDTH + (COLUMNS as u16 - 1) * GAP + 2;
+const PICKER_WIDTH: u16 = COLUMNS as u16 * CHIP_WIDTH + (COLUMNS as u16 - 1) * GAP + 2;
 const PICKER_HEIGHT: u16 = 4;
 
 // The popover rectangle for a cell anchor, clamped inside `area`.
@@ -56,8 +55,7 @@ fn digit_rects(anchor: Rect, area: Rect) -> Vec<(u8, Rect)> {
         return Vec::new();
     }
 
-    let total_width =
-        COLUMNS as u16 * CHIP_WIDTH + (COLUMNS as u16 - 1) * GAP;
+    let total_width = COLUMNS as u16 * CHIP_WIDTH + (COLUMNS as u16 - 1) * GAP;
     let start_x = inner
         .x
         .saturating_add(inner.width.saturating_sub(total_width) / 2);
@@ -74,10 +72,8 @@ fn digit_rects(anchor: Rect, area: Rect) -> Vec<(u8, Rect)> {
                 width: CHIP_WIDTH,
                 height: 1,
             };
-            (chip.x >= inner.x
-                && chip.right() <= inner.right()
-                && chip.bottom() <= inner.bottom())
-            .then_some((*digit, chip))
+            (chip.x >= inner.x && chip.right() <= inner.right() && chip.bottom() <= inner.bottom())
+                .then_some((*digit, chip))
         })
         .collect()
 }
@@ -104,12 +100,7 @@ pub fn digit_at(anchor: Rect, area: Rect, point: (u16, u16)) -> Option<u8> {
 }
 
 // Draws the picker and highlights the hovered digit. Returns its rectangle.
-pub fn render(
-    anchor: Rect,
-    area: Rect,
-    buf: &mut Buffer,
-    hover: Option<HoverTarget>,
-) -> Rect {
+pub fn render(anchor: Rect, area: Rect, buf: &mut Buffer, hover: Option<HoverTarget>) -> Rect {
     let frame = rect(anchor, area);
     if frame.width == 0 || frame.height == 0 {
         return frame;

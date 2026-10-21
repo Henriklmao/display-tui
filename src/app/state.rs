@@ -691,6 +691,10 @@ impl App {
                     // For unrelated keys, keep the popup visible
                 }
             }
+            if self.show_popup.is_none() {
+                // A dismissed popup must not leave its button hover behind.
+                self.clear_hover();
+            }
             return;
         }
 
@@ -915,6 +919,10 @@ impl App {
                     }
                 }
             }
+            if self.show_preset_menu.is_none() {
+                // A consumed menu button must not leave a tooltip on the list.
+                self.clear_hover();
+            }
             return;
         }
 
@@ -1122,7 +1130,7 @@ impl App {
     // diverges from what the active preset defines (or the preset file is gone).
     pub(crate) fn clear_active_preset_if_changed(&mut self) {
         if let Some(ref active) = self.active_preset.clone() {
-            if let Some(state) = crate::config::load_preset(active) {
+            if let Some(state) = crate::config::load_preset_in(&self.presets_dir(), active) {
                 for monitor_state in &state {
                     if let Some(monitor) =
                         self.monitors.iter().find(|m| m.name == monitor_state.name)

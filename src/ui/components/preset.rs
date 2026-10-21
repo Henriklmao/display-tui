@@ -211,10 +211,9 @@ impl PresetMenu {
                 PresetButtonAction::Rename,
                 PresetButtonAction::Close,
             ],
-            MenuState::CreateName(_) | MenuState::RenameName(_, _) => vec![
-                PresetButtonAction::Save,
-                PresetButtonAction::Cancel,
-            ],
+            MenuState::CreateName(_) | MenuState::RenameName(_, _) => {
+                vec![PresetButtonAction::Save, PresetButtonAction::Cancel]
+            }
             MenuState::DeleteConfirm(_) => vec![
                 PresetButtonAction::Yes,
                 PresetButtonAction::No,
@@ -269,8 +268,7 @@ impl PresetMenu {
                 .saturating_add(row_buttons.len().saturating_sub(1) as u16);
             let mut x = inner.x + inner.width.saturating_sub(row_width) / 2;
             for (label, action) in row_buttons {
-                let width = (label.chars().count() as u16)
-                    .min(inner.right().saturating_sub(x));
+                let width = (label.chars().count() as u16).min(inner.right().saturating_sub(x));
                 if width == 0 {
                     break;
                 }
@@ -687,8 +685,7 @@ impl PresetMenu {
             let hovered = hover == Some(HoverTarget::PresetButton(button.action));
             if hovered {
                 Paragraph::new(
-                    Line::from(button_label(button.action))
-                        .style(styles::hover_style().reversed()),
+                    Line::from(button_label(button.action)).style(styles::hover_style().reversed()),
                 )
                 .render(button.rect, buf);
             } else {

@@ -176,8 +176,9 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
         MouseEventKind::Up(MouseButton::Left) => app.drag = None,
         // The mouse's Apply: a right click resolves a pending move.
         MouseEventKind::Down(MouseButton::Right) => {
-            // Right-clicking the footer is not the map's Apply gesture.
-            if !action_bar(app, layout).contains(point(event)) {
+            // Apply-by-right-click belongs to the map gesture only; the list,
+            // tables and footer must not commit a move behind the user's back.
+            if inside(layout.canvas, point(event)) {
                 handle_right_click(app);
             }
         }
@@ -223,11 +224,7 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
     MonitorList::footer_rect(layout.list, &app.monitors)
         .map(|footer| {
-            ActionBar::layout_in(
-                footer,
-                ActionBarContext::from_app(app),
-                layout.list.width,
-            )
+            ActionBar::layout_in(footer, ActionBarContext::from_app(app), layout.list.width)
         })
         .unwrap_or_default()
 }
@@ -236,12 +233,7 @@ fn action_bar(app: &App, layout: ScreenLayout) -> ActionBar {
 // the bar first keeps the hit map aligned with the frame that was drawn, and
 // committing the hover selection makes the button act on the display it was
 // labelled for.
-fn footer_click(
-    app: &mut App,
-    layout: ScreenLayout,
-    point: (u16, u16),
-    now: Instant,
-) -> bool {
+fn footer_click(app: &mut App, layout: ScreenLayout, point: (u16, u16), now: Instant) -> bool {
     let bar = action_bar(app, layout);
     if let Some(action) = bar.button_at(point) {
         app.last_click = None;
@@ -492,11 +484,7 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
             ListColumn::Scale if !confirm_pending => {
                 if changed_row || app.mode != TUIMode::Scale {
                     if let Some(monitor) = app.monitors.get(row) {
-                        let current = monitor.scale.unwrap_or(1.0);
-                        app.selected_scale = ScaleValue::table()
-                            .iter()
-                            .position(|entry| (entry.value - current).abs() < 1e-6)
-                            .unwrap_or(0);
+                        app.selected_scale = nearest_scale_index(monitor.scale.unwrap_or(1.0));
                     }
                     crate::utils::change_mode(app, TUIMode::Scale);
                 }
@@ -599,6 +587,21 @@ fn handle_scroll(app: &mut App, layout: ScreenLayout, point: (u16, u16), delta: 
     if inside(layout.list, point) {
         app.selected_monitor = step(app.selected_monitor, app.monitors.len(), delta);
     }
+}
+
+// The table entry closest to an arbitrary monitor scale. A scale set outside
+// the table (e.g. 1.45) must not jump to the first row.
+fn nearest_scale_index(value: f32) -> usize {
+    ScaleValue::table()
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            (left.value - value)
+                .abs()
+                .total_cmp(&(right.value - value).abs())
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(0)
 }
 
 fn step(current: usize, length: usize, delta: i32) -> usize {
@@ -1234,7 +1237,8 @@ mod tests {
 
     fn footer_button(a: &App, action: ActionId) -> Rect {
         let layout = a.layout.unwrap();
-        ActionBar::layout(layout.list, ActionBarContext::from_app(a))
+        let footer = MonitorList::footer_rect(layout.list, &a.monitors).expect("footer row");
+        ActionBar::layout_in(footer, ActionBarContext::from_app(a), layout.list.width)
             .buttons
             .iter()
             .find(|button| button.action == action)
@@ -1244,11 +1248,7 @@ mod tests {
 
     #[test]
     fn moving_over_a_footer_button_sets_the_action_hover() {
-        let mut a = app_in(
-            Rect::new(0, 0, 160, 40),
-            TUIMode::View,
-            test_monitors(),
-        );
+        let mut a = app_in(Rect::new(0, 0, 160, 40), TUIMode::View, test_monitors());
         let rect = footer_button(&a, ActionId::Save);
 
         moved(&mut a, rect.x, rect.y);
@@ -1317,7 +1317,7 @@ mod tests {
         let mut a = app(TUIMode::View, test_monitors());
         a.state_path = Some(dir.path().join("monitor_state.json"));
         a.note_move(0, (0, 0));
-        let rect = footer_button(&a, ActionId::Apply);
+        let rect = footer_button(&a, ActionId::ApplyPending);
 
         down(&mut a, rect.x, rect.y);
 
@@ -1332,7 +1332,7 @@ mod tests {
     fn right_clicking_the_footer_is_not_the_map_apply_gesture() {
         let mut a = app(TUIMode::View, test_monitors());
         a.note_move(0, (0, 0));
-        let rect = footer_button(&a, ActionId::Apply);
+        let rect = footer_button(&a, ActionId::ApplyPending);
 
         right_click(&mut a, rect.x, rect.y);
 
@@ -1340,6 +1340,18 @@ mod tests {
             a.has_pending_move(),
             "a right click on the footer must not apply a move"
         );
+    }
+
+    #[test]
+    fn right_clicking_the_list_does_not_apply_a_pending_move() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.note_move(0, (0, 0));
+        let buf = render(&a);
+        let (col, row) = find_text(&buf, "Description 1").expect("list row");
+
+        right_click(&mut a, col, row);
+
+        assert!(a.has_pending_move(), "only the map right-click applies");
     }
 
     #[test]
@@ -1424,10 +1436,7 @@ mod tests {
 
         for (column, target) in [
             (ListColumn::Icon, HoverTarget::ListIcon(0)),
-            (
-                ListColumn::Resolution,
-                HoverTarget::ListResolution(0),
-            ),
+            (ListColumn::Resolution, HoverTarget::ListResolution(0)),
             (ListColumn::Scale, HoverTarget::ListScale(0)),
             (ListColumn::Rotation, HoverTarget::ListRotation(0)),
             (ListColumn::Workspace, HoverTarget::ListWorkspace(0)),
@@ -1463,6 +1472,22 @@ mod tests {
         down(&mut a, rect.x, rect.y);
 
         assert_eq!(a.mode, TUIMode::Scale);
+        assert_eq!(a.selected_scale, expected);
+    }
+
+    #[test]
+    fn an_off_table_scale_preselects_the_nearest_value() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.monitors[0].scale = Some(1.45);
+        let rect = list_cell(&a, 0, ListColumn::Scale);
+        let expected = ScaleValue::table()
+            .iter()
+            .position(|entry| (entry.value - 1.6).abs() < 1e-6)
+            .expect("160% in the table");
+
+        down(&mut a, rect.x, rect.y);
+
         assert_eq!(a.selected_scale, expected);
     }
 
@@ -1529,28 +1554,23 @@ mod tests {
 
     #[test]
     fn scrolled_list_cells_are_hit_tested_in_the_window() {
-        let monitors = (0..10)
-            .map(|index| {
-                monitor(
-                    &format!("M{index}"),
-                    index * 1920,
-                    0,
-                    true,
-                )
-            })
+        let mut monitors: Vec<Monitor> = (0..10)
+            .map(|index| monitor(&format!("M{index}"), index * 1920, 0, true))
             .collect();
-        let mut a = app_in(Rect::new(0, 0, 160, 40), TUIMode::View, monitors);
+        for (index, monitor) in monitors.iter_mut().enumerate() {
+            monitor.description = Some(format!("row-{index}"));
+        }
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, monitors);
         a.selected_monitor = 9;
-        let rect = MonitorList::cell_rect(
-            a.layout.unwrap().list,
-            &a.monitors,
-            9,
-            9,
-            ListColumn::Rotation,
-        )
-        .expect("the selected row is scrolled into view");
+        // Use the actually drawn row, not the hit-test helper, so an
+        // off-by-one in the scroll window cannot fake a pass.
+        let buf = render_in(&a, screen);
+        let (_, row) = find_text(&buf, "row-9").expect("the selected row is scrolled into view");
+        let column = MonitorList::column_rect(a.layout.unwrap().list, ListColumn::Rotation)
+            .expect("rotation column");
 
-        down(&mut a, rect.x, rect.y);
+        down(&mut a, column.x, row);
 
         assert_eq!(a.selected_monitor, 9);
         assert_eq!(a.monitors[9].transform.as_deref(), Some("90"));
@@ -1597,8 +1617,10 @@ mod tests {
 
     #[test]
     fn the_icon_click_clears_a_stale_active_preset() {
+        let dir = TempDir::new("mouse-active-preset");
         let screen = Rect::new(0, 0, 160, 40);
         let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.presets_dir = Some(dir.path().to_path_buf());
         a.active_preset = Some("does-not-exist".to_string());
         let rect = list_cell(&a, 0, ListColumn::Icon);
 
@@ -1629,7 +1651,9 @@ mod tests {
         let cell = list_cell(&a, 0, ListColumn::Workspace);
         down(&mut a, cell.x, cell.y);
 
-        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let anchor = a
+            .workspace_picker_anchor(a.layout.unwrap())
+            .expect("anchor");
         let chip = workspace_picker::digit_rect(anchor, screen, 3).expect("digit 3");
         moved(&mut a, chip.x, chip.y);
         assert_eq!(a.hover, Some(HoverTarget::WorkspaceDigit(3)));
@@ -1648,7 +1672,9 @@ mod tests {
         let cell = list_cell(&a, 0, ListColumn::Workspace);
         down(&mut a, cell.x, cell.y);
 
-        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let anchor = a
+            .workspace_picker_anchor(a.layout.unwrap())
+            .expect("anchor");
         let chip = workspace_picker::digit_rect(anchor, screen, 0).expect("digit 0");
         down(&mut a, chip.x, chip.y);
 
@@ -1702,7 +1728,9 @@ mod tests {
         let mut a = app_in(screen, TUIMode::View, test_monitors());
         let cell = list_cell(&a, 0, ListColumn::Workspace);
         down(&mut a, cell.x, cell.y);
-        let anchor = a.workspace_picker_anchor(a.layout.unwrap()).expect("anchor");
+        let anchor = a
+            .workspace_picker_anchor(a.layout.unwrap())
+            .expect("anchor");
         let chip = workspace_picker::digit_rect(anchor, screen, 3).expect("digit 3");
         moved(&mut a, chip.x, chip.y);
         assert_eq!(a.hover, Some(HoverTarget::WorkspaceDigit(3)));
@@ -1777,11 +1805,7 @@ mod tests {
 
     fn open_preset_menu(a: &mut App) {
         a.preset_backup = Some(vec![]);
-        a.show_preset_menu = Some(PresetMenu::new(
-            vec!["missing-a".to_string()],
-            &[],
-            None,
-        ));
+        a.show_preset_menu = Some(PresetMenu::new(vec!["missing-a".to_string()], &[], None));
     }
 
     fn preset_button(a: &App, action: PresetButtonAction) -> Rect {

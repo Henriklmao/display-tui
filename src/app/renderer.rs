@@ -64,7 +64,12 @@ impl Widget for &App {
         }
 
         if self.show_help {
-            HelpModal::render(area, buf, self.hover == Some(HoverTarget::HelpClose));
+            HelpModal::render(
+                area,
+                buf,
+                self.help_scroll,
+                self.hover == Some(HoverTarget::HelpClose),
+            );
         }
 
         if let Some(ref popup) = self.show_popup {

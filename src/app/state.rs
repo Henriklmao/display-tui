@@ -6,7 +6,9 @@ use crate::CliAction;
 use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
-use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{
+    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix};
@@ -27,6 +29,8 @@ pub struct App {
     pub selected_scale: usize,
     pub mode: TUIMode,
     pub show_help: bool,
+    // First visible content row of the help modal; reset when it opens.
+    pub help_scroll: u16,
     pub show_popup: Option<Popup>,
     pub show_preset_menu: Option<PresetMenu>,
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
@@ -529,10 +533,17 @@ impl App {
     // real key path (e.g. Escape after a drag) instead of the components alone.
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         if self.show_help {
+            // The help is scrollable: `j`/`k`, the arrows and PgUp/PgDn move
+            // through the content instead of acting on the list behind it.
+            // Closing is reserved for Esc, q and the K toggle.
             match key_event.code {
-                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') | KeyCode::Char('k') => {
-                    self.show_help = false
-                }
+                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') => self.show_help = false,
+                KeyCode::Up | KeyCode::Char('k') => self.scroll_help(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.scroll_help(1),
+                KeyCode::PageUp => self.scroll_help(-(self.help_viewport() as i32)),
+                KeyCode::PageDown => self.scroll_help(self.help_viewport() as i32),
+                KeyCode::Home => self.help_scroll = 0,
+                KeyCode::End => self.help_scroll = self.help_max_scroll(),
                 _ => {}
             }
             return;
@@ -830,7 +841,10 @@ impl App {
                     self.write();
                 }
             }
-            KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
+            KeyCode::Char('K') if self.mode != TUIMode::Move => {
+                self.show_help = true;
+                self.help_scroll = 0;
+            }
             _ => match self.mode {
                 TUIMode::View => {
                     if key_event.code == KeyCode::Char('p') || key_event.code == KeyCode::Char('P')
@@ -872,6 +886,26 @@ impl App {
                 }
             },
         }
+    }
+
+    // Highest scroll offset the help modal supports right now.
+    fn help_max_scroll(&self) -> u16 {
+        self.layout
+            .map(|layout| HelpModal::max_scroll(layout.area))
+            .unwrap_or(0)
+    }
+
+    // Visible help rows, used as the page step.
+    fn help_viewport(&self) -> u16 {
+        self.layout
+            .map(|layout| HelpModal::viewport(layout.area))
+            .unwrap_or(0)
+    }
+
+    // Scrolls the help by `delta` rows, clamped to its content.
+    pub(crate) fn scroll_help(&mut self, delta: i32) {
+        let max = self.help_max_scroll() as i32;
+        self.help_scroll = (self.help_scroll as i32 + delta).clamp(0, max) as u16;
     }
 
     // Snapshot the current monitor state so it can be restored if the
@@ -1332,6 +1366,71 @@ mod tests {
             was_pending,
         });
         app
+    }
+
+    // A help overlay on a terminal too short to show every section.
+    fn help_app(width: u16, height: u16) -> App {
+        let area = ratatui::layout::Rect::new(0, 0, width, height);
+        let mut app = App::new(None);
+        app.layout = Some(crate::ui::layouts::screen_layout(area, TUIMode::View));
+        app.show_help = true;
+        app
+    }
+
+    #[test]
+    fn help_scrolls_with_j_k_and_the_arrows() {
+        let area = ratatui::layout::Rect::new(0, 0, 60, 15);
+        let mut app = help_app(60, 15);
+        let max = HelpModal::max_scroll(area);
+        assert!(max > 0, "the test terminal must need scrolling");
+
+        let keys = |code| KeyEvent::new(code, KeyModifiers::NONE);
+
+        app.handle_key_event(keys(KeyCode::Char('j')));
+        assert_eq!(app.help_scroll, 1);
+        app.handle_key_event(keys(KeyCode::Down));
+        assert_eq!(app.help_scroll, 2);
+        app.handle_key_event(keys(KeyCode::Char('k')));
+        assert_eq!(app.help_scroll, 1);
+        app.handle_key_event(keys(KeyCode::Up));
+        assert_eq!(app.help_scroll, 0);
+        assert!(app.show_help, "scrolling must not close the help");
+
+        app.handle_key_event(keys(KeyCode::End));
+        assert_eq!(app.help_scroll, max);
+        app.handle_key_event(keys(KeyCode::Char('j')));
+        assert_eq!(app.help_scroll, max, "the offset is clamped");
+        app.handle_key_event(keys(KeyCode::Home));
+        assert_eq!(app.help_scroll, 0);
+
+        app.handle_key_event(keys(KeyCode::PageDown));
+        assert_eq!(app.help_scroll, HelpModal::viewport(area).min(max));
+        app.handle_key_event(keys(KeyCode::PageUp));
+        assert_eq!(app.help_scroll, 0);
+    }
+
+    #[test]
+    fn help_still_closes_with_q_escape_or_the_toggle() {
+        for code in [KeyCode::Char('q'), KeyCode::Esc, KeyCode::Char('K')] {
+            let mut app = help_app(60, 15);
+            app.help_scroll = 3;
+
+            app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+
+            assert!(!app.show_help, "{code:?} must close the help");
+        }
+    }
+
+    #[test]
+    fn opening_the_help_starts_at_the_top() {
+        let mut app = help_app(60, 15);
+        app.help_scroll = 4;
+        app.show_help = false;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+
+        assert!(app.show_help);
+        assert_eq!(app.help_scroll, 0, "a fresh help starts at the top");
     }
 
     #[test]

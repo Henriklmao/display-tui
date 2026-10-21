@@ -53,10 +53,17 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     }
 
     if app.show_help {
-        if is_left_click(event.kind) {
-            // A modal-consumed click must not seed a later double-click.
-            app.last_click = None;
-            app.show_help = false;
+        let over_help = inside(HelpModal::rect(layout.area), point(event));
+        match event.kind {
+            // The wheel scrolls the help when the pointer is over the modal.
+            MouseEventKind::ScrollUp if over_help => app.scroll_help(-1),
+            MouseEventKind::ScrollDown if over_help => app.scroll_help(1),
+            kind if is_left_click(kind) => {
+                // A modal-consumed click must not seed a later double-click.
+                app.last_click = None;
+                app.show_help = false;
+            }
+            _ => {}
         }
         return;
     }
@@ -140,7 +147,8 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 // precedence as the click handler. Pure so it can be unit-tested.
 fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<HoverTarget> {
     if app.show_help {
-        return inside(HelpModal::close_button(layout.area), point).then_some(HoverTarget::HelpClose);
+        return inside(HelpModal::close_button(layout.area), point)
+            .then_some(HoverTarget::HelpClose);
     }
 
     if app.show_popup.is_some() {
@@ -624,6 +632,35 @@ mod tests {
 
         assert!(!a.show_help, "the embedded Esc button closes the help");
         assert_eq!(a.selected_monitor, 0, "the click must not fall through");
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_help_overlay() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let popup = HelpModal::rect(screen);
+        let (col, row) = (popup.x + popup.width / 2, popup.y + popup.height / 2);
+        assert!(HelpModal::max_scroll(screen) > 0, "must be scrollable");
+
+        wheel_down(&mut a, col, row);
+        assert_eq!(a.help_scroll, 1);
+        assert!(a.show_help, "the wheel must not dismiss the help");
+
+        wheel_up(&mut a, col, row);
+        assert_eq!(a.help_scroll, 0);
+    }
+
+    #[test]
+    fn the_wheel_outside_the_help_overlay_does_not_scroll_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+
+        wheel_down(&mut a, 0, 0);
+
+        assert_eq!(a.help_scroll, 0);
+        assert!(a.show_help);
     }
 
     #[test]

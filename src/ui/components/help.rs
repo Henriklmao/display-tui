@@ -6,7 +6,7 @@
 //! columns; below [`TWO_COLUMN_MIN_WIDTH`] every section is stacked into
 //! a single column instead.
 //!
-//! The frame is a double-line box drawn by hand so the title, the version
+//! The frame is a single-line box drawn by hand so the title, the version
 //! and the close hint can sit inside the border itself: the title is embedded
 //! top-left, the version top-right and the footer is centred in the bottom
 //! line.
@@ -466,7 +466,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-// Draws the double-line frame, the embedded title/version and the footer.
+// Draws the single-line frame, the embedded title/version and the footer.
 fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     if popup.width < 2 || popup.height < 2 {
         return;
@@ -479,18 +479,18 @@ fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     let bottom = popup.bottom() - 1;
 
     for x in (left + 1)..right {
-        put(buf, x, top, '═', border);
-        put(buf, x, bottom, '═', border);
+        put(buf, x, top, '─', border);
+        put(buf, x, bottom, '─', border);
     }
     for y in (top + 1)..bottom {
-        put(buf, left, y, '║', border);
-        put(buf, right, y, '║', border);
+        put(buf, left, y, '│', border);
+        put(buf, right, y, '│', border);
     }
 
-    put(buf, left, top, '╔', border);
-    put(buf, right, top, '╗', border);
-    put(buf, left, bottom, '╚', border);
-    put(buf, right, bottom, '╝', border);
+    put(buf, left, top, '┌', border);
+    put(buf, right, top, '┐', border);
+    put(buf, left, bottom, '└', border);
+    put(buf, right, bottom, '┘', border);
 
     // The version is dropped on narrow popups so the title keeps its room.
     let version = format!(" Display-TUI v{} ", env!("CARGO_PKG_VERSION"));
@@ -625,7 +625,11 @@ mod tests {
     fn the_two_columns_are_split_by_a_vertical_rule() {
         let buf = render_help(120, 40);
         let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
-        let (x, y) = find(&buf, "│").expect("divider");
+        let body = body_area(popup);
+        let y = body.y;
+        let x = (body.left()..body.right())
+            .find(|&x| buf[(x, y)].symbol() == "│")
+            .expect("divider");
 
         assert!(
             x.abs_diff(popup.x + popup.width / 2) <= 1,
@@ -638,17 +642,19 @@ mod tests {
     #[test]
     fn the_stacked_layout_has_no_divider() {
         // 60 cols < TWO_COLUMN_MIN_WIDTH: the second column drops below, so
-        // the only vertical rule left is the scrollbar lane on the right.
+        // the middle column carries content instead of a vertical rule.
         let buf = render_help(60, 30);
         let popup = responsive_help_rect(Rect::new(0, 0, 60, 30));
-        // The first vertical rule (if any) must be the scrollbar lane; a
-        // divider would be found further left first.
-        let (x, _) = find(&buf, "│").expect("the scrollbar track is drawn");
-        assert_eq!(
-            x,
-            popup.right() - 2,
-            "no column divider in the stacked layout"
-        );
+        let body = body_area(popup);
+        let middle = popup.x + popup.width / 2;
+
+        for y in body.top()..body.bottom() {
+            assert_ne!(
+                buf[(middle, y)].symbol(),
+                "│",
+                "no column divider in the stacked layout"
+            );
+        }
     }
 
     #[test]
@@ -794,16 +800,16 @@ mod tests {
     }
 
     #[test]
-    fn the_frame_uses_double_lines() {
+    fn the_frame_uses_single_lines() {
         let buf = render_help(120, 40);
         let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
 
-        assert_eq!(buf[(popup.x, popup.y)].symbol(), "╔");
-        assert_eq!(buf[(popup.right() - 1, popup.y)].symbol(), "╗");
-        assert_eq!(buf[(popup.x, popup.bottom() - 1)].symbol(), "╚");
-        assert_eq!(buf[(popup.right() - 1, popup.bottom() - 1)].symbol(), "╝");
-        assert_eq!(buf[(popup.x, popup.y + 1)].symbol(), "║");
-        assert_eq!(buf[(popup.x + 1, popup.y)].symbol(), "═");
+        assert_eq!(buf[(popup.x, popup.y)].symbol(), "┌");
+        assert_eq!(buf[(popup.right() - 1, popup.y)].symbol(), "┐");
+        assert_eq!(buf[(popup.x, popup.bottom() - 1)].symbol(), "└");
+        assert_eq!(buf[(popup.right() - 1, popup.bottom() - 1)].symbol(), "┘");
+        assert_eq!(buf[(popup.x, popup.y + 1)].symbol(), "│");
+        assert_eq!(buf[(popup.x + 1, popup.y)].symbol(), "─");
 
         // A horizontal cell outside the embedded title keeps the border style.
         assert_eq!(buf[(popup.x + 1, popup.y)].style().fg, Some(Color::Cyan));
@@ -831,7 +837,7 @@ mod tests {
         let version_at = top.find(&version).unwrap();
         assert!(title_at < version_at, "title must come before version");
         assert!(
-            top[version_at..].trim_end_matches("═").trim_end().len() <= version.len() + 2,
+            top[version_at..].trim_end_matches("─").trim_end().len() <= version.len() + 2,
             "version is not right-aligned: {top:?}"
         );
 

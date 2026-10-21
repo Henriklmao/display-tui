@@ -104,6 +104,8 @@ pub enum HoverTarget {
     PresetRow(usize),
     // A popup footer button.
     Popup(PopupAction),
+    // The close button embedded in the help modal's footer.
+    HelpClose,
 }
 
 // How long one blink phase stays on screen.

@@ -1,6 +1,6 @@
 //! UI rendering for the display-tui application.
 
-use super::state::App;
+use super::state::{App, HoverTarget};
 use crate::ui::components::{HelpModal, Map, MonitorList, Resolutions, Scale};
 use crate::utils::TUIMode;
 use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
@@ -64,7 +64,7 @@ impl Widget for &App {
         }
 
         if self.show_help {
-            HelpModal::render(area, buf);
+            HelpModal::render(area, buf, self.hover == Some(HoverTarget::HelpClose));
         }
 
         if let Some(ref popup) = self.show_popup {

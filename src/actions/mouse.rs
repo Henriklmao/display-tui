@@ -8,7 +8,9 @@ use crate::App;
 use crate::actions::movement::snap_to_alignment;
 use crate::app::state::HoverTarget;
 use crate::monitor::{Monitor, MonitorCanvas};
-use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{
+    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -138,7 +140,7 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 // precedence as the click handler. Pure so it can be unit-tested.
 fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<HoverTarget> {
     if app.show_help {
-        return None;
+        return inside(HelpModal::close_button(layout.area), point).then_some(HoverTarget::HelpClose);
     }
 
     if app.show_popup.is_some() {
@@ -598,6 +600,29 @@ mod tests {
         let row = a.layout.unwrap().list.y + 4;
         down(&mut a, 10, row);
         assert!(!a.show_help, "the click closes help");
+        assert_eq!(a.selected_monitor, 0, "the click must not fall through");
+    }
+
+    #[test]
+    fn hovering_the_help_close_button_marks_it() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.show_help = true;
+        let rect = HelpModal::close_button(area());
+
+        moved(&mut a, rect.x + 1, rect.y);
+
+        assert_eq!(a.hover, Some(HoverTarget::HelpClose));
+    }
+
+    #[test]
+    fn clicking_the_help_close_button_dismisses_the_overlay() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.show_help = true;
+        let rect = HelpModal::close_button(area());
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(!a.show_help, "the embedded Esc button closes the help");
         assert_eq!(a.selected_monitor, 0, "the click must not fall through");
     }
 

@@ -50,7 +50,9 @@ const MUTED_COLOR: Color = Color::Gray;
 const DIVIDER_COLOR: Color = Color::DarkGray;
 
 impl HelpModal {
-    pub fn render(area: Rect, buf: &mut Buffer) {
+    // `close_hovered` highlights the embedded close button while the pointer
+    // rests on it.
+    pub fn render(area: Rect, buf: &mut Buffer, close_hovered: bool) {
         let popup_area = responsive_help_rect(area);
 
         Clear.render(popup_area, buf);
@@ -62,7 +64,7 @@ impl HelpModal {
         }
 
         // The frame is drawn last so the content never overwrites a border.
-        draw_frame(popup_area, buf);
+        draw_frame(popup_area, buf, close_hovered);
     }
 
     // The popup rectangle for a terminal area. Shared by the renderer and the
@@ -70,6 +72,41 @@ impl HelpModal {
     pub fn rect(area: Rect) -> Rect {
         responsive_help_rect(area)
     }
+
+    // The clickable rectangle of the embedded `[ Esc ]` button, on the bottom
+    // border. It covers exactly the drawn label, so a click cannot miss it.
+    pub fn close_button(area: Rect) -> Rect {
+        let popup = responsive_help_rect(area);
+        if popup.width < 2 || popup.height < 2 {
+            return Rect::default();
+        }
+
+        let (start, width) = footer_layout(popup);
+        let button_width = (CLOSE_BUTTON.chars().count() as u16).min(width);
+
+        Rect {
+            x: start,
+            y: popup.bottom() - 1,
+            width: button_width,
+            height: 1,
+        }
+    }
+}
+
+// Total display width of the footer label.
+fn footer_width() -> u16 {
+    CLOSE_BUTTON.chars().count() as u16 + 1 + CLOSE_TEXT.chars().count() as u16
+}
+
+// Start column and available width of the centred footer, kept inside the
+// horizontal border cells. Shared by the renderer and the hit-test.
+fn footer_layout(popup: Rect) -> (u16, u16) {
+    let width = footer_width();
+    let limit = popup.right() - 1;
+    let start = (popup.x + popup.width.saturating_sub(width) / 2).max(popup.x + 1);
+    let start = start.min(limit);
+    let width = width.min(limit.saturating_sub(start));
+    (start, width)
 }
 
 // Adaptive popup rect. Vertically the help uses at most 30 rows and
@@ -302,7 +339,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 // Draws the double-line frame, the embedded title/version and the footer.
-fn draw_frame(popup: Rect, buf: &mut Buffer) {
+fn draw_frame(popup: Rect, buf: &mut Buffer, close_hovered: bool) {
     if popup.width < 2 || popup.height < 2 {
         return;
     }
@@ -351,13 +388,17 @@ fn draw_frame(popup: Rect, buf: &mut Buffer) {
     draw_spans(buf, top, left + 2, version_start, title);
 
     // Footer, centred in the bottom border.
+    let (start, _) = footer_layout(popup);
+    let key_style = if close_hovered {
+        Style::default().fg(Color::Black).bg(KEY_COLOR).bold()
+    } else {
+        Style::default().fg(KEY_COLOR).bold()
+    };
     let footer: &[(&str, Style)] = &[
-        (CLOSE_BUTTON, Style::default().fg(Color::LightCyan).bold()),
+        (CLOSE_BUTTON, key_style),
         (" ", Style::default().fg(Color::Gray)),
         (CLOSE_TEXT, Style::default().white()),
     ];
-    let width = footer.iter().map(|(text, _)| text.len() as u16).sum::<u16>();
-    let start = left + popup.width.saturating_sub(width) / 2;
     draw_spans(buf, bottom, start, right, footer);
 }
 
@@ -389,9 +430,13 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     fn render_help(width: u16, height: u16) -> Buffer {
+        render_help_with_hover(width, height, false)
+    }
+
+    fn render_help_with_hover(width: u16, height: u16, close_hovered: bool) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
-            .draw(|f| HelpModal::render(f.area(), f.buffer_mut()))
+            .draw(|f| HelpModal::render(f.area(), f.buffer_mut(), close_hovered))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -676,6 +721,45 @@ mod tests {
     }
 
     #[test]
+    fn the_close_button_rect_covers_the_drawn_label() {
+        let area = Rect::new(0, 0, 120, 40);
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(area);
+        let rect = HelpModal::close_button(area);
+
+        let label: String = (rect.left()..rect.right())
+            .map(|x| buf[(x, rect.y)].symbol())
+            .collect();
+        assert_eq!(label, CLOSE_BUTTON, "the hit rect must match the label");
+        assert_eq!(rect.y, popup.bottom() - 1, "on the bottom border");
+        assert!(rect.width > 0 && rect.height == 1);
+    }
+
+    #[test]
+    fn a_hovered_close_button_gets_a_contrast_background() {
+        let area = Rect::new(0, 0, 120, 40);
+        let buf = render_help_with_hover(120, 40, true);
+        let rect = HelpModal::close_button(area);
+
+        let cell = &buf[(rect.x, rect.y)];
+        assert_eq!(cell.style().bg, Some(KEY_COLOR));
+        assert_eq!(cell.style().fg, Some(Color::Black));
+    }
+
+    #[test]
+    fn the_close_button_stays_inside_the_frame_on_tiny_terminals() {
+        for (width, height) in [(1u16, 1u16), (5, 3), (10, 4), (20, 5)] {
+            let area = Rect::new(0, 0, width, height);
+            let rect = HelpModal::close_button(area);
+            if rect.width == 0 {
+                continue;
+            }
+            assert!(rect.left() >= area.left() && rect.right() <= area.right());
+            assert!(rect.top() >= area.top() && rect.bottom() <= area.bottom());
+        }
+    }
+
+    #[test]
     fn the_close_hint_survives_a_short_terminal() {
         // The footer lives in the border, so a short popup cannot drop it.
         assert!(as_text(&render_help(80, 6)).contains("[ Esc ] Close"));
@@ -732,7 +816,7 @@ mod tests {
             }
         }
 
-        HelpModal::render(area, &mut buf);
+        HelpModal::render(area, &mut buf, false);
 
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {

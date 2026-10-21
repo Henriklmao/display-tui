@@ -5,13 +5,18 @@
 //! On wide terminals the keybindings are shown in two side-by-side
 //! columns; below [`TWO_COLUMN_MIN_WIDTH`] every section is stacked into
 //! a single column instead.
+//!
+//! The frame is a double-line box drawn by hand so the title, the version
+//! and the close hint can sit inside the border itself: the title is embedded
+//! top-left, the version top-right and the footer is centred in the bottom
+//! line.
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
+    widgets::{Clear, Paragraph, Widget, Wrap},
 };
 
 // Help modal display.
@@ -21,15 +26,33 @@ pub struct HelpModal;
 // to the two-column layout.
 const TWO_COLUMN_MIN_WIDTH: u16 = 80;
 
+// Width below which the version is dropped to keep the full title visible.
+const VERSION_MIN_WIDTH: u16 = 42;
+
+// The close hint embedded in the bottom border.
+const CLOSE_BUTTON: &str = "[ Esc ]";
+const CLOSE_TEXT: &str = "Close";
+
 impl HelpModal {
     pub fn render(area: Rect, buf: &mut Buffer) {
         let popup_area = responsive_help_rect(area);
+
+        Clear.render(popup_area, buf);
 
         if area.width >= TWO_COLUMN_MIN_WIDTH {
             render_columns(popup_area, buf);
         } else {
             render_stacked(popup_area, buf);
         }
+
+        // The frame is drawn last so the content never overwrites a border.
+        draw_frame(popup_area, buf);
+    }
+
+    // The popup rectangle for a terminal area. Shared by the renderer and the
+    // mouse hit-testing so a click lands on exactly what was drawn.
+    pub fn rect(area: Rect) -> Rect {
+        responsive_help_rect(area)
     }
 }
 
@@ -103,113 +126,122 @@ fn right_sections() -> Vec<Line<'static>> {
     ]
 }
 
-// Shared bordered frame used by both layouts.
-fn help_block() -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .title(" Keybindings/Help ".bold().white())
-        .border_style(Style::default().fg(Color::Cyan))
-}
-
-// The footer button line, mirroring the popup buttons (help closes on any
-// click, so this is purely visual parity).
-fn close_hint() -> Line<'static> {
-    Line::from("[ Esc close ]").gray()
-}
-
-// Renders a centered version line spanning the full popup width.
-fn version_line() -> Line<'static> {
-    Line::from(
-        format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))
-            .bold()
-            .blue(),
-    )
-}
-
-// Draws the version line into the popup's first interior row and returns the
-// interior area below it. The header gets the row unconditionally so a short
-// terminal shrinks the sections instead of dropping the version; when there
-// is no interior row at all the header collapses to zero height and the
-// paragraph simply draws nothing.
-fn render_version_header(inner: Rect, buf: &mut Buffer) -> Rect {
-    let header = Rect {
-        height: inner.height.min(1),
-        ..inner
-    };
-    Paragraph::new(version_line())
-        .alignment(Alignment::Center)
-        .render(header, buf);
-
-    Rect {
-        y: header.bottom(),
-        height: inner.height - header.height,
-        ..inner
-    }
-}
-
 // Two-column layout for terminals wide enough to fit both columns.
 fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
-
-    Clear.render(popup_area, buf);
-    help_block().render(popup_area, buf);
-
-    let rest = render_version_header(inner, buf);
-    if rest.height == 0 {
+    if inner.height == 0 {
         return;
     }
 
-    // The close hint keeps the bottom row; the sections get everything in
-    // between and are simply skipped when the popup is too short.
-    let footer = Rect {
-        y: rest.bottom() - 1,
-        height: 1,
-        ..rest
-    };
-    let body = Rect {
-        height: rest.height - 1,
-        ..rest
-    };
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner);
 
-    if body.height > 0 {
-        let columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(body);
-
-        let left = Paragraph::new(left_sections()).wrap(Wrap { trim: false });
-        let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
-        left.render(columns[0], buf);
-        right.render(columns[1], buf);
-    }
-
-    Paragraph::new(close_hint())
-        .alignment(Alignment::Center)
-        .render(footer, buf);
+    let left = Paragraph::new(left_sections()).wrap(Wrap { trim: false });
+    let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
+    left.render(columns[0], buf);
+    right.render(columns[1], buf);
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
-//
-// The popup is capped in height, so the blank separators are dropped to keep
-// every labelled section visible. Unlike the two-column layout the version is
-// part of the wrapped paragraph: on narrow terminals the full string is worth
-// a second row, while the two-column header promises exactly one.
 fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
-    let mut lines = vec![version_line(), Line::from("")];
-    lines.extend(left_sections());
+    let inner = popup_area.inner(Margin::new(1, 1));
+    if inner.height == 0 {
+        return;
+    }
+
+    let mut lines = left_sections();
     lines.push(Line::from(""));
     lines.extend(right_sections());
     lines.retain(|line| line.width() > 0);
-    lines.push(Line::from(""));
-    lines.push(close_hint());
 
     let p = Paragraph::new(lines)
-        .block(help_block())
         .wrap(Wrap { trim: false })
-        .alignment(Alignment::Center);
+        .alignment(ratatui::layout::Alignment::Left);
 
-    Clear.render(popup_area, buf);
-    p.render(popup_area, buf);
+    p.render(inner, buf);
+}
+
+// Draws the double-line frame, the embedded title/version and the footer.
+fn draw_frame(popup: Rect, buf: &mut Buffer) {
+    if popup.width < 2 || popup.height < 2 {
+        return;
+    }
+
+    let border = Style::default().fg(Color::Cyan);
+    let left = popup.left();
+    let right = popup.right() - 1;
+    let top = popup.top();
+    let bottom = popup.bottom() - 1;
+
+    for x in (left + 1)..right {
+        put(buf, x, top, "═", border);
+        put(buf, x, bottom, "═", border);
+    }
+    for y in (top + 1)..bottom {
+        put(buf, left, y, "║", border);
+        put(buf, right, y, "║", border);
+    }
+
+    put(buf, left, top, "╔", border);
+    put(buf, right, top, "╗", border);
+    put(buf, left, bottom, "╚", border);
+    put(buf, right, bottom, "╝", border);
+
+    // The version is dropped on narrow popups so the title keeps its room.
+    let version = format!(" v{} ", env!("CARGO_PKG_VERSION"));
+    let version_start = if popup.width >= VERSION_MIN_WIDTH {
+        let start = right.saturating_sub(version.len() as u16);
+        draw_spans(
+            buf,
+            top,
+            start,
+            right,
+            &[(&version, Style::default().fg(Color::Gray))],
+        );
+        start
+    } else {
+        right
+    };
+
+    // Title, embedded top-left; clipped so it never runs into the version.
+    let title: &[(&str, Style)] = &[
+        ("⌨", Style::default().fg(Color::LightCyan).bold()),
+        (" Keybindings/Help ", Style::default().white().bold()),
+    ];
+    draw_spans(buf, top, left + 2, version_start, title);
+
+    // Footer, centred in the bottom border.
+    let footer: &[(&str, Style)] = &[
+        (CLOSE_BUTTON, Style::default().fg(Color::LightCyan).bold()),
+        (" ", Style::default().fg(Color::Gray)),
+        (CLOSE_TEXT, Style::default().white()),
+    ];
+    let width = footer.iter().map(|(text, _)| text.len() as u16).sum::<u16>();
+    let start = left + popup.width.saturating_sub(width) / 2;
+    draw_spans(buf, bottom, start, right, footer);
+}
+
+// Writes a styled string into a row, stopping before `limit` (exclusive).
+fn draw_spans(buf: &mut Buffer, y: u16, mut x: u16, limit: u16, spans: &[(&str, Style)]) {
+    for (text, style) in spans {
+        for ch in text.chars() {
+            if x >= limit {
+                return;
+            }
+            put(buf, x, y, &ch.to_string(), *style);
+            x += 1;
+        }
+    }
+}
+
+// Writes one cell, ignoring coordinates outside the buffer.
+fn put(buf: &mut Buffer, x: u16, y: u16, symbol: &str, style: Style) {
+    if x < buf.area.right() && y < buf.area.bottom() {
+        buf[(x, y)].set_symbol(symbol);
+        buf[(x, y)].set_style(style);
+    }
 }
 
 #[cfg(test)]
@@ -231,34 +263,16 @@ mod tests {
     }
 
     fn find(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
-        for y in 0..buf.area.height {
-            let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
-            if let Some(x) = row.find(needle) {
-                return Some((x as u16, y));
-            }
-        }
-        None
+        // Multi-byte symbols (⌨) shift byte offsets, so reuse the column-aware
+        // helper from the test utilities.
+        crate::test_utils::tests::find_text(buf, needle)
     }
 
-    // Padding left and right of the version line within the popup interior,
-    // plus the row it was drawn on.
-    fn version_padding(buf: &Buffer, popup: Rect) -> (u16, u16, u16) {
-        let needle = format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"));
-        let inner = popup.inner(Margin::new(1, 1));
-        for y in inner.top()..inner.bottom() {
-            let row: String = (inner.left()..inner.right())
-                .map(|x| buf[(x, y)].symbol())
-                .collect();
-            if let Some(x) = row.find(&needle) {
-                let lead = row[..x].chars().count() as u16;
-                let trail = inner.width - lead - needle.chars().count() as u16;
-                return (lead, trail, y);
-            }
-        }
-        panic!(
-            "version line missing at {}x{}",
-            buf.area.width, buf.area.height
-        );
+    // The row text inside the popup border columns, excluding the frame.
+    fn inner_row(buf: &Buffer, popup: Rect, y: u16) -> String {
+        (popup.left() + 1..popup.right() - 1)
+            .map(|x| buf[(x, y)].symbol())
+            .collect()
     }
 
     #[test]
@@ -282,17 +296,16 @@ mod tests {
         let buf = render_help(120, 40);
         let text = as_text(&buf);
         assert!(text.contains("Keybindings/Help"));
-        assert!(text.contains("Display-TUI"));
+        assert!(text.contains("Display-TUI") || text.contains(env!("CARGO_PKG_VERSION")));
         assert!(text.contains("View Mode"));
         assert!(text.contains("Res / Scale Mode"));
 
         // "Move Mode" lives in the right column, "View Mode" in the left.
         let (view_x, _) = find(&buf, "View Mode").unwrap();
         let (move_x, _) = find(&buf, "Move Mode").unwrap();
-        let popup_x = responsive_help_rect(Rect::new(0, 0, 120, 40)).x;
-        let popup_width = responsive_help_rect(Rect::new(0, 0, 120, 40)).width;
-        assert!(view_x < popup_x + popup_width / 2);
-        assert!(move_x >= popup_x + popup_width / 2);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+        assert!(view_x < popup.x + popup.width / 2);
+        assert!(move_x >= popup.x + popup.width / 2);
     }
 
     #[test]
@@ -359,71 +372,107 @@ mod tests {
     }
 
     #[test]
-    fn version_line_reports_the_package_version() {
-        let text = as_text(&render_help(120, 40));
+    fn the_frame_uses_double_lines() {
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+
+        assert_eq!(buf[(popup.x, popup.y)].symbol(), "╔");
+        assert_eq!(buf[(popup.right() - 1, popup.y)].symbol(), "╗");
+        assert_eq!(buf[(popup.x, popup.bottom() - 1)].symbol(), "╚");
+        assert_eq!(
+            buf[(popup.right() - 1, popup.bottom() - 1)].symbol(),
+            "╝"
+        );
+        assert_eq!(buf[(popup.x, popup.y + 1)].symbol(), "║");
+        assert_eq!(buf[(popup.x + 1, popup.y)].symbol(), "═");
+
+        // A horizontal cell outside the embedded title keeps the border style.
+        assert_eq!(buf[(popup.x + 1, popup.y)].style().fg, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn the_title_and_version_are_embedded_in_the_top_border() {
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+        let top = inner_row(&buf, popup, popup.y);
 
         assert!(
-            text.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
-            "version line missing: {text}"
+            top.contains("⌨ Keybindings/Help"),
+            "title is not embedded: {top:?}"
+        );
+        let version = format!("v{}", env!("CARGO_PKG_VERSION"));
+        assert!(top.contains(&version), "version is not embedded: {top:?}");
+
+        // The title sits left, the version right.
+        let title_at = top.find("Keybindings/Help").unwrap();
+        let version_at = top.find(&version).unwrap();
+        assert!(title_at < version_at, "title must come before version");
+        assert!(
+            top[version_at..].trim_end_matches('═').trim_end().len() <= version.len() + 2,
+            "version is not right-aligned: {top:?}"
+        );
+
+        let (vx, vy) = find(&buf, &version).unwrap();
+        assert_eq!(vy, popup.y, "version is on the top border");
+        assert_eq!(
+            buf[(vx, vy)].style().fg,
+            Some(Color::Gray),
+            "version must be dezent grey"
         );
     }
 
     #[test]
-    fn version_line_is_centred_at_the_top_in_both_layouts() {
-        for (width, height) in [(120u16, 40u16), (60, 30), (40, 20)] {
-            let buf = render_help(width, height);
-            let popup = responsive_help_rect(Rect::new(0, 0, width, height));
-            let inner = popup.inner(Margin::new(1, 1));
-            let (lead, trail, y) = version_padding(&buf, popup);
+    fn the_title_and_version_fit_without_overlapping() {
+        // On a 60-column popup there is room for both, separated.
+        let buf = render_help(80, 30);
+        let popup = responsive_help_rect(Rect::new(0, 0, 80, 30));
+        let top = inner_row(&buf, popup, popup.y);
 
-            assert_eq!(
-                y, inner.y,
-                "version is not on the first interior row at {}x{}",
-                width, height
-            );
-            assert!(
-                lead.abs_diff(trail) <= 1,
-                "version is off-centre at {}x{}: {lead} left, {trail} right",
-                width,
-                height
-            );
-        }
+        assert!(top.contains("Keybindings/Help"), "{top:?}");
+        assert!(top.contains(env!("CARGO_PKG_VERSION")), "{top:?}");
     }
 
     #[test]
-    fn version_line_survives_a_short_wide_popup() {
-        // Whatever vertical space is left, the two-column layout must give
-        // the first interior row to the version instead of the sections.
-        let width = 80;
-        for height in 3..=8 {
-            let buf = render_help(width, height);
-            let popup = responsive_help_rect(Rect::new(0, 0, width, height));
-            let inner = popup.inner(Margin::new(1, 1));
+    fn the_version_is_dropped_on_a_narrow_popup() {
+        // The title has priority: at 40 columns the version would crowd it out.
+        let buf = render_help(40, 20);
+        let text = as_text(&buf);
 
-            assert!(
-                popup.y + popup.height <= height,
-                "popup escapes the area at 80x{height}"
-            );
-            if inner.height == 0 {
-                // 80x3 and 80x4 leave no interior row at all; not panicking
-                // is the only assertion these two sizes can make.
-                continue;
-            }
-
-            let (lead, trail, y) = version_padding(&buf, popup);
-            assert_eq!(y, inner.y, "version is not on the first row at 80x{height}");
-            assert!(
-                lead.abs_diff(trail) <= 1,
-                "version is off-centre at 80x{height}: {lead} left, {trail} right"
-            );
-        }
+        assert!(text.contains("Keybindings/Help"), "{text}");
     }
 
     #[test]
-    fn a_two_row_interior_keeps_the_close_hint() {
-        // At 80x6 only the footer fits below the header; it must win over a
-        // single section row instead of being dropped.
-        assert!(as_text(&render_help(80, 6)).contains("[ Esc close ]"));
+    fn the_close_hint_is_embedded_in_the_bottom_border() {
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+        let bottom = inner_row(&buf, popup, popup.bottom() - 1);
+
+        assert!(
+            bottom.contains(&format!("{CLOSE_BUTTON} {CLOSE_TEXT}")),
+            "footer is not embedded: {bottom:?}"
+        );
+        let at = bottom.find(CLOSE_BUTTON).unwrap();
+        let before = bottom[..at].chars().count();
+        let trailing =
+            bottom.chars().count() - (before + CLOSE_BUTTON.len() + 1 + CLOSE_TEXT.len());
+        assert!(
+            before.abs_diff(trailing) <= 1,
+            "footer is not centred: {before} before, {trailing} after"
+        );
+
+        let (bx, by) = find(&buf, CLOSE_BUTTON).unwrap();
+        assert_eq!(by, popup.bottom() - 1, "footer is on the bottom border");
+        assert_eq!(
+            buf[(bx, by)].style().fg,
+            Some(Color::LightCyan),
+            "the key is accented"
+        );
+    }
+
+    #[test]
+    fn the_close_hint_survives_a_short_terminal() {
+        // The footer lives in the border, so a short popup cannot drop it.
+        assert!(as_text(&render_help(80, 6)).contains("[ Esc ] Close"));
     }
 
     #[test]

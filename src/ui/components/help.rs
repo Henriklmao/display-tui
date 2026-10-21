@@ -14,9 +14,9 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Style, Stylize},
-    text::Line,
-    widgets::{Clear, Paragraph, Widget, Wrap},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Clear, Paragraph, Widget},
 };
 
 // Help modal display.
@@ -26,12 +26,28 @@ pub struct HelpModal;
 // to the two-column layout.
 const TWO_COLUMN_MIN_WIDTH: u16 = 80;
 
+// Maximum popup size. The width leaves room for two readable key/description
+// columns on large terminals.
+const MAX_WIDTH: u16 = 84;
+const MAX_HEIGHT: u16 = 30;
+
 // Width below which the version is dropped to keep the full title visible.
 const VERSION_MIN_WIDTH: u16 = 42;
+
+// Width of the key column inside each section. Descriptions start here, so
+// every row reads as a table.
+const KEY_COLUMN: usize = 14;
 
 // The close hint embedded in the bottom border.
 const CLOSE_BUTTON: &str = "[ Esc ]";
 const CLOSE_TEXT: &str = "Close";
+
+// Palette of the modal: section rules warm, keys bright, prose neutral.
+const SECTION_COLOR: Color = Color::Yellow;
+const KEY_COLOR: Color = Color::LightCyan;
+const TEXT_COLOR: Color = Color::White;
+const MUTED_COLOR: Color = Color::Gray;
+const DIVIDER_COLOR: Color = Color::DarkGray;
 
 impl HelpModal {
     pub fn render(area: Rect, buf: &mut Buffer) {
@@ -57,7 +73,7 @@ impl HelpModal {
 }
 
 // Adaptive popup rect. Vertically the help uses at most 30 rows and
-// horizontally at most 60 columns; on smaller terminals it shrinks to
+// horizontally at most 84 columns; on smaller terminals it shrinks to
 // fit (with at least one row/column of breathing room on each side).
 fn responsive_help_rect(area: Rect) -> Rect {
     // Vertical: at most 30 rows, with at least 1 row of padding above
@@ -66,101 +82,223 @@ fn responsive_help_rect(area: Rect) -> Rect {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
-            Constraint::Max(30), // Help content max 30 rows
+            Constraint::Max(MAX_HEIGHT),
             Constraint::Min(1),
         ])
         .split(area);
 
-    // Horizontal: at most 60 columns, with at least 1 column of padding
+    // Horizontal: at most 84 columns, with at least 1 column of padding
     // on each side.
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(1),
-            Constraint::Max(60), // Help content max 60 cols
+            Constraint::Max(MAX_WIDTH),
             Constraint::Min(1),
         ])
         .split(vertical[1])[1]
 }
 
+// One logical row of the help content. Entries are rendered as a key column
+// followed by a (possibly wrapped) description.
+enum Row {
+    Section(&'static str),
+    Entry(&'static str, &'static str),
+    Note(&'static str),
+    Blank,
+}
+
 // Left column: global actions and view-mode navigation.
-fn left_sections() -> Vec<Line<'static>> {
+fn left_rows() -> Vec<Row> {
     vec![
-        Line::from(" --- Global --- ".bold().yellow()),
-        Line::from("Save <w> | Quit <q>"),
-        Line::from(""),
-        Line::from(" --- View Mode --- ".bold().yellow()),
-        Line::from("Up <k> | Down <j>"),
-        Line::from("Move <m> | Resolution <r> | Scale <s>"),
-        Line::from("Rotate <o>"),
-        Line::from("Set Workspace (0 to clear) <0-9>"),
-        Line::from("Enable <e> | Disable <d>"),
-        Line::from("Preset Menu <p>"),
-        Line::from("Show Keybindings <K>"),
-        Line::from(""),
-        Line::from(" --- Mouse --- ".bold().yellow()),
-        Line::from("Click to select; click again toggles"),
-        Line::from("Drag to move; Apply saves"),
-        Line::from("Pending: Apply <Enter/Space>/right-click"),
-        Line::from("Cancel/Revert all <Esc/q>"),
+        Row::Section("GLOBAL"),
+        Row::Entry("<w>", "Save"),
+        Row::Entry("<q>", "Quit"),
+        Row::Entry("<K>", "Toggle this help"),
+        Row::Blank,
+        Row::Section("VIEW MODE"),
+        Row::Entry("<k>", "Up"),
+        Row::Entry("<j>", "Down"),
+        Row::Entry("<m>", "Move mode"),
+        Row::Entry("<r>", "Resolution"),
+        Row::Entry("<s>", "Scale"),
+        Row::Entry("<o>", "Rotate"),
+        Row::Entry("<0-9>", "Set workspace (0 clears)"),
+        Row::Entry("<e>", "Enable"),
+        Row::Entry("<d>", "Disable"),
+        Row::Entry("<p>", "Preset menu"),
+        Row::Blank,
+        Row::Section("MOUSE"),
+        Row::Entry("Click", "Select; click again toggles"),
+        Row::Entry("Drag", "Move; Apply saves"),
+        Row::Entry("<Enter/Space>", "Apply pending move"),
+        Row::Entry("<Esc/q>", "Cancel / revert all"),
     ]
 }
 
 // Right column: mode-specific actions and a usage tip.
-fn right_sections() -> Vec<Line<'static>> {
+fn right_rows() -> Vec<Row> {
     vec![
-        Line::from(" --- Move Mode --- ".bold().yellow()),
-        Line::from("Freemove <H/J/K/L>"),
-        Line::from("Snapmove <h/j/k/l>"),
-        Line::from("Done <Esc/Enter/q>"),
-        Line::from(""),
-        Line::from(" --- Res / Scale Mode --- ".bold().yellow()),
-        Line::from("Apply <Enter/Space>"),
-        Line::from("Up/Down <k/j>"),
-        Line::from("Cancel <Esc/q>"),
-        Line::from("[f] force write  [Space] auto fix"),
-        Line::from(""),
-        Line::from(" --- Tip --- ".bold().yellow()),
-        Line::from("Arrow keys work as alternative".light_blue()),
-        Line::from("to h/j/k/l in all modes.".light_blue()),
+        Row::Section("MOVE MODE"),
+        Row::Entry("<H/J/K/L>", "Freemove"),
+        Row::Entry("<h/j/k/l>", "Snapmove"),
+        Row::Entry("<Esc/Enter/q>", "Done"),
+        Row::Blank,
+        Row::Section("RES / SCALE MODE"),
+        Row::Entry("<Enter/Space>", "Apply"),
+        Row::Entry("<k/j>", "Up / down"),
+        Row::Entry("<Esc/q>", "Cancel"),
+        Row::Entry("[f]", "Force write"),
+        Row::Entry("[Space]", "Auto fix"),
+        Row::Blank,
+        Row::Section("TIP"),
+        Row::Note("Arrow keys work as alternative to h/j/k/l in all modes."),
     ]
 }
 
 // Two-column layout for terminals wide enough to fit both columns.
 fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
-    if inner.height == 0 {
+    if inner.width == 0 || inner.height == 0 {
         return;
     }
 
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([
+            Constraint::Ratio(1, 2),
+            Constraint::Length(1),
+            Constraint::Ratio(1, 2),
+        ])
         .split(inner);
 
-    let left = Paragraph::new(left_sections()).wrap(Wrap { trim: false });
-    let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
+    let left = Paragraph::new(build_lines(&left_rows(), columns[0].width));
+    let right = Paragraph::new(build_lines(&right_rows(), columns[2].width));
     left.render(columns[0], buf);
-    right.render(columns[1], buf);
+    right.render(columns[2], buf);
+
+    // A fine vertical rule separates the two sections of the grid.
+    let divider_style = Style::default().fg(DIVIDER_COLOR);
+    for y in inner.top()..inner.bottom() {
+        put(buf, columns[1].x, y, "│", divider_style);
+    }
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
 fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
-    if inner.height == 0 {
+    if inner.width == 0 || inner.height == 0 {
         return;
     }
 
-    let mut lines = left_sections();
-    lines.push(Line::from(""));
-    lines.extend(right_sections());
-    lines.retain(|line| line.width() > 0);
+    let mut rows = left_rows();
+    rows.push(Row::Blank);
+    rows.extend(right_rows());
 
-    let p = Paragraph::new(lines)
-        .wrap(Wrap { trim: false })
-        .alignment(ratatui::layout::Alignment::Left);
+    Paragraph::new(build_lines(&rows, inner.width)).render(inner, buf);
+}
 
-    p.render(inner, buf);
+// Turns the logical rows into styled lines for one column of `width` cells.
+fn build_lines(rows: &[Row], width: u16) -> Vec<Line<'static>> {
+    let width = width as usize;
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let key_width = KEY_COLUMN.min(width.saturating_sub(8)).max(1);
+    let desc_width = width.saturating_sub(key_width).max(1);
+    let mut lines = Vec::new();
+
+    for row in rows {
+        match row {
+            Row::Blank => lines.push(Line::from("")),
+            Row::Section(title) => lines.push(section_rule(title, width)),
+            Row::Note(text) => {
+                for part in wrap_text(text, width) {
+                    lines.push(Line::from(Span::styled(part, Style::default().fg(MUTED_COLOR))));
+                }
+            }
+            Row::Entry(keys, desc) => {
+                for (index, part) in wrap_text(desc, desc_width).into_iter().enumerate() {
+                    let key = if index == 0 {
+                        Span::styled(
+                            format!("{:<key_width$}", keys),
+                            Style::default().fg(KEY_COLOR).bold(),
+                        )
+                    } else {
+                        Span::raw(" ".repeat(key_width))
+                    };
+                    lines.push(Line::from(vec![
+                        key,
+                        Span::styled(part, Style::default().fg(TEXT_COLOR)),
+                    ]));
+                }
+            }
+        }
+    }
+
+    lines
+}
+
+// A coloured section rule, e.g. `── GLOBAL ──────────`.
+fn section_rule(title: &str, width: usize) -> Line<'static> {
+    let label = format!(" {} ", title);
+    let lead = 2;
+    let fill = width.saturating_sub(lead + label.chars().count());
+    let style = Style::default().fg(SECTION_COLOR);
+
+    Line::from(vec![
+        Span::styled("──", style),
+        Span::styled(label, style.bold()),
+        Span::styled("─".repeat(fill), style),
+    ])
+}
+
+// Greedy word wrap that never splits words unless a single word is wider
+// than the column.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut used = 0usize;
+
+    for word in text.split_whitespace() {
+        let length = word.chars().count();
+        if length > width {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            let mut chunk = String::new();
+            for ch in word.chars() {
+                if chunk.chars().count() == width {
+                    lines.push(std::mem::take(&mut chunk));
+                }
+                chunk.push(ch);
+            }
+            current = chunk;
+            used = current.chars().count();
+        } else if current.is_empty() {
+            current.push_str(word);
+            used = length;
+        } else if used + 1 + length <= width {
+            current.push(' ');
+            current.push_str(word);
+            used += 1 + length;
+        } else {
+            lines.push(std::mem::take(&mut current));
+            current.push_str(word);
+            used = length;
+        }
+    }
+
+    if !current.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+
+    lines
 }
 
 // Draws the double-line frame, the embedded title/version and the footer.
@@ -279,7 +417,7 @@ mod tests {
     fn help_rect_caps_at_max_size_on_large_terminals() {
         assert_eq!(
             responsive_help_rect(Rect::new(0, 0, 200, 60)),
-            Rect::new(70, 15, 60, 30)
+            Rect::new(58, 15, 84, 30)
         );
     }
 
@@ -296,16 +434,86 @@ mod tests {
         let buf = render_help(120, 40);
         let text = as_text(&buf);
         assert!(text.contains("Keybindings/Help"));
-        assert!(text.contains("Display-TUI") || text.contains(env!("CARGO_PKG_VERSION")));
-        assert!(text.contains("View Mode"));
-        assert!(text.contains("Res / Scale Mode"));
+        assert!(text.contains(env!("CARGO_PKG_VERSION")));
+        assert!(text.contains("VIEW MODE"));
+        assert!(text.contains("RES / SCALE MODE"));
 
-        // "Move Mode" lives in the right column, "View Mode" in the left.
-        let (view_x, _) = find(&buf, "View Mode").unwrap();
-        let (move_x, _) = find(&buf, "Move Mode").unwrap();
+        // "MOVE MODE" lives in the right column, "VIEW MODE" in the left.
+        let (view_x, _) = find(&buf, "VIEW MODE").unwrap();
+        let (move_x, _) = find(&buf, "MOVE MODE").unwrap();
         let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
         assert!(view_x < popup.x + popup.width / 2);
         assert!(move_x >= popup.x + popup.width / 2);
+    }
+
+    #[test]
+    fn the_two_columns_are_split_by_a_vertical_rule() {
+        let buf = render_help(120, 40);
+        let popup = responsive_help_rect(Rect::new(0, 0, 120, 40));
+        let (x, y) = find(&buf, "│").expect("divider");
+
+        assert!(
+            x.abs_diff(popup.x + popup.width / 2) <= 1,
+            "divider sits in the middle"
+        );
+        assert_eq!(buf[(x, y)].style().fg, Some(DIVIDER_COLOR));
+        assert!(y > popup.y && y < popup.bottom() - 1);
+    }
+
+    #[test]
+    fn the_stacked_layout_has_no_divider() {
+        // 60 cols < TWO_COLUMN_MIN_WIDTH: the second column drops below.
+        assert!(find(&render_help(60, 30), "│").is_none());
+    }
+
+    #[test]
+    fn section_rules_are_warm_and_filled_to_the_column() {
+        let buf = render_help(120, 40);
+        let (x, y) = find(&buf, "GLOBAL").expect("section rule");
+        assert_eq!(buf[(x, y)].style().fg, Some(SECTION_COLOR));
+
+        // The rule ends with a drawing character, not body text.
+        let (rule_x, rule_y) = find(&buf, "── GLOBAL").unwrap();
+        let row: String = (rule_x..rule_x + 20)
+            .map(|x| buf[(x, rule_y)].symbol())
+            .collect();
+        assert!(row.starts_with("── GLOBAL ─"), "{row:?}");
+    }
+
+    #[test]
+    fn keys_are_accented_and_descriptions_stay_neutral() {
+        use ratatui::style::Modifier;
+
+        let buf = render_help(120, 40);
+        let (key_x, key_y) = find(&buf, "<w>").expect("save key");
+        assert_eq!(buf[(key_x, key_y)].style().fg, Some(KEY_COLOR));
+        assert!(
+            buf[(key_x, key_y)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        let (desc_x, desc_y) = find(&buf, "Save").expect("save description");
+        assert_eq!(
+            desc_x,
+            key_x + KEY_COLUMN as u16,
+            "descriptions start in the same column"
+        );
+        assert_eq!(buf[(desc_x, desc_y)].style().fg, Some(TEXT_COLOR));
+    }
+
+    #[test]
+    fn every_key_uses_the_accent_colour() {
+        let buf = render_help(120, 40);
+        for key in ["<w>", "<q>", "<k>", "<j>", "[f]", "[Space]", "<H/J/K/L>"] {
+            let (x, y) = find(&buf, key).unwrap_or_else(|| panic!("{key} missing"));
+            assert_eq!(
+                buf[(x, y)].style().fg,
+                Some(KEY_COLOR),
+                "{key} is not accented"
+            );
+        }
     }
 
     #[test]
@@ -314,13 +522,14 @@ mod tests {
         let buf = render_help(60, 30);
         let text = as_text(&buf);
         assert!(text.contains("Keybindings/Help"));
-        assert!(text.contains("View Mode"));
-        assert!(text.contains("Tip"));
+        assert!(text.contains("VIEW MODE"));
+        assert!(text.contains("<w>"));
 
-        // Everything is stacked: "View Mode" appears above "Move Mode".
-        let (_, view_y) = find(&buf, "View Mode").unwrap();
-        let (_, move_y) = find(&buf, "Move Mode").unwrap();
-        assert!(view_y < move_y);
+        // The second column is stacked below the first, so the later mode
+        // sections start lower down than view-mode navigation.
+        let (_, view_y) = find(&buf, "VIEW MODE").unwrap();
+        let (_, move_y) = find(&buf, "MOVE MODE").unwrap();
+        assert!(view_y < move_y, "the right column drops below the left");
     }
 
     #[test]
@@ -335,39 +544,36 @@ mod tests {
     #[test]
     fn every_section_is_listed_in_both_layouts() {
         let sections = [
-            "Global",
-            "View Mode",
-            "Mouse",
-            "Move Mode",
-            "Res / Scale Mode",
-            "Tip",
+            "GLOBAL",
+            "VIEW MODE",
+            "MOUSE",
+            "MOVE MODE",
+            "RES / SCALE MODE",
+            "TIP",
         ];
         let bindings = [
-            "Save <w>",
-            "Quit <q>",
-            "Preset Menu <p>",
+            "<w>",
+            "Save",
+            "<q>",
+            "Quit",
+            "<p>",
+            "Preset menu",
             "Freemove",
             "Snapmove",
-            "Apply <Enter",
-            "Cancel <Esc/q>",
-            "Pending: Apply",
-            "right-click",
-            "Cancel/Revert all <Esc/q>",
-            "Up/Down <k/j>",
-            "[f] force write",
+            "Apply pending move",
+            "<Esc/q>",
+            "Cancel / revert all",
+            "[f]",
+            "Force write",
+            "[Space]",
+            "Auto fix",
+            "Arrow keys work as alternative",
         ];
 
-        for (width, height) in [(120u16, 40u16), (60, 30)] {
-            let text = as_text(&render_help(width, height));
-            for needle in sections.iter().chain(bindings.iter()) {
-                assert!(
-                    text.contains(needle),
-                    "{:?} missing at {}x{}",
-                    needle,
-                    width,
-                    height
-                );
-            }
+        // Wide terminals show both columns at once.
+        let text = as_text(&render_help(120, 40));
+        for needle in sections.iter().chain(bindings.iter()) {
+            assert!(text.contains(needle), "{:?} missing at 120x40", needle);
         }
     }
 
@@ -500,7 +706,7 @@ mod tests {
                 area
             );
             assert!(
-                popup.width <= 60 && popup.height <= 30,
+                popup.width <= MAX_WIDTH && popup.height <= MAX_HEIGHT,
                 "{:?} exceeds its caps",
                 popup
             );

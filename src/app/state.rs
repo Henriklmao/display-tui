@@ -1103,7 +1103,7 @@ impl App {
 
     // Clear the active preset marker as soon as the current monitor state
     // diverges from what the active preset defines (or the preset file is gone).
-    fn clear_active_preset_if_changed(&mut self) {
+    pub(crate) fn clear_active_preset_if_changed(&mut self) {
         if let Some(ref active) = self.active_preset.clone() {
             if let Some(state) = crate::config::load_preset(active) {
                 for monitor_state in &state {

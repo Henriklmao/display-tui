@@ -10,8 +10,8 @@ use crate::app::state::{HelpScrollbarDrag, HoverTarget};
 use crate::monitor::{Monitor, MonitorCanvas};
 use crate::ui::components::workspace_picker;
 use crate::ui::components::{
-    ActionBar, ActionBarContext, ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction,
-    PresetMenu, Resolutions, Scale,
+    ActionBar, ActionBarContext, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetMenu,
+    Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
@@ -442,8 +442,14 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
         // `row` is resolved against the current render's scroll window, so a
         // click always acts on the monitor actually drawn under the cursor.
         let column = MonitorList::column_at(layout.list, point.0).unwrap_or(ListColumn::Name);
-        let already_selected = app.selected_monitor == row;
+        let changed_row = app.selected_monitor != row;
+        let already_selected = !changed_row;
         app.selected_monitor = row;
+
+        // While a move is unconfirmed, the View confirm gate only allows Apply
+        // and Cancel. Cell actions follow the same rule; selecting the row is
+        // still allowed.
+        let confirm_pending = app.mode == TUIMode::View && app.has_pending_move();
 
         match column {
             // The checkbox keeps the select-then-toggle affordance: the first
@@ -456,31 +462,43 @@ fn handle_left_down(app: &mut App, layout: ScreenLayout, point: (u16, u16), now:
                     if !app.monitors[row].enabled {
                         app.discard_move(row);
                     }
+                    // Match the keyboard path: a state change invalidates the
+                    // active-preset marker.
+                    app.clear_active_preset_if_changed();
                 }
             }
-            // The value cells open the matching picker directly.
-            ListColumn::Resolution => {
-                if let Some(monitor) = app.monitors.get(row) {
-                    app.selected_resolution = monitor
-                        .modes
-                        .iter()
-                        .position(|mode| mode.current)
-                        .unwrap_or(0);
+            // The value cells act directly in every mode. The mode change is
+            // deliberately not routed through the key handler, whose sub-mode
+            // dispatchers would ignore `r`/`s`/`o`.
+            ListColumn::Resolution if !confirm_pending => {
+                if changed_row || app.mode != TUIMode::Resolution {
+                    if let Some(monitor) = app.monitors.get(row) {
+                        app.selected_resolution = monitor
+                            .modes
+                            .iter()
+                            .position(|mode| mode.current)
+                            .unwrap_or(0);
+                    }
+                    crate::utils::change_mode(app, TUIMode::Resolution);
                 }
-                app.perform_action(ActionId::Resolution);
             }
-            ListColumn::Scale => {
-                if let Some(monitor) = app.monitors.get(row) {
-                    let current = monitor.scale.unwrap_or(1.0);
-                    app.selected_scale = ScaleValue::table()
-                        .iter()
-                        .position(|entry| (entry.value - current).abs() < 1e-6)
-                        .unwrap_or(0);
+            ListColumn::Scale if !confirm_pending => {
+                if changed_row || app.mode != TUIMode::Scale {
+                    if let Some(monitor) = app.monitors.get(row) {
+                        let current = monitor.scale.unwrap_or(1.0);
+                        app.selected_scale = ScaleValue::table()
+                            .iter()
+                            .position(|entry| (entry.value - current).abs() < 1e-6)
+                            .unwrap_or(0);
+                    }
+                    crate::utils::change_mode(app, TUIMode::Scale);
                 }
-                app.perform_action(ActionId::Scale);
             }
-            ListColumn::Rotation => app.perform_action(ActionId::Rotate),
-            ListColumn::Workspace => app.open_workspace_picker(row),
+            ListColumn::Rotation if !confirm_pending => {
+                MonitorList::cycle_rotation(app);
+                app.clear_active_preset_if_changed();
+            }
+            ListColumn::Workspace if !confirm_pending => app.open_workspace_picker(row),
             _ => {}
         }
     }
@@ -1448,6 +1466,109 @@ mod tests {
 
         assert_eq!(a.monitors[0].transform.as_deref(), Some("90"));
         assert_eq!(a.mode, TUIMode::View, "rotating stays in View");
+    }
+
+    #[test]
+    fn the_rotation_cell_works_in_every_mode() {
+        for mode in [
+            TUIMode::View,
+            TUIMode::Move,
+            TUIMode::Resolution,
+            TUIMode::Scale,
+        ] {
+            let screen = Rect::new(0, 0, 160, 40);
+            let mut a = app_in(screen, mode, test_monitors());
+            let rect = list_cell(&a, 0, ListColumn::Rotation);
+
+            down(&mut a, rect.x, rect.y);
+
+            assert_eq!(
+                a.monitors[0].transform.as_deref(),
+                Some("90"),
+                "rotation cell must work in {mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn value_cells_switch_to_their_table_from_other_modes() {
+        for mode in [TUIMode::Move, TUIMode::Scale] {
+            let dir = TempDir::new("mouse-cell-resolution");
+            let screen = Rect::new(0, 0, 160, 40);
+            let mut a = app_in(screen, mode, test_monitors());
+            a.state_path = Some(dir.path().join("monitor_state.json"));
+            let rect = list_cell(&a, 0, ListColumn::Resolution);
+
+            down(&mut a, rect.x, rect.y);
+
+            assert_eq!(a.mode, TUIMode::Resolution, "from {mode:?}");
+        }
+
+        for mode in [TUIMode::Move, TUIMode::Resolution] {
+            let dir = TempDir::new("mouse-cell-scale");
+            let screen = Rect::new(0, 0, 160, 40);
+            let mut a = app_in(screen, mode, test_monitors());
+            a.state_path = Some(dir.path().join("monitor_state.json"));
+            let rect = list_cell(&a, 0, ListColumn::Scale);
+
+            down(&mut a, rect.x, rect.y);
+
+            assert_eq!(a.mode, TUIMode::Scale, "from {mode:?}");
+        }
+    }
+
+    #[test]
+    fn value_cells_respect_the_pending_confirm_state() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.note_move(0, (0, 0));
+
+        for column in [
+            ListColumn::Resolution,
+            ListColumn::Scale,
+            ListColumn::Rotation,
+            ListColumn::Workspace,
+        ] {
+            let rect = list_cell(&a, 0, column);
+            down(&mut a, rect.x, rect.y);
+        }
+
+        assert_eq!(a.mode, TUIMode::View, "the confirm gate stays put");
+        assert_eq!(a.monitors[0].transform, None, "no rotation happened");
+        assert!(a.workspace_picker.is_none(), "no picker opened");
+        assert!(a.has_pending_move(), "the move is still pending");
+    }
+
+    #[test]
+    fn a_second_resolution_cell_click_keeps_the_table_selection() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        let rect = list_cell(&a, 0, ListColumn::Resolution);
+        down(&mut a, rect.x, rect.y);
+        assert_eq!(a.mode, TUIMode::Resolution);
+
+        a.selected_resolution = 1;
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(
+            a.selected_resolution, 1,
+            "clicking the same cell again must not jump back to the current mode"
+        );
+    }
+
+    #[test]
+    fn the_icon_click_clears_a_stale_active_preset() {
+        let screen = Rect::new(0, 0, 160, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.active_preset = Some("does-not-exist".to_string());
+        let rect = list_cell(&a, 0, ListColumn::Icon);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(
+            a.active_preset.is_none(),
+            "toggling a display invalidates the active preset"
+        );
     }
 
     #[test]

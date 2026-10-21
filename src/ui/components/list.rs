@@ -312,7 +312,7 @@ impl<'a> MonitorList<'a> {
             }
         }
     }
-    fn cycle_rotation(app: &mut App) {
+    pub(crate) fn cycle_rotation(app: &mut App) {
         {
             let monitor = &mut app.monitors[app.selected_monitor];
             let current_rotation = Rotation::from_transform(&monitor.transform);

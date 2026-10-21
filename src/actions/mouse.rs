@@ -6,9 +6,11 @@
 
 use crate::App;
 use crate::actions::movement::snap_to_alignment;
-use crate::app::state::HoverTarget;
+use crate::app::state::{HelpScrollbarDrag, HoverTarget};
 use crate::monitor::{Monitor, MonitorCanvas};
-use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{
+    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::{ScaleValue, TUIMode};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
@@ -20,6 +22,9 @@ pub const SNAP_THRESHOLD: f64 = 24.0;
 
 // Maximum gap between two clicks for them to count as a double-click.
 const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
+// Rows one wheel notch scrolls the help.
+const WHEEL_ROWS: i32 = 3;
 
 // Routes a mouse event to the component that owns the current view.
 pub fn handle_mouse(app: &mut App, event: MouseEvent) {
@@ -38,6 +43,7 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     // press so the drag cannot stay armed behind an overlay.
     if matches!(event.kind, MouseEventKind::Up(MouseButton::Left)) {
         app.drag = None;
+        app.help_scroll_drag = None;
         app.set_hover(None, point(event), now, false);
     }
 
@@ -51,10 +57,50 @@ fn handle_mouse_at(app: &mut App, event: MouseEvent, now: Instant) {
     }
 
     if app.show_help {
-        if is_left_click(event.kind) {
-            // A modal-consumed click must not seed a later double-click.
-            app.last_click = None;
-            app.show_help = false;
+        let point = point(event);
+        let popup = HelpModal::rect(layout.area);
+        match event.kind {
+            // The wheel scrolls the help when the pointer is over the modal.
+            MouseEventKind::ScrollUp if inside(popup, point) => app.scroll_help(-WHEEL_ROWS),
+            MouseEventKind::ScrollDown if inside(popup, point) => app.scroll_help(WHEEL_ROWS),
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(drag) = app.help_scroll_drag
+                    && let Some(scroll) =
+                        HelpModal::scrollbar_drag_scroll(layout.area, point.1, drag.grab)
+                {
+                    app.help_scroll = scroll;
+                }
+            }
+            kind if is_left_click(kind) => {
+                // A modal-consumed click must not seed a later double-click,
+                // and a lost release must not leave a stale drag armed.
+                app.last_click = None;
+                app.help_scroll_drag = None;
+                if inside(HelpModal::close_button(layout.area), point) {
+                    // The embedded Esc button is the one in-modal control.
+                    app.close_help();
+                } else if inside(HelpModal::scrollbar_lane(layout.area), point) {
+                    let thumb = HelpModal::scrollbar_thumb(layout.area, app.help_scroll);
+                    if let Some(thumb) = thumb
+                        && point.1 >= thumb.top()
+                        && point.1 < thumb.bottom()
+                    {
+                        // A press on the thumb starts a drag; keep the grab
+                        // offset so the thumb does not jump to the cursor.
+                        app.help_scroll_drag = Some(HelpScrollbarDrag {
+                            grab: point.1 - thumb.y,
+                        });
+                    } else if let Some(delta) =
+                        HelpModal::scrollbar_click(layout.area, app.help_scroll, point.1)
+                    {
+                        app.scroll_help(delta);
+                    }
+                } else if !inside(popup, point) {
+                    // Only a click outside the modal boundary dismisses it.
+                    app.close_help();
+                }
+            }
+            _ => {}
         }
         return;
     }
@@ -138,6 +184,12 @@ fn inside(rect: Rect, point: (u16, u16)) -> bool {
 // precedence as the click handler. Pure so it can be unit-tested.
 fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<HoverTarget> {
     if app.show_help {
+        if inside(HelpModal::close_button(layout.area), point) {
+            return Some(HoverTarget::HelpClose);
+        }
+        if inside(HelpModal::scrollbar_lane(layout.area), point) {
+            return Some(HoverTarget::HelpScrollbar);
+        }
         return None;
     }
 
@@ -599,6 +651,225 @@ mod tests {
         down(&mut a, 10, row);
         assert!(!a.show_help, "the click closes help");
         assert_eq!(a.selected_monitor, 0, "the click must not fall through");
+    }
+
+    #[test]
+    fn hovering_the_help_close_button_marks_it() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.show_help = true;
+        let rect = HelpModal::close_button(area());
+
+        moved(&mut a, rect.x + 1, rect.y);
+
+        assert_eq!(a.hover, Some(HoverTarget::HelpClose));
+    }
+
+    #[test]
+    fn clicking_the_help_close_button_dismisses_the_overlay() {
+        let mut a = app(TUIMode::View, test_monitors());
+        a.show_help = true;
+        let rect = HelpModal::close_button(area());
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(!a.show_help, "the embedded Esc button closes the help");
+        assert_eq!(a.selected_monitor, 0, "the click must not fall through");
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_help_overlay() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let popup = HelpModal::rect(screen);
+        let (col, row) = (popup.x + popup.width / 2, popup.y + popup.height / 2);
+        assert!(HelpModal::max_scroll(screen) > 0, "must be scrollable");
+
+        wheel_down(&mut a, col, row);
+        assert_eq!(a.help_scroll, 3, "one notch scrolls three rows");
+        assert!(a.show_help, "the wheel must not dismiss the help");
+
+        wheel_up(&mut a, col, row);
+        assert_eq!(a.help_scroll, 0);
+    }
+
+    #[test]
+    fn dragging_the_help_scrollbar_scrolls_to_the_pointer() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let lane = HelpModal::scrollbar_lane(screen);
+        let thumb = HelpModal::scrollbar_thumb(screen, 0).expect("thumb");
+        let max = HelpModal::max_scroll(screen);
+
+        down(&mut a, lane.x, thumb.y + thumb.height / 2);
+        assert!(
+            a.help_scroll_drag.is_some(),
+            "pressing the thumb arms a drag"
+        );
+        assert_eq!(a.help_scroll, 0, "grabbing does not jump");
+
+        drag(&mut a, lane.x, lane.bottom() - 1);
+        assert_eq!(a.help_scroll, max, "dragging down reaches the last page");
+        assert!(a.show_help, "dragging must not dismiss the help");
+
+        up(&mut a, lane.x, lane.bottom() - 1);
+        assert!(a.help_scroll_drag.is_none(), "release ends the drag");
+        assert!(a.show_help);
+    }
+
+    #[test]
+    fn dragging_the_help_scrollbar_outside_the_frame_keeps_scrolling() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let lane = HelpModal::scrollbar_lane(screen);
+        let thumb = HelpModal::scrollbar_thumb(screen, 0).expect("thumb");
+        let max = HelpModal::max_scroll(screen);
+
+        down(&mut a, lane.x, thumb.y);
+        drag(&mut a, 0, screen.bottom() - 1);
+        assert_eq!(a.help_scroll, max, "dragging below the frame clamps down");
+        assert!(a.show_help, "leaving the frame must not dismiss the help");
+
+        drag(&mut a, screen.right() + 5, screen.top());
+        assert_eq!(a.help_scroll, 0, "dragging above the frame clamps up");
+
+        up(&mut a, 0, 0);
+        assert!(a.help_scroll_drag.is_none());
+    }
+
+    #[test]
+    fn hovering_the_help_scrollbar_marks_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let lane = HelpModal::scrollbar_lane(screen);
+
+        moved(&mut a, lane.x, lane.y + 1);
+        assert_eq!(a.hover, Some(HoverTarget::HelpScrollbar));
+        assert_eq!(
+            crate::ui::tooltip::text_for(HoverTarget::HelpScrollbar),
+            "Drag or click to scroll the help"
+        );
+    }
+
+    #[test]
+    fn a_click_on_the_help_scrollbar_pages_and_keeps_it_open() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let lane = HelpModal::scrollbar_lane(screen);
+        let max = HelpModal::max_scroll(screen);
+        assert_eq!(lane.width, 1, "a bar is drawn at this size");
+
+        // Below the thumb: one page down.
+        down(&mut a, lane.x, lane.bottom() - 1);
+
+        assert!(a.show_help, "the scrollbar click must not dismiss help");
+        assert_eq!(
+            a.help_scroll,
+            lane.height.min(max),
+            "a track click pages down"
+        );
+
+        // Above the thumb now: one page up.
+        let before = a.help_scroll;
+        down(&mut a, lane.x, lane.y);
+        assert!(a.help_scroll < before, "a track click pages up");
+    }
+
+    #[test]
+    fn the_scrollbar_click_map_matches_the_drawn_thumb() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        // A stale offset (e.g. after a terminal resize) is clamped by both
+        // the renderer and the hit map, so the two must still agree.
+        a.help_scroll = HelpModal::max_scroll(screen) + 5;
+        let buf = render_in(&a, screen);
+        let lane = HelpModal::scrollbar_lane(screen);
+        let mut thumbs = 0;
+
+        for row in lane.top()..lane.bottom() {
+            let on_thumb = buf[(lane.x, row)].symbol() == "█";
+            let delta =
+                HelpModal::scrollbar_click(screen, a.help_scroll, row).expect("inside the lane");
+            assert_eq!(
+                delta == 0,
+                on_thumb,
+                "row {row} maps to {delta}, drawn thumb = {on_thumb}"
+            );
+            thumbs += u16::from(on_thumb);
+        }
+
+        assert!(thumbs > 0, "the thumb must be visible");
+    }
+
+    #[test]
+    fn a_click_on_the_help_border_does_not_dismiss_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let popup = HelpModal::rect(screen);
+
+        down(&mut a, popup.x, popup.y + 4);
+
+        assert!(a.show_help, "the frame belongs to the modal");
+    }
+
+    #[test]
+    fn a_click_inside_the_help_body_does_not_dismiss_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let popup = HelpModal::rect(screen);
+
+        down(&mut a, popup.x + 5, popup.y + 3);
+
+        assert!(a.show_help, "only clicks outside the boundary dismiss");
+        assert_eq!(a.help_scroll, 0, "a body click does not scroll");
+    }
+
+    #[test]
+    fn a_click_on_the_blank_lane_does_not_close_when_no_scrollbar_is_drawn() {
+        let screen = Rect::new(0, 0, 120, 40);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        assert_eq!(
+            HelpModal::scrollbar_lane(screen),
+            Rect::default(),
+            "no lane exists without a scrollbar"
+        );
+
+        let popup = HelpModal::rect(screen);
+        down(&mut a, popup.right() - 2, popup.y + 2);
+
+        assert!(a.show_help, "inside the frame the modal stays open");
+    }
+
+    #[test]
+    fn a_click_outside_the_help_boundary_dismisses_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+        let popup = HelpModal::rect(screen);
+
+        down(&mut a, popup.x.saturating_sub(1), popup.y);
+
+        assert!(!a.show_help, "a click outside closes the help");
+    }
+
+    #[test]
+    fn the_wheel_outside_the_help_overlay_does_not_scroll_it() {
+        let screen = Rect::new(0, 0, 60, 15);
+        let mut a = app_in(screen, TUIMode::View, test_monitors());
+        a.show_help = true;
+
+        wheel_down(&mut a, 0, 0);
+
+        assert_eq!(a.help_scroll, 0);
+        assert!(a.show_help);
     }
 
     #[test]

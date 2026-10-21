@@ -43,6 +43,8 @@ pub fn text_for(target: HoverTarget) -> &'static str {
         HoverTarget::ResolutionRow(_) => "Click selects, double-click applies",
         HoverTarget::ScaleRow(_) => "Click selects, double-click applies",
         HoverTarget::PresetRow(_) => "Click previews, double-click applies",
+        HoverTarget::HelpClose => "Close the keybindings help",
+        HoverTarget::HelpScrollbar => "Drag or click to scroll the help",
         HoverTarget::Popup(action) => match action {
             PopupAction::Close => "Close without applying",
             PopupAction::Accept => "Accept and write the configuration",
@@ -234,6 +236,8 @@ mod tests {
             HoverTarget::ResolutionRow(0),
             HoverTarget::ScaleRow(0),
             HoverTarget::PresetRow(0),
+            HoverTarget::HelpClose,
+            HoverTarget::HelpScrollbar,
             HoverTarget::Popup(PopupAction::Close),
             HoverTarget::Popup(PopupAction::Accept),
             HoverTarget::Popup(PopupAction::Force),

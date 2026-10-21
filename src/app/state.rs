@@ -6,7 +6,9 @@ use crate::CliAction;
 use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
-use crate::ui::components::{Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale};
+use crate::ui::components::{
+    HelpModal, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+};
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
 use crate::validation::diagnostics::{AutoFix, LayoutHighlights, layout_highlights, plan_auto_fix};
@@ -27,6 +29,10 @@ pub struct App {
     pub selected_scale: usize,
     pub mode: TUIMode,
     pub show_help: bool,
+    // First visible content row of the help modal; reset when it opens.
+    pub help_scroll: u16,
+    // An in-progress drag of the help scrollbar, if any.
+    pub help_scroll_drag: Option<HelpScrollbarDrag>,
     pub show_popup: Option<Popup>,
     pub show_preset_menu: Option<PresetMenu>,
     pub preset_backup: Option<Vec<crate::config::MonitorState>>,
@@ -87,6 +93,13 @@ pub struct DragState {
     pub was_pending: bool,
 }
 
+// An in-progress drag of the help scrollbar: the row offset below the thumb's
+// top edge where the pointer grabbed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HelpScrollbarDrag {
+    pub grab: u16,
+}
+
 // An interactive element the pointer can rest on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HoverTarget {
@@ -104,6 +117,10 @@ pub enum HoverTarget {
     PresetRow(usize),
     // A popup footer button.
     Popup(PopupAction),
+    // The close button embedded in the help modal's footer.
+    HelpClose,
+    // The draggable scrollbar inside the help modal.
+    HelpScrollbar,
 }
 
 // How long one blink phase stays on screen.
@@ -244,8 +261,8 @@ impl App {
 
     // Time until the next animation deadline. `None` means nothing animates, so
     // the event loop blocks until real input (zero idle cost). Only validation
-    // errors animate; hover is a steady glow, but the tooltip dwell still needs
-    // a wake-up so it appears without any further input.
+    // errors animate; hover is a steady recolour, but the tooltip dwell still
+    // needs a wake-up so it appears without any further input.
     pub(crate) fn next_deadline_at(&self, now: Instant) -> Option<Duration> {
         let blink = self.blink.as_ref().map(|blink| blink.remaining(now));
         match (blink, self.tooltip_deadline_at(now)) {
@@ -253,6 +270,24 @@ impl App {
             (Some(a), None) => Some(a),
             (None, Some(b)) => Some(b),
             (None, None) => None,
+        }
+    }
+
+    // Whether the current layout still draws a help scrollbar.
+    fn help_scrollbar_available(&self) -> bool {
+        self.layout
+            .is_some_and(|layout| HelpModal::scrollbar_lane(layout.area).width > 0)
+    }
+
+    // A resize can remove the scrollbar under a resting pointer; drop the
+    // hover so a stale tooltip does not survive while there is nothing to hover.
+    fn drop_unavailable_help_hover(&mut self) {
+        if self.show_help
+            && self.hover == Some(HoverTarget::HelpScrollbar)
+            && !self.help_scrollbar_available()
+        {
+            self.hover = None;
+            self.hover_since = None;
         }
     }
 
@@ -503,8 +538,10 @@ impl App {
         let mut layout = crate::ui::layouts::screen_layout(area, self.mode);
         layout.popup = self.show_popup.as_ref().map(|popup| popup.layout(area));
         self.layout = Some(layout);
-        // The tooltip is derived from the dwell time at draw time.
-        self.tooltip = self.tooltip_at(Instant::now());
+        // The tooltip is derived at draw time.
+        let now = Instant::now();
+        self.drop_unavailable_help_hover();
+        self.tooltip = self.tooltip_at(now);
         frame.render_widget(&*self, area);
     }
 
@@ -527,10 +564,19 @@ impl App {
     // real key path (e.g. Escape after a drag) instead of the components alone.
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
         if self.show_help {
+            // The help is scrollable: `j`/`k`, the arrows and PgUp/PgDn move
+            // through the content instead of acting on the list behind it.
+            // Closing is reserved for Esc, q/Q and the K toggle.
             match key_event.code {
-                KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') | KeyCode::Char('k') => {
-                    self.show_help = false
+                KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc | KeyCode::Char('K') => {
+                    self.close_help()
                 }
+                KeyCode::Up | KeyCode::Char('k') => self.scroll_help(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.scroll_help(1),
+                KeyCode::PageUp => self.scroll_help(-(self.help_viewport() as i32)),
+                KeyCode::PageDown => self.scroll_help(self.help_viewport() as i32),
+                KeyCode::Home => self.help_scroll = 0,
+                KeyCode::End => self.help_scroll = self.help_max_scroll(),
                 _ => {}
             }
             return;
@@ -828,7 +874,13 @@ impl App {
                     self.write();
                 }
             }
-            KeyCode::Char('K') if self.mode != TUIMode::Move => self.show_help = true,
+            KeyCode::Char('K') if self.mode != TUIMode::Move => {
+                self.show_help = true;
+                self.help_scroll = 0;
+                self.help_scroll_drag = None;
+                // A list/map tooltip must not linger over the modal.
+                self.clear_hover();
+            }
             _ => match self.mode {
                 TUIMode::View => {
                     if key_event.code == KeyCode::Char('p') || key_event.code == KeyCode::Char('P')
@@ -870,6 +922,42 @@ impl App {
                 }
             },
         }
+    }
+
+    // Highest scroll offset the help modal supports right now.
+    fn help_max_scroll(&self) -> u16 {
+        self.layout
+            .map(|layout| HelpModal::max_scroll(layout.area))
+            .unwrap_or(0)
+    }
+
+    // Visible help rows, used as the page step.
+    fn help_viewport(&self) -> u16 {
+        self.layout
+            .map(|layout| HelpModal::viewport(layout.area))
+            .unwrap_or(0)
+    }
+
+    // Scrolls the help by `delta` rows, clamped to its content.
+    pub(crate) fn scroll_help(&mut self, delta: i32) {
+        let max = self.help_max_scroll() as i32;
+        self.help_scroll = (self.help_scroll as i32 + delta).clamp(0, max) as u16;
+    }
+
+    // Drops the pointer state so a tooltip from behind the modal (or from the
+    // modal's own close button) cannot reappear after it is dismissed.
+    pub(crate) fn clear_hover(&mut self) {
+        let point = self.hover_point;
+        self.set_hover(None, point, Instant::now(), false);
+        self.hover_since = None;
+        self.tooltip = None;
+    }
+
+    // Closes the help modal and leaves no stale hover behind.
+    pub(crate) fn close_help(&mut self) {
+        self.show_help = false;
+        self.help_scroll_drag = None;
+        self.clear_hover();
     }
 
     // Snapshot the current monitor state so it can be restored if the
@@ -1330,6 +1418,163 @@ mod tests {
             was_pending,
         });
         app
+    }
+
+    // A help overlay on a terminal too short to show every section.
+    fn help_app(width: u16, height: u16) -> App {
+        let area = ratatui::layout::Rect::new(0, 0, width, height);
+        let mut app = App::new(None);
+        app.layout = Some(crate::ui::layouts::screen_layout(area, TUIMode::View));
+        app.show_help = true;
+        app
+    }
+
+    #[test]
+    fn help_scrolls_with_j_k_and_the_arrows() {
+        let area = ratatui::layout::Rect::new(0, 0, 60, 15);
+        let mut app = help_app(60, 15);
+        let max = HelpModal::max_scroll(area);
+        assert!(max > 0, "the test terminal must need scrolling");
+
+        let keys = |code| KeyEvent::new(code, KeyModifiers::NONE);
+
+        app.handle_key_event(keys(KeyCode::Char('j')));
+        assert_eq!(app.help_scroll, 1);
+        app.handle_key_event(keys(KeyCode::Down));
+        assert_eq!(app.help_scroll, 2);
+        app.handle_key_event(keys(KeyCode::Char('k')));
+        assert_eq!(app.help_scroll, 1);
+        app.handle_key_event(keys(KeyCode::Up));
+        assert_eq!(app.help_scroll, 0);
+        assert!(app.show_help, "scrolling must not close the help");
+
+        app.handle_key_event(keys(KeyCode::End));
+        assert_eq!(app.help_scroll, max);
+        app.handle_key_event(keys(KeyCode::Char('j')));
+        assert_eq!(app.help_scroll, max, "the offset is clamped");
+        app.handle_key_event(keys(KeyCode::Home));
+        assert_eq!(app.help_scroll, 0);
+
+        app.handle_key_event(keys(KeyCode::PageDown));
+        assert_eq!(app.help_scroll, HelpModal::viewport(area).min(max));
+        app.handle_key_event(keys(KeyCode::PageUp));
+        assert_eq!(app.help_scroll, 0);
+    }
+
+    #[test]
+    fn help_still_closes_with_q_escape_or_the_toggle() {
+        for code in [
+            KeyCode::Char('q'),
+            KeyCode::Char('Q'),
+            KeyCode::Esc,
+            KeyCode::Char('K'),
+        ] {
+            let mut app = help_app(60, 15);
+            app.help_scroll = 3;
+
+            app.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+
+            assert!(!app.show_help, "{code:?} must close the help");
+        }
+    }
+
+    #[test]
+    fn a_stale_scrollbar_hover_is_dropped_when_no_bar_exists() {
+        // 120x40 fits all content: the scrollbar lane is empty.
+        let mut app = help_app(120, 40);
+        let t0 = Instant::now();
+        app.hover = Some(HoverTarget::HelpScrollbar);
+        app.hover_since = Some(t0);
+
+        // Only the tooltip dwell remains armed; hover itself never animates.
+        let deadline = app.next_deadline_at(t0).expect("the tooltip still runs");
+        assert!(
+            deadline >= Duration::from_secs(1),
+            "no short redraw loop without a bar: {deadline:?}"
+        );
+
+        app.drop_unavailable_help_hover();
+        assert!(app.hover.is_none(), "the stale target is dropped");
+        assert!(app.hover_since.is_none());
+    }
+
+    #[test]
+    fn closing_the_help_clears_its_close_tooltip() {
+        let mut app = help_app(60, 15);
+        app.hover = Some(HoverTarget::HelpClose);
+        app.hover_point = (20, 10);
+        app.hover_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(app.hover.is_none(), "the help-close target is dropped");
+        assert!(
+            app.tooltip_at(Instant::now() + std::time::Duration::from_secs(10))
+                .is_none(),
+            "no stale tooltip is recomputed after closing"
+        );
+    }
+
+    #[test]
+    fn opening_the_help_drops_a_tooltip_from_behind_it() {
+        let mut app = help_app(60, 15);
+        app.show_help = false;
+        app.hover = Some(HoverTarget::ListRow(0));
+        app.hover_since = Some(Instant::now() - std::time::Duration::from_secs(10));
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+
+        assert!(app.show_help);
+        assert!(app.hover.is_none(), "the list hover is cleared");
+        assert!(
+            app.tooltip_at(Instant::now() + std::time::Duration::from_secs(10))
+                .is_none(),
+            "the list tooltip cannot cover the modal"
+        );
+    }
+
+    #[test]
+    fn opening_and_closing_the_help_restores_a_hovered_selection() {
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        let mut second = monitor();
+        second.name = "DP-2".to_string();
+        second.position = Some(Position { x: 1920, y: 0 });
+        let mut app = App::new(None);
+        app.monitors = vec![monitor(), second];
+        app.layout = Some(crate::ui::layouts::screen_layout(area, TUIMode::View));
+
+        let now = Instant::now();
+        app.set_hover(Some(HoverTarget::Map(1)), (10, 10), now, true);
+        assert_eq!(app.selected_monitor, 1, "hover selects the monitor");
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+        assert!(app.show_help);
+        assert_eq!(
+            app.selected_monitor, 0,
+            "opening restores the committed row"
+        );
+        assert!(app.hover.is_none() && app.hover_restore.is_none());
+
+        app.set_hover(Some(HoverTarget::Map(1)), (10, 10), now, true);
+        app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.show_help);
+        assert_eq!(
+            app.selected_monitor, 0,
+            "closing restores the committed row"
+        );
+        assert!(app.hover.is_none() && app.hover_restore.is_none());
+    }
+
+    #[test]
+    fn opening_the_help_starts_at_the_top() {
+        let mut app = help_app(60, 15);
+        app.help_scroll = 4;
+        app.show_help = false;
+
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE));
+
+        assert!(app.show_help);
+        assert_eq!(app.help_scroll, 0, "a fresh help starts at the top");
     }
 
     #[test]

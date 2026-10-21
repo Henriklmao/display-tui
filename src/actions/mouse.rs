@@ -1528,6 +1528,35 @@ mod tests {
     }
 
     #[test]
+    fn scrolled_list_cells_are_hit_tested_in_the_window() {
+        let monitors = (0..10)
+            .map(|index| {
+                monitor(
+                    &format!("M{index}"),
+                    index * 1920,
+                    0,
+                    true,
+                )
+            })
+            .collect();
+        let mut a = app_in(Rect::new(0, 0, 160, 40), TUIMode::View, monitors);
+        a.selected_monitor = 9;
+        let rect = MonitorList::cell_rect(
+            a.layout.unwrap().list,
+            &a.monitors,
+            9,
+            9,
+            ListColumn::Rotation,
+        )
+        .expect("the selected row is scrolled into view");
+
+        down(&mut a, rect.x, rect.y);
+
+        assert_eq!(a.selected_monitor, 9);
+        assert_eq!(a.monitors[9].transform.as_deref(), Some("90"));
+    }
+
+    #[test]
     fn value_cells_respect_the_pending_confirm_state() {
         let screen = Rect::new(0, 0, 160, 40);
         let mut a = app_in(screen, TUIMode::View, test_monitors());

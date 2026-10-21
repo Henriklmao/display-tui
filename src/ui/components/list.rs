@@ -577,7 +577,6 @@ impl<'a> MonitorList<'a> {
 mod tests {
     use super::*;
     use crate::test_utils::tests::{find_cell, find_text, test_monitors, text_of};
-    use ratatui::style::Style;
 
     // The instruction footer of a rendered list, without the border column and
     // the centring spaces (so it is the drawn hint text, not the padding).
@@ -619,81 +618,12 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 120, 7));
 
         list.render(buf.area, &mut buf);
+        let text = text_of(&buf);
 
-        let mut expected = Buffer::with_lines(vec![
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ Displays ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓",
-            "┃     name              description                    resolution       position    scale      rotation    workspace  ┃",
-            "┃                                                                                                                      ┃",
-            "┃     Monitor 1         Description 1                  1920x1080        (0,0)       1          normal      -          ┃",
-            "┃     Monitor 2         Description 2                  1280x720         (1920,0)    1.25       normal      -          ┃",
-            "┃                                                                                                                      ┃",
-            "┗━━━━ Up <k>  Down <j>  Move <m>  Resolution <r>  Scale <s>  Rotate <o>  Workspace <0-9>  Disable <d>  Save <w>  Quit <q> ━━━━┛",
-        ]);
-
-        let border_style = Style::new().fg(Color::Yellow);
-        let title_style = Style::new().bold().fg(Color::White);
-        let header_style = Style::new().green().bold().reversed();
-        let empty_style = Style::new();
-        let instructions_label_style = Style::new().fg(Color::White);
-        let instructions_key_style = Style::new().blue().bold();
-        let connected_style = Style::new().fg(Color::Green);
-        let disconnected_style = Style::new().fg(Color::Red);
-        let row_style = Style::new();
-
-        // first line : title
-        expected.set_style(Rect::new(0, 0, 50, 1), border_style);
-        expected.set_style(Rect::new(50, 0, 10, 1), title_style);
-        expected.set_style(Rect::new(60, 0, 50, 1), border_style);
-
-        // second line : header
-        expected.set_style(Rect::new(0, 1, 1, 1), border_style);
-        expected.set_style(Rect::new(1, 1, 108, 1), header_style);
-        expected.set_style(Rect::new(109, 1, 1, 1), border_style);
-
-        // third line : empty
-        expected.set_style(Rect::new(0, 2, 1, 1), border_style);
-        expected.set_style(Rect::new(1, 2, 108, 1), empty_style);
-        expected.set_style(Rect::new(109, 2, 1, 1), border_style);
-
-        // fourth line : first row
-        expected.set_style(Rect::new(0, 3, 1, 1), border_style);
-        expected.set_style(Rect::new(1, 3, 5, 1), connected_style);
-        expected.set_style(Rect::new(6, 3, 103, 1), row_style);
-        expected.set_style(Rect::new(109, 3, 1, 1), border_style);
-
-        // fifth line : second row
-        expected.set_style(Rect::new(0, 4, 1, 1), border_style);
-        expected.set_style(Rect::new(1, 4, 5, 1), disconnected_style);
-        expected.set_style(Rect::new(6, 4, 103, 1), row_style);
-        expected.set_style(Rect::new(109, 4, 1, 1), border_style);
-
-        // sixth line : empty
-        expected.set_style(Rect::new(0, 5, 1, 1), border_style);
-        expected.set_style(Rect::new(1, 5, 108, 1), empty_style);
-        expected.set_style(Rect::new(109, 5, 1, 1), border_style);
-
-        // last line : instructions
-        expected.set_style(Rect::new(0, 6, 5, 1), border_style);
-        expected.set_style(Rect::new(5, 6, 4, 1), instructions_label_style);
-        expected.set_style(Rect::new(9, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(13, 6, 6, 1), instructions_label_style);
-        expected.set_style(Rect::new(19, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(23, 6, 6, 1), instructions_label_style);
-        expected.set_style(Rect::new(29, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(33, 6, 12, 1), instructions_label_style);
-        expected.set_style(Rect::new(45, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(49, 6, 7, 1), instructions_label_style);
-        expected.set_style(Rect::new(56, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(60, 6, 8, 1), instructions_label_style);
-        expected.set_style(Rect::new(68, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(72, 6, 9, 1), instructions_label_style);
-        expected.set_style(Rect::new(81, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(85, 6, 6, 1), instructions_label_style);
-        expected.set_style(Rect::new(91, 6, 4, 1), instructions_key_style);
-        expected.set_style(Rect::new(95, 6, 6, 1), instructions_label_style);
-        expected.set_style(Rect::new(101, 6, 4, 1), instructions_key_style);
-        // We skip exact buffer comparison here due to length variations,
-        // the test already ran and exercised the render path which is the main goal.
+        assert!(text.contains("Displays"), "title missing: {text}");
+        assert!(text.contains("Monitor 1"), "first row missing: {text}");
+        assert!(text.contains("Monitor 2"), "second row missing: {text}");
+        assert!(text.contains("[ Save  w ]"), "footer missing: {text}");
     }
 
     fn render_list_to(monitors: &[Monitor], mode: TUIMode, selected: usize, area: Rect) -> Buffer {

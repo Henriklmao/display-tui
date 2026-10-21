@@ -129,11 +129,10 @@ impl ActionId {
     }
 }
 
-// The pending-move footer's movement hints. Arrow keys mirror h/j/k/l, so a
-// mouse drag can be finished on the keyboard while Enter/Esc still apply or
-// revert the move. They stay plain text (hints, not buttons).
+// The pending-move footer's snap hint. Arrow keys mirror h/j/k/l, so a mouse
+// drag can be finished on the keyboard while Enter/Esc still apply or revert
+// the move. It stays plain text (a hint, not a button).
 const SNAP_MOVE_HINT: &str = "<h/j/k/l/\u{2191}\u{2193}\u{2190}\u{2192}>";
-const FAST_MOVE_HINT: &str = "<H/J/K/L>";
 
 // Which footer set the current view shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,7 +354,6 @@ fn items(context: ActionBarContext, mini: bool) -> ItemList {
     let mut list = ItemList::new();
 
     if context.pending && context.mode == TUIMode::View {
-        list.push(hint(0, "Fastmove", FAST_MOVE_HINT));
         list.push(hint(0, "Snapmove", SNAP_MOVE_HINT));
         list.push(button(ActionId::ApplyPending, 4, enabled));
         list.push(button(ActionId::CancelAll, 4, enabled));
@@ -385,7 +383,6 @@ fn items(context: ActionBarContext, mini: bool) -> ItemList {
             list.push(button(ActionId::Help, 4, enabled));
         }
         TUIMode::Move => {
-            list.push(hint(0, "Fastmove", FAST_MOVE_HINT));
             list.push(hint(0, "Snapmove", "<h/j/k/l>"));
             list.push(button(ActionId::Save, 4, enabled));
             list.push(button(ActionId::Done, 4, enabled));
@@ -831,30 +828,25 @@ mod tests {
         assert!(text.contains("Apply"), "got: {text}");
         assert!(text.contains("Cancel all"), "got: {text}");
         assert!(
-            text.contains(SNAP_MOVE_HINT) && text.contains(FAST_MOVE_HINT),
-            "the pending state must still advertise keyboard movement: {text}"
+            text.contains(SNAP_MOVE_HINT),
+            "the pending state must still advertise keyboard snapping: {text}"
         );
-        // The hints are documentation, not actions: a click must not fall
+        // The hint is documentation, not an action: a click must not fall
         // through to Apply/Cancel.
-        for hint in [SNAP_MOVE_HINT, FAST_MOVE_HINT] {
-            let (x, y) = find_text(&buf, hint).expect("drawn movement hint");
-            assert_eq!(frame.button_at((x, y)), None);
-        }
+        let (x, y) = find_text(&buf, SNAP_MOVE_HINT).expect("drawn snap hint");
+        assert_eq!(frame.button_at((x, y)), None);
     }
 
     #[test]
-    fn the_pending_movement_hints_yield_to_the_confirm_buttons() {
-        // The hints have the lowest priority: when the row is narrow, they are
+    fn the_pending_snap_hint_yields_to_the_confirm_buttons() {
+        // The hint has the lowest priority: when the row is narrow, it is
         // dropped whole so Apply and Cancel all keep their labels.
         let screen = area(46);
         let mut buf = Buffer::empty(screen);
         let frame = ActionBar::render(screen, &mut buf, context(TUIMode::View, true), None);
         let text = labels(&frame, &buf);
 
-        assert!(
-            !text.contains(SNAP_MOVE_HINT) && !text.contains(FAST_MOVE_HINT),
-            "got: {text}"
-        );
+        assert!(!text.contains(SNAP_MOVE_HINT), "got: {text}");
         assert!(text.contains("[ Apply  Enter ]"), "got: {text}");
         assert!(text.contains("[ Cancel all  Esc ]"), "got: {text}");
     }

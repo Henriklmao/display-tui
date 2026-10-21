@@ -264,8 +264,7 @@ fn left_rows() -> Vec<Row> {
         Row::Entry("<K>", "Toggle help (not in Move/pending)"),
         Row::Blank,
         Row::Section("VIEW MODE"),
-        Row::Entry("<k>", "Up"),
-        Row::Entry("<j>", "Down"),
+        Row::Entry("<k/j>", "Up / Down"),
         Row::Entry("<m>", "Move mode"),
         Row::Entry("<r>", "Resolution"),
         Row::Entry("<s>", "Scale"),
@@ -278,10 +277,10 @@ fn left_rows() -> Vec<Row> {
         Row::Section("MOUSE"),
         Row::Entry("Click", "Select; footer chips act"),
         Row::Entry("Cells", "Res/scale/rotate/workspace"),
-        Row::Entry("Drag", "Move; H/J/K/L nudge too"),
+        Row::Entry("Drag", "Move; arrows/hjkl snap"),
         Row::Entry("<Enter/Space>", "Apply pending move"),
         Row::Entry("Right click", "Apply pending move"),
-        Row::Entry("<Esc/q>", "Cancel / revert all"),
+        Row::Entry("<Esc/q>", "Cancel / revert"),
     ]
 }
 
@@ -289,7 +288,6 @@ fn left_rows() -> Vec<Row> {
 fn right_rows() -> Vec<Row> {
     vec![
         Row::Section("MOVE MODE"),
-        Row::Entry("<H/J/K/L>", "Freemove"),
         Row::Entry("<h/j/k/l>", "Snapmove"),
         Row::Entry("<Esc/Enter/q>", "Done"),
         Row::Blank,
@@ -297,11 +295,11 @@ fn right_rows() -> Vec<Row> {
         Row::Entry("<Enter/Space>", "Apply"),
         Row::Entry("<k/j>", "Up / down"),
         Row::Entry("<Esc/q>", "Cancel"),
-        Row::Entry("[f]", "Force write"),
-        Row::Entry("[Space]", "Auto fix"),
+        Row::Entry("<f>", "Force write"),
+        Row::Entry("<Space>", "Auto fix"),
         Row::Blank,
         Row::Section("TIP"),
-        Row::Entry("<↑/↓>", "Scroll: j/k, PgUp/PgDn, Home/End, wheel"),
+        Row::Entry("<↑/↓>", "Scroll: <j/k>, <PgUp/PgDn>, <Home/End>, wheel"),
         Row::Note("Arrow keys work as alternative to h/j/k/l in all modes."),
     ]
 }
@@ -808,7 +806,7 @@ mod tests {
     #[test]
     fn every_key_uses_the_accent_colour() {
         let buf = render_help(120, 40);
-        for key in ["<w>", "<q>", "<k>", "<j>", "[f]", "[Space]", "<H/J/K/L>"] {
+        for key in ["<w>", "<q>", "<k>", "<j>", "[f]", "[Space]", "<h/j/k/l>"] {
             let (x, y) = find(&buf, key).unwrap_or_else(|| panic!("{key} missing"));
             assert_eq!(
                 buf[(x, y)].style().fg,
@@ -860,7 +858,6 @@ mod tests {
             "Quit",
             "<p>",
             "Preset menu",
-            "Freemove",
             "Snapmove",
             "Apply pending move",
             "Right click",

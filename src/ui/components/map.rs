@@ -11,7 +11,7 @@ use crate::{
     utils::TUIMode,
     validation::diagnostics::{EdgeSegment, LayoutHighlights},
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -83,32 +83,35 @@ fn draw_highlight_segment(
 enum Movement {
     SnapHorizontal(i32),
     SnapVertical(i32),
-    FreeHorizontal(i32),
-    FreeVertical(i32),
 }
 
-// Resolves a key to a movement action. Arrow keys snap unless Shift is held;
-// the lowercase letters always snap and the capitals always fast-move.
-fn movement_key(code: KeyCode, shift: bool) -> Option<Movement> {
+// Resolves a key to a snapping action. Arrow keys mirror h/j/k/l and modifiers
+// do not change the step.
+fn movement_key(code: KeyCode) -> Option<Movement> {
     Some(match code {
-        KeyCode::Char('h') => Movement::SnapHorizontal(-1),
-        KeyCode::Char('H') => Movement::FreeHorizontal(-10),
-        KeyCode::Left if shift => Movement::FreeHorizontal(-10),
-        KeyCode::Left => Movement::SnapHorizontal(-1),
-        KeyCode::Char('l') => Movement::SnapHorizontal(1),
-        KeyCode::Char('L') => Movement::FreeHorizontal(10),
-        KeyCode::Right if shift => Movement::FreeHorizontal(10),
-        KeyCode::Right => Movement::SnapHorizontal(1),
-        KeyCode::Char('k') => Movement::SnapVertical(-1),
-        KeyCode::Char('K') => Movement::FreeVertical(-10),
-        KeyCode::Up if shift => Movement::FreeVertical(-10),
-        KeyCode::Up => Movement::SnapVertical(-1),
-        KeyCode::Char('j') => Movement::SnapVertical(1),
-        KeyCode::Char('J') => Movement::FreeVertical(10),
-        KeyCode::Down if shift => Movement::FreeVertical(10),
-        KeyCode::Down => Movement::SnapVertical(1),
+        KeyCode::Char('h') | KeyCode::Left => Movement::SnapHorizontal(-1),
+        KeyCode::Char('l') | KeyCode::Right => Movement::SnapHorizontal(1),
+        KeyCode::Char('k') | KeyCode::Up => Movement::SnapVertical(-1),
+        KeyCode::Char('j') | KeyCode::Down => Movement::SnapVertical(1),
         _ => return None,
     })
+}
+
+// Applies a resolved movement. Snapping needs a monitor to index and is
+// skipped on an empty or stale selection while the key is still consumed.
+fn apply_movement(app: &mut App, action: Movement) {
+    let selected = app.selected_monitor;
+    if app.monitors.get(selected).is_none() {
+        return;
+    }
+    match action {
+        Movement::SnapHorizontal(delta) => {
+            movement::snap_horizontal(&mut app.monitors, selected, delta)
+        }
+        Movement::SnapVertical(delta) => {
+            movement::snap_vertical(&mut app.monitors, selected, delta)
+        }
+    }
 }
 
 impl<'a> Widget for Map<'a> {
@@ -270,43 +273,15 @@ impl<'a> Map<'a> {
         }
     }
 
-    // Moves the selected monitor and reports whether the key was a movement
-    // key. Shared by Move mode and the pending-move confirm state in View, so a
-    // mouse drag can still be nudged with the keyboard while Enter/Esc keep
-    // their apply/revert meaning.
+    // Moves the selected monitor with snapping and reports whether the key was
+    // a movement key. Shared by Move mode and the pending-move confirm state in
+    // View, so a mouse drag can still be finished with the keyboard while
+    // Enter/Esc keep their apply/revert meaning.
     pub fn handle_movement(app: &mut App, key_event: KeyEvent) -> bool {
-        let Some(action) = movement_key(
-            key_event.code,
-            key_event.modifiers.contains(KeyModifiers::SHIFT),
-        ) else {
+        let Some(action) = movement_key(key_event.code) else {
             return false;
         };
-
-        let selected = app.selected_monitor;
-        // A movement key without a monitor to move is still consumed, and must
-        // not panic on an empty list or a stale selection.
-        if app.monitors.get(selected).is_none() {
-            return true;
-        }
-
-        match action {
-            Movement::SnapHorizontal(delta) => {
-                movement::snap_horizontal(&mut app.monitors, selected, delta)
-            }
-            Movement::SnapVertical(delta) => {
-                movement::snap_vertical(&mut app.monitors, selected, delta)
-            }
-            Movement::FreeHorizontal(delta) => {
-                if let Some(monitor) = app.monitors.get_mut(selected) {
-                    movement::move_horizontal(monitor, delta);
-                }
-            }
-            Movement::FreeVertical(delta) => {
-                if let Some(monitor) = app.monitors.get_mut(selected) {
-                    movement::move_vertical(monitor, delta);
-                }
-            }
-        }
+        apply_movement(app, action);
         true
     }
 
@@ -452,6 +427,7 @@ mod tests {
     use super::*;
     use crate::monitor::{Position, Resolution};
     use crate::test_utils::tests::{TempDir, find_text, test_monitors, text_of};
+    use crossterm::event::KeyModifiers;
     use ratatui::style::Style;
 
     fn monitor(name: &str, x: i32, y: i32) -> Monitor {
@@ -705,20 +681,23 @@ mod tests {
     }
 
     #[test]
-    fn capital_keys_nudge_the_selected_monitor_by_ten() {
+    fn capital_keys_do_not_move_the_monitor() {
+        // Fast-move is gone everywhere: H/J/K/L no longer nudge anything.
         let mut a = app(vec![monitor("A", 100, 100)], 0);
 
-        press(&mut a, KeyCode::Char('H'));
-        assert_eq!(position_of(&a.monitors[0]), (90, 100));
-
-        press(&mut a, KeyCode::Char('L'));
-        assert_eq!(position_of(&a.monitors[0]), (100, 100));
-
-        press(&mut a, KeyCode::Char('K'));
-        assert_eq!(position_of(&a.monitors[0]), (100, 90));
-
-        press(&mut a, KeyCode::Char('J'));
-        assert_eq!(position_of(&a.monitors[0]), (100, 100));
+        for code in [
+            KeyCode::Char('H'),
+            KeyCode::Char('J'),
+            KeyCode::Char('K'),
+            KeyCode::Char('L'),
+        ] {
+            press(&mut a, code);
+            assert_eq!(
+                position_of(&a.monitors[0]),
+                (100, 100),
+                "{code:?} must not move the monitor"
+            );
+        }
     }
 
     #[test]
@@ -735,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn arrow_keys_snap_unless_shift_is_held() {
+    fn arrow_keys_snap_with_or_without_shift() {
         let mut a = app(vec![monitor("A", 0, 0), monitor("B", 3000, 2000)], 1);
 
         press_with(&mut a, KeyCode::Left, KeyModifiers::NONE);
@@ -745,20 +724,21 @@ mod tests {
             "plain arrow snaps"
         );
 
+        // Shift no longer fast-moves, so a shifted arrow snaps like a plain one.
         press_with(&mut a, KeyCode::Left, KeyModifiers::SHIFT);
         assert_eq!(
             position_of(&a.monitors[1]),
-            (1910, 2000),
-            "shifted arrow moves by ten"
+            (960, 2000),
+            "shifted arrow snaps again instead of moving by ten"
         );
 
         press_with(&mut a, KeyCode::Up, KeyModifiers::SHIFT);
-        assert_eq!(position_of(&a.monitors[1]), (1910, 1990));
+        assert_eq!(position_of(&a.monitors[1]), (960, 1080));
 
         press_with(&mut a, KeyCode::Down, KeyModifiers::NONE);
         assert_eq!(
             position_of(&a.monitors[1]),
-            (1910, 1990),
+            (960, 1080),
             "nothing to snap onto below"
         );
     }
@@ -772,7 +752,7 @@ mod tests {
             let mut a = app(Vec::new(), selected);
             for (code, modifiers, consumed) in [
                 (KeyCode::Char('h'), KeyModifiers::NONE, true),
-                (KeyCode::Char('H'), KeyModifiers::NONE, true),
+                (KeyCode::Char('H'), KeyModifiers::NONE, false),
                 (KeyCode::Left, KeyModifiers::NONE, true),
                 (KeyCode::Right, KeyModifiers::SHIFT, true),
                 (KeyCode::Char('z'), KeyModifiers::NONE, false),
@@ -837,7 +817,7 @@ mod tests {
         a.mode = TUIMode::Move;
         a.state_path = Some(dir.path().join("monitor_state.json"));
 
-        press(&mut a, KeyCode::Char('L')); // nudge +10 on x
+        press(&mut a, KeyCode::Char('h')); // snap onto the origin
         press(&mut a, KeyCode::Esc);
 
         assert_eq!(a.mode, TUIMode::View);
@@ -847,8 +827,8 @@ mod tests {
             serde_json::from_str(&content).expect("state file must hold valid JSON");
         assert_eq!(
             saved[0].position,
-            Some(Position { x: 110, y: 100 }),
-            "the moved position is persisted"
+            Some(Position { x: 0, y: 100 }),
+            "the snapped position is persisted"
         );
     }
 

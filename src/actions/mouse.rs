@@ -2090,8 +2090,8 @@ mod tests {
 
     #[test]
     fn a_released_drag_can_still_be_nudged_with_the_keyboard() {
-        // The drag leaves View in its confirm state; arrows/hjkl must keep
-        // working before the user applies or reverts the move.
+        // The drag leaves View in its confirm state; snapping with
+        // arrows/hjkl must keep working before the user applies or reverts.
         let monitors = vec![monitor("A", 0, 0, true), monitor("B", 3000, 1000, true)];
         let mut a = app(TUIMode::View, monitors);
         let (col, row) = cell_for_monitor(&a, 1);
@@ -2100,12 +2100,12 @@ mod tests {
         up(&mut a, col + 6, row);
         let dragged = pos(&a.monitors[1]);
 
-        a.handle_key_event(KeyEvent::new(KeyCode::Char('L'), KeyModifiers::NONE));
+        a.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
 
         assert_eq!(
             pos(&a.monitors[1]),
-            (dragged.0 + 10, dragged.1),
-            "L fast-moves the pending monitor"
+            (1920, dragged.1),
+            "h snaps the pending monitor onto A's right edge"
         );
         assert_eq!(
             a.move_origins.get(&1),

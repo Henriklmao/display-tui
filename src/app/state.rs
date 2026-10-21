@@ -7,7 +7,8 @@ use crate::actions::movement::SnapGuides;
 use crate::config::{Configuration, load_monitor_state, save_monitor_state_in};
 use crate::monitor::Monitor;
 use crate::ui::components::{
-    ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetMenu, Resolutions, Scale,
+    ActionId, HelpModal, ListColumn, Map, MonitorList, PopupAction, PresetButtonAction, PresetMenu,
+    Resolutions, Scale,
 };
 use crate::ui::layouts::ScreenLayout;
 use crate::utils::TUIMode;
@@ -138,6 +139,8 @@ pub enum HoverTarget {
     ScaleRow(usize),
     // A preset-menu row.
     PresetRow(usize),
+    // A button in the preset menu's footer.
+    PresetButton(PresetButtonAction),
     // A popup footer button.
     Popup(PopupAction),
     // The close button embedded in the help modal's footer.
@@ -623,6 +626,11 @@ impl App {
             .get(self.selected_monitor)
             .is_some_and(|monitor| monitor.enabled);
         self.handle_key_event(KeyEvent::new(action.key(enabled), KeyModifiers::NONE));
+    }
+
+    // Runs a preset-menu button through the menu's own key handler.
+    pub(crate) fn perform_preset_button(&mut self, action: PresetButtonAction) {
+        self.handle_key_event(KeyEvent::new(action.key(), KeyModifiers::NONE));
     }
 
     // Dispatches one key press. `pub(crate)` so the mouse tests can drive the

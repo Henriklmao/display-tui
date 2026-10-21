@@ -15,6 +15,8 @@ pub use help::HelpModal;
 pub use list::{ListColumn, MonitorList};
 pub use map::Map;
 pub use popup::{PopupAction, PopupFrame};
-pub use preset::{MenuEvent, PresetAction, PresetEntry, PresetMenu};
+pub use preset::{
+    MenuEvent, PresetAction, PresetButtonAction, PresetEntry, PresetFrame, PresetMenu,
+};
 pub use resolution_table::Resolutions;
 pub use scale_table::Scale;

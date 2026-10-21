@@ -230,6 +230,9 @@ fn resolve_hover(app: &App, layout: ScreenLayout, point: (u16, u16)) -> Option<H
     }
 
     if let Some(menu) = app.show_preset_menu.as_ref() {
+        if let Some(button) = menu.button_at(layout.area, point) {
+            return Some(HoverTarget::PresetButton(button));
+        }
         if inside(PresetMenu::rect(layout.area), point) {
             return menu
                 .row_at(layout.area, point.1)
@@ -569,6 +572,16 @@ fn handle_preset(app: &mut App, area: Rect, event: MouseEvent, now: Instant) {
         MouseEventKind::ScrollDown => preview_scrolled(app, 1),
         MouseEventKind::Down(MouseButton::Left) => {
             let point = point(event);
+            let button = app
+                .show_preset_menu
+                .as_ref()
+                .and_then(|menu| menu.button_at(area, point));
+            if let Some(button) = button {
+                // A footer button runs the menu's own key path.
+                app.last_click = None;
+                app.perform_preset_button(button);
+                return;
+            }
             if !inside(PresetMenu::rect(area), point) {
                 // Clicking outside cancels; do not let it seed a double-click.
                 app.last_click = None;
@@ -614,7 +627,8 @@ mod tests {
     use crate::app::state::Popup;
     use crate::monitor::{Monitor, Position, Resolution};
     use crate::test_utils::tests::{TempDir, find_cell, find_text, test_monitors, text_of};
-    use crate::ui::components::{ActionId, PresetMenu};
+    use crate::ui::components::preset::MenuState;
+    use crate::ui::components::{ActionId, PresetButtonAction, PresetMenu};
     use crate::ui::layouts::screen_layout;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::buffer::Buffer;
@@ -1497,6 +1511,80 @@ mod tests {
         moved(&mut a, 40, top + 1);
 
         assert_eq!(a.hover, Some(HoverTarget::PresetRow(1)));
+    }
+
+    fn open_preset_menu(a: &mut App) {
+        a.preset_backup = Some(vec![]);
+        a.show_preset_menu = Some(PresetMenu::new(
+            vec!["missing-a".to_string()],
+            &[],
+            None,
+        ));
+    }
+
+    fn preset_button(a: &App, action: PresetButtonAction) -> Rect {
+        let menu = a.show_preset_menu.as_ref().expect("preset menu");
+        menu.layout(a.layout.unwrap().area)
+            .buttons
+            .iter()
+            .find(|button| button.action == action)
+            .map(|button| button.rect)
+            .unwrap_or_else(|| panic!("{action:?} is not in the preset footer"))
+    }
+
+    #[test]
+    fn the_preset_button_hover_tracks_the_chip() {
+        let mut a = app(TUIMode::View, test_monitors());
+        open_preset_menu(&mut a);
+        let rect = preset_button(&a, PresetButtonAction::New);
+
+        moved(&mut a, rect.x, rect.y);
+
+        assert_eq!(
+            a.hover,
+            Some(HoverTarget::PresetButton(PresetButtonAction::New))
+        );
+    }
+
+    #[test]
+    fn clicking_new_opens_the_create_state() {
+        let mut a = app(TUIMode::View, test_monitors());
+        open_preset_menu(&mut a);
+        let rect = preset_button(&a, PresetButtonAction::New);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(matches!(
+            a.show_preset_menu.as_ref().map(|menu| &menu.state),
+            Some(MenuState::CreateName(_))
+        ));
+    }
+
+    #[test]
+    fn clicking_close_dismisses_the_preset_menu() {
+        let mut a = app(TUIMode::View, test_monitors());
+        open_preset_menu(&mut a);
+        let rect = preset_button(&a, PresetButtonAction::Close);
+
+        down(&mut a, rect.x, rect.y);
+
+        assert!(a.show_preset_menu.is_none());
+    }
+
+    #[test]
+    fn clicking_cancel_returns_to_the_preset_list() {
+        let mut a = app(TUIMode::View, test_monitors());
+        open_preset_menu(&mut a);
+        let new = preset_button(&a, PresetButtonAction::New);
+        down(&mut a, new.x, new.y);
+
+        let cancel = preset_button(&a, PresetButtonAction::Cancel);
+        down(&mut a, cancel.x, cancel.y);
+
+        assert!(matches!(
+            a.show_preset_menu.as_ref().map(|menu| &menu.state),
+            Some(MenuState::List)
+        ));
     }
 
     #[test]

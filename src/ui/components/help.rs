@@ -852,7 +852,7 @@ mod tests {
 
     #[test]
     fn the_title_and_version_fit_without_overlapping() {
-        // On a 60-column popup there is room for both, separated.
+        // A wide popup has plenty of room for both, separated.
         let buf = render_help(80, 30);
         let popup = responsive_help_rect(Rect::new(0, 0, 80, 30));
         let top = inner_row(&buf, popup, popup.y);
@@ -862,6 +862,32 @@ mod tests {
             top.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
             "{top:?}"
         );
+    }
+
+    #[test]
+    fn the_title_stays_clear_of_the_version_at_the_threshold() {
+        // The popup is two columns narrower than the area (one padding
+        // column each side), so this starts exactly at VERSION_MIN_WIDTH.
+        for width in (VERSION_MIN_WIDTH + 2)..=(VERSION_MIN_WIDTH + 10) {
+            let query = Rect::new(0, 0, width, 30);
+            let buf = render_help(width, 30);
+            let popup = responsive_help_rect(query);
+            let top = inner_row(&buf, popup, popup.y);
+
+            let title_end = top.find("Keybindings/Help").unwrap() + "Keybindings/Help".len();
+            let version_at = top
+                .find("Display-TUI v")
+                .unwrap_or_else(|| panic!("version missing at width {width}: {top:?}"));
+
+            assert!(
+                title_end < version_at,
+                "title collides with the version at width {width}: {top:?}"
+            );
+            assert!(
+                top.contains(&format!(" Display-TUI v{} ", env!("CARGO_PKG_VERSION"))),
+                "version is clipped at width {width}: {top:?}"
+            );
+        }
     }
 
     #[test]

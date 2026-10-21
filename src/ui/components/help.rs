@@ -126,44 +126,74 @@ fn version_line() -> Line<'static> {
     )
 }
 
+// Draws the version line into the popup's first interior row and returns the
+// interior area below it. The header gets the row unconditionally so a short
+// terminal shrinks the sections instead of dropping the version; when there
+// is no interior row at all the header collapses to zero height and the
+// paragraph simply draws nothing.
+fn render_version_header(inner: Rect, buf: &mut Buffer) -> Rect {
+    let header = Rect {
+        height: inner.height.min(1),
+        ..inner
+    };
+    Paragraph::new(version_line())
+        .alignment(Alignment::Center)
+        .render(header, buf);
+
+    Rect {
+        y: header.bottom(),
+        height: inner.height - header.height,
+        ..inner
+    }
+}
+
 // Two-column layout for terminals wide enough to fit both columns.
 fn render_columns(popup_area: Rect, buf: &mut Buffer) {
     let inner = popup_area.inner(Margin::new(1, 1));
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(rows[1]);
 
     Clear.render(popup_area, buf);
     help_block().render(popup_area, buf);
 
-    Paragraph::new(version_line())
-        .alignment(Alignment::Center)
-        .render(rows[0], buf);
+    let rest = render_version_header(inner, buf);
+    if rest.height == 0 {
+        return;
+    }
 
-    let left = Paragraph::new(left_sections()).wrap(Wrap { trim: false });
-    let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
-    left.render(columns[0], buf);
-    right.render(columns[1], buf);
+    // The close hint keeps the bottom row; the sections get everything in
+    // between and are simply skipped when the popup is too short.
+    let footer = Rect {
+        y: rest.bottom() - 1,
+        height: 1,
+        ..rest
+    };
+    let body = Rect {
+        height: rest.height - 1,
+        ..rest
+    };
+
+    if body.height > 0 {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(body);
+
+        let left = Paragraph::new(left_sections()).wrap(Wrap { trim: false });
+        let right = Paragraph::new(right_sections()).wrap(Wrap { trim: false });
+        left.render(columns[0], buf);
+        right.render(columns[1], buf);
+    }
 
     Paragraph::new(close_hint())
         .alignment(Alignment::Center)
-        .render(rows[2], buf);
+        .render(footer, buf);
 }
 
 // Fallback for narrow terminals: every section stacked in one column.
 //
 // The popup is capped in height, so the blank separators are dropped to keep
-// every labelled section visible.
+// every labelled section visible. Unlike the two-column layout the version is
+// part of the wrapped paragraph: on narrow terminals the full string is worth
+// a second row, while the two-column header promises exactly one.
 fn render_stacked(popup_area: Rect, buf: &mut Buffer) {
     let mut lines = vec![version_line(), Line::from("")];
     lines.extend(left_sections());
@@ -208,6 +238,27 @@ mod tests {
             }
         }
         None
+    }
+
+    // Padding left and right of the version line within the popup interior,
+    // plus the row it was drawn on.
+    fn version_padding(buf: &Buffer, popup: Rect) -> (u16, u16, u16) {
+        let needle = format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"));
+        let inner = popup.inner(Margin::new(1, 1));
+        for y in inner.top()..inner.bottom() {
+            let row: String = (inner.left()..inner.right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect();
+            if let Some(x) = row.find(&needle) {
+                let lead = row[..x].chars().count() as u16;
+                let trail = inner.width - lead - needle.chars().count() as u16;
+                return (lead, trail, y);
+            }
+        }
+        panic!(
+            "version line missing at {}x{}",
+            buf.area.width, buf.area.height
+        );
     }
 
     #[test]
@@ -315,6 +366,64 @@ mod tests {
             text.contains(&format!("Display-TUI v{}", env!("CARGO_PKG_VERSION"))),
             "version line missing: {text}"
         );
+    }
+
+    #[test]
+    fn version_line_is_centred_at_the_top_in_both_layouts() {
+        for (width, height) in [(120u16, 40u16), (60, 30), (40, 20)] {
+            let buf = render_help(width, height);
+            let popup = responsive_help_rect(Rect::new(0, 0, width, height));
+            let inner = popup.inner(Margin::new(1, 1));
+            let (lead, trail, y) = version_padding(&buf, popup);
+
+            assert_eq!(
+                y, inner.y,
+                "version is not on the first interior row at {}x{}",
+                width, height
+            );
+            assert!(
+                lead.abs_diff(trail) <= 1,
+                "version is off-centre at {}x{}: {lead} left, {trail} right",
+                width,
+                height
+            );
+        }
+    }
+
+    #[test]
+    fn version_line_survives_a_short_wide_popup() {
+        // Whatever vertical space is left, the two-column layout must give
+        // the first interior row to the version instead of the sections.
+        let width = 80;
+        for height in 3..=8 {
+            let buf = render_help(width, height);
+            let popup = responsive_help_rect(Rect::new(0, 0, width, height));
+            let inner = popup.inner(Margin::new(1, 1));
+
+            assert!(
+                popup.y + popup.height <= height,
+                "popup escapes the area at 80x{height}"
+            );
+            if inner.height == 0 {
+                // 80x3 and 80x4 leave no interior row at all; not panicking
+                // is the only assertion these two sizes can make.
+                continue;
+            }
+
+            let (lead, trail, y) = version_padding(&buf, popup);
+            assert_eq!(y, inner.y, "version is not on the first row at 80x{height}");
+            assert!(
+                lead.abs_diff(trail) <= 1,
+                "version is off-centre at 80x{height}: {lead} left, {trail} right"
+            );
+        }
+    }
+
+    #[test]
+    fn a_two_row_interior_keeps_the_close_hint() {
+        // At 80x6 only the footer fits below the header; it must win over a
+        // single section row instead of being dropped.
+        assert!(as_text(&render_help(80, 6)).contains("[ Esc close ]"));
     }
 
     #[test]

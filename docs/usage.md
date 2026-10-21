@@ -27,13 +27,15 @@ In Resolution and Scale modes, `Enter`/`Space` apply the highlighted value and `
 
 The interface is fully keyboard driven, but the mouse can drive the same actions:
 
+- **Buttons**: the keybind hints at the bottom of the display list, in the preset menu and in popups are buttons. They always show the key they stand for, glow on hover and run exactly that key when clicked. Range hints such as `0-9`, `k/j` and `H/J/K/L` stay plain text because they are not a single action.
 - **Select**: click a display row, a resolution/scale row, or a monitor on the map.
 - **Enable/disable**: clicking a display row selects it; click its checkbox again (once it is selected) to enable/disable it.
-- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides (a centre-to-centre snap draws a guide spanning both monitors). An **Apply** button then appears in the centre of every moved monitor — click it, **right-click**, or press `Enter`/`Space` to persist the move. While a move is unconfirmed the other actions are hidden: `Enter`/`Space` (or a button or a right-click) apply every pending move, and `Esc`/`q` cancel them by putting the monitors back.
-- **Hover**: resting the pointer over an interactive element shows a one-line tooltip after two seconds. Hovering a monitor on the map temporarily selects it in the display list (and the side table) and marks it yellow; leaving the map restores the previously selected monitor, while a click makes the hovered monitor the persistent selection.
+- **Value cells**: click the resolution or scale cell of a display to open the matching table with its current value preselected, click the rotation cell to rotate clockwise, or click the workspace cell to open a small `0-9` picker (`0` clears the assignment).
+- **Move**: drag a monitor on the map; it snaps to nearby edges and centres and draws alignment guides (a centre-to-centre snap draws a guide spanning both monitors). An **Apply** button then appears in the centre of every moved monitor — click it, **right-click**, or press `Enter`/`Space` to persist the move. While a move is unconfirmed the footer collapses to **Apply** and **Cancel all**: apply every pending move with the button, `Enter`/`Space` or a right-click, and put the monitors back with **Cancel all** or `Esc`/`q`.
+- **Hover**: every clickable control glows under the pointer, and resting on it for two seconds shows a one-line tooltip. Hovering a monitor on the map temporarily selects it in the display list (and the side table) and marks it yellow; leaving the map restores the previously selected monitor, while a click makes the hovered monitor the persistent selection.
 - **Double-click**: double-click a resolution, scale or preset row to apply it immediately.
-- **Scroll**: use the wheel over a list to step through it (displays, resolutions, scales or presets).
-- **Presets**: click a preset to preview it, double-click to apply it, and click outside the menu to close it.
+- **Scroll**: use the wheel over a list to step through it (displays, resolutions, scales or presets). The wheel over the footer does nothing, so a stray scroll cannot move the selection.
+- **Presets**: click a preset to preview it, double-click to apply it, use the footer buttons for Apply/Override/New/Delete/Rename/Close, and click outside the menu to close it. The create, rename and delete prompts have their own clickable Save/Cancel and Yes/No buttons.
 
 When saving, the app will automatically validate your layout. The rules are: no overlapping displays, no detached displays, unique workspaces, and at least one display starting at `(0,0)`. A warning pop-up appears with the problems; you can hit `f` to force save anyway, or `Esc` to go back and fix the issues.
 

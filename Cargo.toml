@@ -1,6 +1,6 @@
 [package]
 name = "display-tui"
-version = "0.9.7"
+version = "0.9.8"
 edition = "2024"
 
 [dependencies]
@@ -15,3 +15,10 @@ shellexpand = "3.1.2"
 icon = "assets/desktop-icon.png"
 desktop_entry = "assets/display-tui.desktop"
 auto_link = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
